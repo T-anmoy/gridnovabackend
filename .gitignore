@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment / secrets
+.env
+
+# Databases
+*.db
+
+# Test / tooling caches
+.pytest_cache/
+alembic/versions/__pycache__/
+
+# OS
+.DS_Store

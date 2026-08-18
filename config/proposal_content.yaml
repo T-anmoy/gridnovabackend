@@ -1,0 +1,136 @@
+# Grid Nova Energy — Proposal Content Templates
+#
+# This file drives the proposal composition engine (app/proposals/content_engine.py).
+# Grid Nova staff can edit copy, pricing, and matching rules here WITHOUT touching code.
+# Mark anything that still needs a real value with [PLACEHOLDER].
+#
+# Structure:
+#   company / letterhead   — branding, consumed by the PDF generator
+#   base_sections          — always included in every proposal
+#   sections_library       — reusable content blocks, referenced by id from parameter_rules
+#   parameter_rules        — composable rules; ALL matching rules contribute their sections
+#   pricing                — capacity-tiered rates + per-segment modifiers
+#
+# The engine validates this file at startup (overlapping tiers / missing section ids
+# are hard errors — the app refuses to boot rather than draft a broken proposal).
+
+company:
+  name: "Grid Nova Energy"
+  tagline: "Eco-Energy Initiative"
+  address: "Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal, India"
+  phone: "+91 98747 74440"
+  email: "info@gridnova.in"
+  website: "https://www.gridnova.in"
+  gstin: "[PLACEHOLDER]"
+
+letterhead:
+  logo_text: "Grid Nova Energy"
+  accent_color: "#f7a800"
+  primary_color: "#0e2a63"
+
+base_sections:
+  # Always included in every proposal, regardless of parameters.
+  cover_letter_intro: |
+    [PLACEHOLDER: Cover letter introduction — thank the customer, reference their
+    enquiry, and set up the proposal that follows.]
+
+  standard_terms: |
+    [PLACEHOLDER: Standard commercial terms and conditions — to be reviewed by
+    counsel before any proposal is sent.]
+
+  closing: |
+    [PLACEHOLDER: Closing paragraph — validity period, next steps, and contact
+    details for questions.]
+
+sections_library:
+  # Reusable content blocks, referenced by id from parameter_rules below.
+  residential_rooftop_scope: |
+    [PLACEHOLDER: Scope of work for a residential rooftop solar installation —
+    site survey, structure, panels, inverter, net-metering, commissioning.]
+
+  commercial_rooftop_scope: |
+    [PLACEHOLDER: Scope of work for a commercial rooftop installation —
+    structural assessment, higher-capacity system design, load analysis.]
+
+  industrial_rooftop_scope: |
+    [PLACEHOLDER: Scope of work for an industrial rooftop installation —
+    large-scale engineering review, HT/LT integration, phased commissioning.]
+
+  utility_scale_scope: |
+    [PLACEHOLDER: Scope of work for a utility-scale ground-mounted plant —
+    land preparation, mounting structures, evacuation infrastructure, grid tie-in.]
+
+  government_scope: |
+    [PLACEHOLDER: Scope of work for a government / institutional project —
+    tender-specification alignment, documentation, and delivery milestones.]
+
+  pm_surya_ghar_subsidy_note: |
+    [PLACEHOLDER: PM Surya Ghar subsidy note — eligibility and how it reduces the
+    effective customer cost for residential rooftop systems.]
+
+  pm_kusum_note: |
+    [PLACEHOLDER: PM-KUSUM note — subsidy and eligibility for agricultural
+    solar-pump projects.]
+
+  government_compliance_note: |
+    [PLACEHOLDER: Government compliance note — tender terms, statutory approvals,
+    and documentation requirements.]
+
+  fallback_generic_scope: |
+    [PLACEHOLDER: Generic scope of work — used only when no parameter rule matches.
+    This proposal did not match a known project profile and MUST be reviewed and
+    completed manually before it is sent.]
+
+parameter_rules:
+  # Each rule matches on lead parameters; ALL matching rules contribute their
+  # sections — this is composable, not first-match-wins.
+  - id: residential_rooftop
+    match:
+      project_type: rooftop
+      segment: residential
+    contributes: [residential_rooftop_scope, pm_surya_ghar_subsidy_note]
+  - id: commercial_rooftop
+    match:
+      project_type: rooftop
+      segment: commercial
+    contributes: [commercial_rooftop_scope]
+  - id: industrial_rooftop
+    match:
+      project_type: rooftop
+      segment: industrial
+    contributes: [industrial_rooftop_scope]
+  - id: utility_scale
+    match:
+      project_type: ground_mounted
+      capacity_kw_min: 500
+    contributes: [utility_scale_scope]
+  - id: agricultural_pump
+    match:
+      project_type: solar_pump
+    contributes: [pm_kusum_note]
+  - id: government_institutional
+    match:
+      segment: government
+    contributes: [government_scope, government_compliance_note]
+
+pricing:
+  tiers:
+    # Matched by project_type + capacity range; first matching tier wins.
+    # Ranges must not overlap for the same project_type — validated at startup.
+    # capacity_max_kw: null = no upper bound. rate_per_kw is INR/kW.
+    - project_type: rooftop
+      capacity_min_kw: 0
+      capacity_max_kw: 10
+      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+    - project_type: rooftop
+      capacity_min_kw: 10
+      capacity_max_kw: 100
+      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+    - project_type: ground_mounted
+      capacity_min_kw: 0
+      capacity_max_kw: null   # null = no upper bound
+      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+  segment_modifiers:
+    # Multiplicative modifier applied after the base tier rate, if the lead's
+    # segment matches — e.g. 0.95 = 5% reduction. 1.0 = no change.
+    government: 1.0           # [PLACEHOLDER — confirm real modifier with Grid Nova]
