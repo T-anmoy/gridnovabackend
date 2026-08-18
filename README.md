@@ -140,5 +140,37 @@ POST /api/v1/dashboard/proposals/{id}/send             (Sales/Admin, after appro
 
 Run Alembic migrations after the first deploy:
 ```bash
-alembic upgrade head
+alembic -c alembic/alembic.ini upgrade head
 ```
+(`alembic.ini` lives at `alembic/alembic.ini`, not the project root — the bare
+`alembic upgrade head` command fails immediately with "No config file 'alembic.ini'
+found" unless `-c` points at it, or the command is run from inside `alembic/`.)
+
+### Deploying to a fresh database
+
+This repo has historically relied on `Base.metadata.create_all()` (run automatically
+by the app's startup lifespan in `app/main.py`) rather than a true baseline migration —
+see the note at the top of `alembic/versions/0001_scheduling_and_fallback.py`. Every
+migration from `0001` onward is an incremental `ALTER` that assumes the tables it's
+touching already exist, so running `alembic upgrade head` against a genuinely empty
+database fails (`NoSuchTableError`), and running it against a database `create_all()`
+already brought fully up to date fails a different way (`CircularDependencyError` on
+SQLite, "column already exists" on Postgres) — the columns those migrations try to add
+are already there.
+
+The correct, current workflow against a brand-new database is therefore:
+
+1. Start the app once (`uvicorn app.main:app`, or just let Cloud Run's first boot do
+   it) — the startup lifespan calls `Base.metadata.create_all()` and builds the full
+   current schema.
+2. Mark migration history as caught up, **without** replaying any migrations:
+   ```bash
+   alembic -c alembic/alembic.ini stamp head
+   ```
+3. From then on, `alembic -c alembic/alembic.ini upgrade head` works normally for any
+   *new* migration added after this point, since the database will already be at
+   `head` in Alembic's bookkeeping.
+
+Writing a real `0000` baseline migration (so `upgrade head` alone works end-to-end
+against a genuinely empty database, the way it should) is a known follow-up — tracked,
+intentionally not done in this change.
