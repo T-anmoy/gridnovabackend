@@ -167,13 +167,23 @@ def render_pdf(proposal_data: dict, content_config: dict) -> bytes:
     return HTML(string=html_str).write_pdf()
 
 
+class StorageNotConfiguredError(RuntimeError):
+    """R2 credentials aren't set. Distinct from a transient upload failure —
+    retrying can never fix a configuration gap, so the retry loop below treats
+    this as fatal on the first attempt instead of sleeping through a full
+    exponential back-off for a failure mode that will be identical every time.
+    """
+
+
 def upload_to_r2(pdf_bytes: bytes, proposal_id: int) -> str:
     """Upload PDF to Cloudflare R2. Returns the public URL. Raises on failure."""
-    import boto3
-    from botocore.exceptions import BotoCoreError, ClientError
-
+    # Config checked BEFORE importing boto3 — a missing/broken boto3 install
+    # shouldn't masquerade as a slow "transient" failure the caller retries;
+    # an unconfigured deployment should fail the same fast way either way.
     if not all([settings.storage_access_key, settings.storage_secret_key, settings.storage_endpoint_url, settings.storage_bucket]):
-        raise RuntimeError("R2 storage is not configured — set STORAGE_* environment variables.")
+        raise StorageNotConfiguredError("R2 storage is not configured — set STORAGE_* environment variables.")
+
+    import boto3
 
     s3 = boto3.client(
         "s3",
@@ -196,12 +206,25 @@ def generate_and_upload_pdf(
     content_config: dict,
     proposal_id: int,
     max_retries: int = 3,
+    timeout_seconds: Optional[float] = None,
 ) -> Optional[str]:
     """
     Render the PDF and attempt to upload to R2 with exponential back-off.
     Returns the URL on success, None if all retries fail.
     The caller is responsible for deciding whether to block or proceed.
+
+    `timeout_seconds`, if given, bounds the TOTAL wall-clock time spent retrying —
+    a real thread can't be safely killed from outside in Python, so this is what
+    keeps the background PDF-generation thread from running away indefinitely
+    (e.g. full exponential back-off across every retry) when storage is down.
     """
+    start = time.monotonic()
+
+    def _remaining() -> Optional[float]:
+        if timeout_seconds is None:
+            return None
+        return timeout_seconds - (time.monotonic() - start)
+
     try:
         pdf_bytes = render_pdf(proposal_data, content_config)
     except Exception as exc:
@@ -209,10 +232,25 @@ def generate_and_upload_pdf(
         return None
 
     for attempt in range(1, max_retries + 1):
+        remaining = _remaining()
+        if remaining is not None and remaining <= 0:
+            logger.error(
+                "[FALLBACK] PDF generation timed out before all upload retries were attempted",
+                extra={"proposal_id": proposal_id, "timeout_seconds": timeout_seconds, "attempt": attempt},
+            )
+            return None
         try:
             url = upload_to_r2(pdf_bytes, proposal_id)
             logger.info("PDF uploaded to R2", extra={"proposal_id": proposal_id, "url": url})
             return url
+        except StorageNotConfiguredError as exc:
+            # Not transient — every retry would fail identically. Fail fast instead
+            # of sleeping through a full exponential back-off for nothing.
+            logger.error(
+                "[FALLBACK] R2 storage is not configured — not retrying",
+                extra={"proposal_id": proposal_id, "error": str(exc)},
+            )
+            return None
         except Exception as exc:
             wait = 2 ** attempt
             logger.warning(
@@ -221,6 +259,15 @@ def generate_and_upload_pdf(
                 extra={"proposal_id": proposal_id, "error": str(exc)},
             )
             if attempt < max_retries:
+                remaining = _remaining()
+                if remaining is not None:
+                    if remaining <= 0:
+                        logger.error(
+                            "[FALLBACK] PDF generation timed out — no time left for backoff",
+                            extra={"proposal_id": proposal_id, "timeout_seconds": timeout_seconds},
+                        )
+                        return None
+                    wait = min(wait, remaining)
                 time.sleep(wait)
 
     logger.error(

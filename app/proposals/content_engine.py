@@ -17,10 +17,13 @@ Design principles carried over from the rest of the platform:
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Optional
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = "config/proposal_content.yaml"
 
@@ -104,6 +107,24 @@ def validate_content_config(cfg: dict) -> None:
                     f"Overlapping pricing tiers for project_type '{project_type}': "
                     f"[{a_lo:g}, {a_hi:g}) and [{b_lo:g}, {b_hi:g}) overlap."
                 )
+
+    # Placeholder pricing (rate_per_kw == 0) is structurally valid — the app still
+    # boots — but every proposal it produces will price at ₹0 until Grid Nova staff
+    # fill in real rates. That's easy to miss since nothing else fails loudly about
+    # it after boot, so flag it clearly, once, right when it matters most.
+    placeholder_tiers = [t for t in tiers if not t.get("rate_per_kw")]
+    if placeholder_tiers:
+        described = ", ".join(
+            f"{t.get('project_type')} [{_tier_bounds(t)[0]:g}, "
+            f"{'∞' if _tier_bounds(t)[1] == float('inf') else f'{_tier_bounds(t)[1]:g}'})"
+            for t in placeholder_tiers
+        )
+        logger.warning(
+            "%d of %d pricing tier(s) in %s still have rate_per_kw = 0 (PLACEHOLDER) — "
+            "every proposal matching one of these tiers will price at ₹0 until real "
+            "rates are entered. Affected tiers: %s",
+            len(placeholder_tiers), len(tiers), _CONFIG_PATH, described,
+        )
 
 
 # ── Selection ────────────────────────────────────────────────────────────────────
@@ -211,6 +232,24 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
     timeline = collected.get("timeline")
 
     section_ids, used_fallback = select_sections(collected, cfg)
+    if used_fallback:
+        if project_type == "rooftop" and not segment:
+            # REQUIRED_FIELDS (business_rules.py) doesn't include `segment`, so a
+            # lead can be "qualified" and still hit this — every rooftop parameter
+            # rule needs segment (residential/commercial/industrial) to match, so a
+            # rooftop lead missing it always falls back, silently otherwise.
+            logger.warning(
+                "Proposal fell back to the generic template because 'segment' was "
+                "never collected for a rooftop lead — residential/commercial/"
+                "industrial pricing and scope rules all require it to match.",
+                extra={"lead_id": lead.id, "project_type": project_type},
+            )
+        else:
+            logger.warning(
+                "Proposal fell back to the generic template — no parameter rule "
+                "matched this lead's collected fields.",
+                extra={"lead_id": lead.id, "project_type": project_type, "segment": segment},
+            )
     rate_per_kw = select_pricing(project_type, capacity_kw, segment, cfg)
 
     # total_value only when a tier matched with a real (>0) rate — placeholders (0)

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -27,6 +28,7 @@ from app.orchestrator.orchestrator import orchestrator
 from app.pdf.generator import generate_and_upload_pdf
 
 router = APIRouter(prefix="/api/v1/dashboard")
+logger = logging.getLogger(__name__)
 
 def _get_yaml_config() -> dict:
     # Single source of truth — the content engine owns loading + validation + caching.
@@ -1228,10 +1230,22 @@ def memory_of(db: Session) -> MemoryManager:
     return MemoryManager(db)
 
 
+_PDF_GENERATION_TIMEOUT_SECONDS = 20.0
+
+
 def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: MemoryManager) -> None:
     """
     Attempt PDF generation in a background thread so the approval response
     is not blocked by R2 upload time. If it fails, pdf_url stays None (pending).
+
+    A real thread can't be safely force-killed from outside in Python, so
+    "timeout" here means the retry/back-off loop inside generate_and_upload_pdf
+    is bounded to _PDF_GENERATION_TIMEOUT_SECONDS total — it can't run away
+    indefinitely if storage is down. Every step from here on is wrapped so a
+    failure (including the final session close) is logged, never left as an
+    unhandled exception in the thread — that's what previously surfaced as
+    "Cannot operate on a closed database" whenever this thread's session outlived
+    the engine it was bound to.
     """
     import threading
 
@@ -1255,6 +1269,7 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
                 proposal_data=proposal_data,
                 content_config=content_config,
                 proposal_id=proposal_id,
+                timeout_seconds=_PDF_GENERATION_TIMEOUT_SECONDS,
             )
             if pdf_url:
                 inner_memory.transition_proposal_status(
@@ -1265,8 +1280,23 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
                 )
                 inner_db.commit()
         except Exception:
-            inner_db.rollback()
+            logger.exception("Background PDF generation failed for proposal %s", proposal_id)
+            try:
+                inner_db.rollback()
+            except Exception:
+                logger.exception(
+                    "Rollback also failed after background PDF generation error for proposal %s", proposal_id
+                )
         finally:
-            inner_db.close()
+            try:
+                inner_db.close()
+            except Exception:
+                logger.warning(
+                    "Closing the background PDF generation session failed for proposal %s "
+                    "(connection likely already invalid) — nothing left to clean up.",
+                    proposal_id,
+                )
 
-    threading.Thread(target=_generate, daemon=True).start()
+    threading.Thread(
+        target=_generate, daemon=True, name=f"pdf-generation-proposal-{proposal_id}"
+    ).start()

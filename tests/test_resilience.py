@@ -68,7 +68,7 @@ class TestLLMFallback:
 
 
 class TestR2UploadResilience:
-    def test_approval_succeeds_even_when_r2_upload_fails(self, client, memory, db_session):
+    def test_approval_succeeds_even_when_r2_upload_fails(self, client, memory, db_session, monkeypatch):
         """R2 upload failure must not block the approval HTTP response."""
         cid, lid = _make_qualified_lead(memory, db_session)
 
@@ -78,6 +78,12 @@ class TestR2UploadResilience:
         }, headers=sales_headers())
         assert r.status_code == 200
         pid = r.json()["proposal_id"]
+
+        # A genuinely transient failure (unlike a missing-config one) still retries
+        # with back-off — bound that to keep the background thread from outliving
+        # this test (and racing the next test's DB teardown) while still exercising
+        # the real retry path.
+        monkeypatch.setattr("app.api.routes.dashboard._PDF_GENERATION_TIMEOUT_SECONDS", 0.3)
 
         # Approve — with R2 upload stubbed to fail
         with patch("app.pdf.generator.upload_to_r2", side_effect=RuntimeError("R2 unreachable")):
@@ -89,7 +95,7 @@ class TestR2UploadResilience:
 
         # pdf_url endpoint returns "pdf_pending" state
         import time
-        time.sleep(0.1)  # let background thread attempt (and fail)
+        time.sleep(0.4)  # let the (now short-timeout) background thread finish attempting
         r = client.get(f"/api/v1/dashboard/proposals/{pid}/pdf", headers=admin_headers())
         assert r.status_code == 200
         # Either pending or None — approval was not blocked
