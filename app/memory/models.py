@@ -4,6 +4,7 @@ from typing import Optional
 from sqlalchemy import (
     String, Float, Boolean, Text, JSON, ForeignKey,
     Enum as SAEnum, DateTime, Integer, UniqueConstraint, CheckConstraint,
+    Index, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.memory.db import Base
@@ -273,6 +274,20 @@ class AuditLog(Base):
 
 class Meeting(Base):
     __tablename__ = "meetings"
+    __table_args__ = (
+        # Hard backstop against double-booking: the free/busy re-verification in
+        # app/scheduling/booking.py is a check-then-act race under real concurrency
+        # (confirmed live — two simultaneous bookings for the same employee/slot can
+        # both pass the check before either commits). Scoped to status = 'scheduled'
+        # so a cancelled meeting doesn't block ever re-booking that slot.
+        Index(
+            "uq_meetings_employee_slot_active",
+            "employee_id", "scheduled_at",
+            unique=True,
+            sqlite_where=text("status = 'scheduled'"),
+            postgresql_where=text("status = 'scheduled'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)

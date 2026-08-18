@@ -64,6 +64,12 @@ class MemoryManager:
     def __init__(self, db: Session):
         self._db = db
 
+    def rollback(self) -> None:
+        """Discard the current transaction — needed after a caught IntegrityError
+        (e.g. the meetings double-booking unique index) leaves the session unusable
+        until it's rolled back."""
+        self._db.rollback()
+
     # ── Audit ──────────────────────────────────────────────────────────────────
 
     def _audit(
