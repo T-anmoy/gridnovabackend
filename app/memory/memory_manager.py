@@ -261,6 +261,26 @@ class MemoryManager:
         )
         return lead
 
+    def get_open_lead_for_customer(self, customer_id: int) -> Optional[Lead]:
+        """Most recently created lead for this customer that hasn't reached a
+        terminal pipeline stage (won/lost).
+
+        Used so rapid/duplicate first-contact chat messages from the same customer
+        (no lead_id yet on the client — e.g. a double-tapped send, or several
+        concurrent tabs) fold into one lead instead of minting a new one per
+        request. A customer whose only prior lead is won/lost still gets a fresh
+        lead — their next inquiry is treated as a new one, not glued onto a closed
+        pipeline entry.
+        """
+        q = (
+            select(Lead)
+            .where(Lead.customer_id == customer_id)
+            .where(Lead.pipeline_stage.notin_((PipelineStage.won, PipelineStage.lost)))
+            .order_by(Lead.created_at.desc())
+            .limit(1)
+        )
+        return self._db.execute(q).scalars().first()
+
     def update_lead_fields(
         self,
         lead_id: int,

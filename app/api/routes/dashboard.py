@@ -492,7 +492,7 @@ def manager_sign_off(
 
 
 class RevisionRequest(BaseModel):
-    reason: str
+    reason: str = Field(min_length=1)
 
 
 @router.post("/proposals/{proposal_id}/request-revision")

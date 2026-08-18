@@ -102,11 +102,17 @@ async def chat_message(
     customer_id = body.customer_id
     lead_id = body.lead_id
 
-    # An ongoing conversation is identified by its lead — the lead already knows its
-    # customer, so never create a second customer for it.
-    if lead_id and not customer_id:
+    # A client-supplied lead_id must actually exist — validated before any write
+    # happens. A stale or foreign lead_id used to fall through silently, creating an
+    # orphan customer and then crashing deep inside the orchestrator (KeyError) once
+    # it tried to load a lead that was never there.
+    if lead_id is not None:
         existing_lead = memory.get_lead(lead_id)
-        if existing_lead:
+        if not existing_lead:
+            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found.")
+        # An ongoing conversation is identified by its lead — the lead already knows
+        # its customer, so never create a second customer for it.
+        if not customer_id:
             customer_id = existing_lead.customer_id
 
     if not customer_id:
@@ -124,12 +130,22 @@ async def chat_message(
         customer_id = customer.id
 
     if not lead_id:
-        try:
-            source = LeadSource(body.source) if body.source else LeadSource.website_chat
-        except ValueError:
-            raise HTTPException(status_code=422, detail=f"Unknown lead source: {body.source!r}")
-        lead = memory.create_lead(customer_id=customer_id, performed_by="website", source=source)
-        lead_id = lead.id
+        # Fold rapid/duplicate first-contact messages into the customer's existing
+        # open lead (if any) rather than minting a new one per request — this is
+        # what makes several near-simultaneous "first messages" from the same real
+        # customer (double-tapped send, multiple tabs) resolve to one lead instead
+        # of one each. A customer whose only prior lead already reached won/lost
+        # still gets a fresh lead for a new inquiry.
+        existing_open_lead = memory.get_open_lead_for_customer(customer_id)
+        if existing_open_lead:
+            lead_id = existing_open_lead.id
+        else:
+            try:
+                source = LeadSource(body.source) if body.source else LeadSource.website_chat
+            except ValueError:
+                raise HTTPException(status_code=422, detail=f"Unknown lead source: {body.source!r}")
+            lead = memory.create_lead(customer_id=customer_id, performed_by="website", source=source)
+            lead_id = lead.id
 
     dedup_key = _dedup_key(customer_id, body.message)
     if _is_duplicate(dedup_key):
