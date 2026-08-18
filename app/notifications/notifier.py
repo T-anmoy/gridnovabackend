@@ -36,8 +36,11 @@ class Notifier(ABC):
     def proposal_approved(self, proposal_id: int, lead_id: int) -> None:
         self.notify("proposal_approved", {"proposal_id": proposal_id, "lead_id": lead_id})
 
-    def proposal_sent(self, proposal_id: int, customer_email: str) -> None:
-        self.notify("proposal_sent", {"proposal_id": proposal_id, "customer_email": customer_email})
+    def proposal_sent(self, proposal_id: int, customer_email: str, accept_path: str = "") -> None:
+        payload = {"proposal_id": proposal_id, "customer_email": customer_email}
+        if accept_path:
+            payload["accept_path"] = accept_path
+        self.notify("proposal_sent", payload)
 
     def director_capacity_alert(self, lead_id: int, capacity_kw: float) -> None:
         self.notify("director_capacity_alert", {"lead_id": lead_id, "capacity_kw": capacity_kw})

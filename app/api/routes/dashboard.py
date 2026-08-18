@@ -34,6 +34,16 @@ def _get_yaml_config() -> dict:
     return load_content_config()
 
 
+def _accept_path(accept_token: Optional[str]) -> Optional[str]:
+    """The backend's own public accept-link path for a token. Deliberately not a
+    full URL — this API doesn't know the frontend's public domain, only its own
+    fixed route shape — so callers prefix their own origin to build the real link.
+    """
+    if not accept_token:
+        return None
+    return f"/api/v1/proposals/accept/{accept_token}"
+
+
 # Technical fields an Engineer is allowed to see (no pricing / customer PII).
 _ENGINEER_TECHNICAL_FIELDS = ("project_type", "capacity_kw", "location", "roof_type")
 
@@ -77,6 +87,10 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
         "pdf_url": p.pdf_url,
         "date_created": p.date_created.isoformat() if p.date_created else None,
         "date_sent": p.date_sent.isoformat() if p.date_sent else None,
+        # Not shown to Engineers — the accept link is a bearer credential onto the
+        # public accept endpoint, which returns pricing to anyone holding it.
+        "accept_token": p.accept_token,
+        "accept_path": _accept_path(p.accept_token),
         "lead": {
             "id": lead.id,
             "pipeline_stage": lead.pipeline_stage,
@@ -608,7 +622,8 @@ def send_proposal(
         date_sent=datetime.now(timezone.utc),
     )
     # Generate the customer accept-link token at send time (idempotent).
-    memory.generate_accept_token(proposal_id, performed_by=employee.employee_id)
+    accept_token = memory.generate_accept_token(proposal_id, performed_by=employee.employee_id)
+    accept_path = _accept_path(accept_token)
     memory.add_timeline_event(
         lead_id=proposal.lead_id,
         event_type=TimelineEventType.proposal_sent,
@@ -620,9 +635,14 @@ def send_proposal(
     ctx = memory.get_lead_context(proposal.lead_id)
     customer = ctx.get("customer")
     if customer:
-        notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer.email)
+        notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer.email, accept_path=accept_path)
 
-    return {"status": "sent", "proposal_id": proposal_id}
+    return {
+        "status": "sent",
+        "proposal_id": proposal_id,
+        "accept_token": accept_token,
+        "accept_path": accept_path,
+    }
 
 
 @router.get("/proposals/{proposal_id}/pdf")
@@ -741,6 +761,11 @@ def get_proposal_detail(
         "pdf_url": proposal.pdf_url,
         "date_created": proposal.date_created.isoformat() if proposal.date_created else None,
         "date_sent": proposal.date_sent.isoformat() if proposal.date_sent else None,
+        # Not shown to Engineers (see the Engineer branch above) — the accept link
+        # is a bearer credential onto the public accept endpoint, which returns
+        # pricing to anyone holding it.
+        "accept_token": proposal.accept_token,
+        "accept_path": _accept_path(proposal.accept_token),
         "customer": {
             "id": customer.id, "name": customer.name,
             "company": customer.company, "email": customer.email,
