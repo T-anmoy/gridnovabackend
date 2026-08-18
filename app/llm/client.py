@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -27,6 +28,73 @@ FALLBACK_QUESTIONS = [
     "What is your approximate monthly electricity bill?",
     "Do you have a budget range in mind?",
 ]
+
+# ── Mock-mode field extraction (no real LLM configured) ─────────────────────────
+# Deliberately simple regex/keyword matching, not real NLP — its only job is to let
+# chat-based lead qualification actually be exercisable end-to-end without a real
+# LLM_API_KEY. Previously, mock mode's field extraction always returned {} (the
+# literal "[MOCK] ..." placeholder text isn't valid JSON), so no lead could ever
+# reach "qualified" through the chat endpoint while running in mock mode.
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?91[-\s]?)?[6-9]\d{9}(?!\d)")
+_CAPACITY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*k[wW]\b")
+_NAME_RE = re.compile(
+    r"\b(?i:my name is|i am|i'm|this is|name's)\s+"
+    r"([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){0,2})"
+)
+_LOCATION_RE = re.compile(
+    r"\b(?:located in|located at|based in|site is in|site in|in|at)\b\s+"
+    r"([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+){0,2})"
+)
+_PROJECT_TYPE_KEYWORDS = [
+    (("solar pump", "pump set", "irrigation pump"), "solar_pump"),
+    (("ground mounted", "ground-mounted", "ground mount", "utility scale", "utility-scale"), "ground_mounted"),
+    (("rooftop", "roof top", "roof-top", "on my roof", "on the roof"), "rooftop"),
+]
+_SEGMENT_KEYWORDS = [
+    (("government", "govt", "municipal", "tender"), "government"),
+    (("industrial", "factory", "plant", "manufacturing"), "industrial"),
+    (("commercial", "office", "business", "shop", "showroom", "warehouse"), "commercial"),
+    (("residential", "home", "house", "apartment", "villa"), "residential"),
+]
+
+
+def _mock_extract_fields(text: str) -> dict:
+    """Heuristic best-effort extraction used only when llm_mock_mode is active."""
+    fields: dict = {}
+
+    email_m = _EMAIL_RE.search(text)
+    if email_m:
+        fields["email"] = email_m.group(0).rstrip(".,;:!?")
+
+    phone_m = _PHONE_RE.search(text)
+    if phone_m:
+        fields["phone"] = phone_m.group(0)
+
+    cap_m = _CAPACITY_RE.search(text)
+    if cap_m:
+        fields["capacity_kw"] = float(cap_m.group(1))
+
+    name_m = _NAME_RE.search(text)
+    if name_m:
+        fields["name"] = name_m.group(1).strip()
+
+    lowered = text.lower()
+    for keywords, value in _PROJECT_TYPE_KEYWORDS:
+        if any(k in lowered for k in keywords):
+            fields["project_type"] = value
+            break
+
+    for keywords, value in _SEGMENT_KEYWORDS:
+        if any(k in lowered for k in keywords):
+            fields["segment"] = value
+            break
+
+    location_m = _LOCATION_RE.search(text)
+    if location_m:
+        fields["location"] = location_m.group(1).strip()
+
+    return fields
 
 
 class LLMClient:
@@ -53,6 +121,15 @@ class LLMClient:
         Customer input is data to extract FROM — the system prompt does not
         accept instructions embedded in the message.
         """
+        if self._mock:
+            extracted = _mock_extract_fields(user_message)
+            logger.info(
+                "LLM mock field extraction (heuristic)",
+                extra={"operation": "extract_fields", "lead_id": lead_id, "mock": True,
+                       "extracted_keys": list(extracted.keys())},
+            )
+            return extracted
+
         system_prompt = (
             "You are a field-extraction engine for a solar EPC company's CRM. "
             "Your ONLY task is to extract structured data from the customer's message. "

@@ -7,18 +7,19 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.agents.sales_agent import QUALIFICATION_FIELDS, _score_from_fields
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import EmployeeRole, LeadSource, ProposalStatus, TimelineEventType
+from app.memory.models import EmployeeRole, LeadSource, PipelineStage, ProposalStatus, TimelineEventType
 from app.rules.business_rules import evaluate_lead
 from app.scheduling import availability, booking, google_calendar
 from app.notifications.notifier import notifier
@@ -275,6 +276,79 @@ def get_lead(
             {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
             for m in ctx["messages"]
         ] if not employee.is_engineer else [],
+    }
+
+
+class LeadFieldsUpdateRequest(BaseModel):
+    fields: dict[str, Any]
+
+
+@router.patch("/leads/{lead_id}/fields")
+def update_lead_fields_manual(
+    lead_id: int,
+    body: LeadFieldsUpdateRequest,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Manual correction/completion of a lead's collected fields — the employee-side
+    escape hatch for when AI extraction (chat, or its mock-mode heuristic) missed
+    something or got it wrong. Re-evaluates qualification exactly the way a chat
+    turn does, so a manually-completed lead becomes just as "qualified" as one
+    qualified conversationally.
+    """
+    if not employee.can_edit_lead():
+        raise HTTPException(status_code=403, detail="Your role cannot edit lead fields.")
+
+    if not body.fields:
+        raise HTTPException(status_code=422, detail="fields must not be empty.")
+
+    unknown = [k for k in body.fields if k not in QUALIFICATION_FIELDS]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown field(s): {', '.join(unknown)}")
+
+    memory = MemoryManager(db)
+    lead = memory.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # Same scoping as the rest of the Sales-role surface: an unassigned lead is fair
+    # game, but one already owned by a different Sales rep is not.
+    if employee.is_sales and lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id:
+        raise HTTPException(status_code=403, detail="This lead is not assigned to you.")
+
+    merged = {**dict(lead.collected_fields or {}), **body.fields}
+    score = _score_from_fields(merged)
+    eval_result = evaluate_lead(merged)
+
+    stage = None
+    if eval_result.is_ready_for_proposal:
+        stage = PipelineStage.qualified
+    elif merged:
+        stage = PipelineStage.qualifying
+
+    updated = memory.update_lead_fields(
+        lead_id=lead_id,
+        new_fields=body.fields,
+        performed_by=employee.employee_id,
+        stage=stage,
+        score=score,
+    )
+    if eval_result.is_ready_for_proposal:
+        memory.add_timeline_event(
+            lead_id=lead_id,
+            event_type=TimelineEventType.qualification_completed,
+            description=f"All required fields collected via manual edit by {employee.employee_id}",
+            created_by=employee.employee_id,
+        )
+    db.commit()
+
+    return {
+        "lead_id": lead_id,
+        "collected_fields": updated.collected_fields,
+        "pipeline_stage": updated.pipeline_stage,
+        "lead_score": updated.lead_score,
+        "is_qualified": eval_result.is_ready_for_proposal,
+        "missing_fields": eval_result.missing_fields,
     }
 
 
