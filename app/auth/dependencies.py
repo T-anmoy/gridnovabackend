@@ -14,13 +14,37 @@ from typing import Optional
 import httpx
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.memory.db import get_db
 from app.memory.models import EmployeeRole
 
 logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name: str = "", email: str = "") -> None:
+    """Get-or-create the local Employee mirror row for an authenticated identity.
+
+    Called on every successful authentication (dev-header or real JWT) so the
+    `employees` table actually reflects who has signed in — previously nothing
+    ever wrote to it, which silently broke Sales-role lead/proposal scoping and
+    the Google Calendar connection flow for any employee who hadn't been
+    manually pre-seeded. Committed immediately so it survives independent of
+    whatever the route handler does with its own session afterward.
+    """
+    from app.memory.memory_manager import MemoryManager
+
+    memory = MemoryManager(db)
+    memory.get_or_create_employee(
+        employee_id,
+        name or employee_id,
+        email or f"{employee_id}@no-email.local",
+        role.value,
+    )
+    db.commit()
 
 
 @lru_cache(maxsize=1)
@@ -109,6 +133,7 @@ class AuthenticatedEmployee:
 async def get_current_employee(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> AuthenticatedEmployee:
     # ── Dev-only header bypass ─────────────────────────────────────────────────
     dev_id = request.headers.get("X-Employee-Id")
@@ -123,6 +148,7 @@ async def get_current_employee(
             role = EmployeeRole(dev_role)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Unknown role: {dev_role}")
+        _provision_employee(db, dev_id, role)
         return AuthenticatedEmployee(employee_id=dev_id, role=role)
 
     # ── JWT verification ───────────────────────────────────────────────────────
@@ -152,9 +178,13 @@ async def get_current_employee(
     except ValueError:
         raise HTTPException(status_code=403, detail=f"Unknown employee role: {role_str!r}")
 
+    email = payload.get("email", "")
+    name = payload.get("name", "")
+    _provision_employee(db, employee_id, role, name=name, email=email)
+
     return AuthenticatedEmployee(
         employee_id=employee_id,
         role=role,
-        email=payload.get("email", ""),
-        name=payload.get("name", ""),
+        email=email,
+        name=name,
     )

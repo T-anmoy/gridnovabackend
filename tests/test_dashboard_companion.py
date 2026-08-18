@@ -58,6 +58,11 @@ class TestRecentActivity:
         assert stamps == sorted(stamps, reverse=True)  # newest first
 
     def test_human_readable_description(self, client, memory, db_session):
+        # Pre-provision the admin identity so the auth layer's own get-or-create
+        # (see app/auth/dependencies.py) doesn't add an "Employee created" audit
+        # entry ahead of the proposal event we're asserting on below.
+        memory.get_or_create_employee("emp-admin-1", "Admin", "emp-admin-1@gridnova.in", "admin")
+        db_session.commit()
         lead = _lead(memory, db_session, email="desc@x.com")
         p = _proposal(memory, db_session, lead)
         memory.transition_proposal_status(proposal_id=p.id, new_status=ProposalStatus.approved,

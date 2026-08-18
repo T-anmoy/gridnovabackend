@@ -280,6 +280,23 @@ class MemoryManager:
     def get_lead(self, lead_id: int) -> Optional[Lead]:
         return self._db.get(Lead, lead_id)
 
+    def assign_lead_if_unassigned(self, lead_id: int, employee_id: str, performed_by: str) -> Lead:
+        """Give an unassigned lead an owner — the first Sales/Admin employee to work
+        it (currently: the one who requests its proposal draft). Never reassigns a
+        lead that already has an owner, so a lead stays with whoever picked it up.
+        """
+        lead = self._db.get(Lead, lead_id)
+        if lead is not None and lead.assigned_employee_id is None:
+            before = {"assigned_employee_id": None}
+            lead.assigned_employee_id = employee_id
+            lead.updated_at = datetime.now(timezone.utc)
+            self._db.flush()
+            self._audit(
+                "lead", str(lead_id), "assigned", performed_by,
+                before=before, after={"assigned_employee_id": employee_id},
+            )
+        return lead
+
     def list_leads(
         self,
         assigned_employee_id: Optional[str] = None,

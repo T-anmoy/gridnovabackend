@@ -76,6 +76,12 @@ class ProposalAgent:
             used_fallback_template=used_fallback,
         )
 
+        # The employee who picks up a lead to draft its first proposal becomes its
+        # owner — never reassigns a lead that already has one. This is what makes
+        # Sales-role scoping (own leads, own proposals) actually resolve to real
+        # rows instead of everything staying unassigned forever.
+        memory.assign_lead_if_unassigned(lead_id, employee_id=performed_by, performed_by=performed_by)
+
         # Advance pipeline stage
         memory.update_lead_fields(
             lead_id=lead_id,
