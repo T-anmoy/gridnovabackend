@@ -80,9 +80,10 @@ class TestR2UploadResilience:
         pid = r.json()["proposal_id"]
 
         # A genuinely transient failure (unlike a missing-config one) still retries
-        # with back-off — bound that to keep the background thread from outliving
-        # this test (and racing the next test's DB teardown) while still exercising
-        # the real retry path.
+        # with back-off — bound that so this test doesn't spend several real
+        # seconds asleep in the retry loop, which now runs synchronously within
+        # the approve() call itself under tests (see conftest.py's
+        # _start_pdf_generation monkeypatch).
         monkeypatch.setattr("app.api.routes.dashboard._PDF_GENERATION_TIMEOUT_SECONDS", 0.3)
 
         # Approve — with R2 upload stubbed to fail
@@ -93,9 +94,8 @@ class TestR2UploadResilience:
         assert r.status_code == 200
         assert r.json()["status"] == "approved"
 
-        # pdf_url endpoint returns "pdf_pending" state
-        import time
-        time.sleep(0.4)  # let the (now short-timeout) background thread finish attempting
+        # pdf_url endpoint returns "pdf_pending" state — PDF generation already ran
+        # (synchronously, under tests) by the time approve() returned above.
         r = client.get(f"/api/v1/dashboard/proposals/{pid}/pdf", headers=admin_headers())
         assert r.status_code == 200
         # Either pending or None — approval was not blocked

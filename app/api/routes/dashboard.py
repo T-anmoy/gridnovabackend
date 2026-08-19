@@ -429,6 +429,7 @@ def approve_proposal(
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot approve.")
 
+    lead_id = proposal.lead_id
     memory.transition_proposal_status(
         proposal_id=proposal_id,
         new_status=ProposalStatus.approved,
@@ -436,16 +437,20 @@ def approve_proposal(
         approved_by_employee_id=employee.employee_id,
     )
     memory.add_timeline_event(
-        lead_id=proposal.lead_id,
+        lead_id=lead_id,
         event_type=TimelineEventType.proposal_approved,
         description=f"Approved by {employee.employee_id}",
         created_by=employee.employee_id,
     )
     db.commit()
 
+    # Captured lead_id above, before commit expires the ORM object's attributes —
+    # _trigger_pdf_generation starts a background thread against its own session
+    # right below, so re-touching `proposal` on this (the request's) session past
+    # this point would mean two threads issuing queries concurrently against it.
     _trigger_pdf_generation(proposal_id, proposal, db, memory)
 
-    notifier.proposal_approved(proposal_id=proposal_id, lead_id=proposal.lead_id)
+    notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id}
 
 
@@ -473,6 +478,7 @@ def manager_sign_off(
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot sign off.")
 
+    lead_id = proposal.lead_id
     memory.transition_proposal_status(
         proposal_id=proposal_id,
         new_status=ProposalStatus.approved,
@@ -480,16 +486,18 @@ def manager_sign_off(
         approved_by_employee_id=employee.employee_id,
     )
     memory.add_timeline_event(
-        lead_id=proposal.lead_id,
+        lead_id=lead_id,
         event_type=TimelineEventType.manager_signoff_completed,
         description=f"Manager sign-off by {employee.employee_id}",
         created_by=employee.employee_id,
     )
     db.commit()
 
+    # See the matching comment in approve_proposal above — capture lead_id before
+    # the background PDF thread starts, don't re-touch `proposal` after.
     _trigger_pdf_generation(proposal_id, proposal, db, memory)
 
-    notifier.proposal_approved(proposal_id=proposal_id, lead_id=proposal.lead_id)
+    notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id, "signoff_by": employee.employee_id}
 
 
@@ -1233,6 +1241,22 @@ def memory_of(db: Session) -> MemoryManager:
 _PDF_GENERATION_TIMEOUT_SECONDS = 20.0
 
 
+def _start_pdf_generation(generate_fn, proposal_id: int) -> None:
+    """Run `generate_fn` in a background thread — split out from
+    _trigger_pdf_generation as its own seam so tests can substitute a synchronous
+    call instead (see tests/conftest.py). generate_fn opens its own DB session,
+    which under the test harness's single shared SQLite connection (StaticPool)
+    is not safe to run concurrently with the request's own session no matter how
+    carefully the call sites avoid touching shared ORM state — real deployments
+    don't share a connection this way, so this only matters for tests.
+    """
+    import threading
+
+    threading.Thread(
+        target=generate_fn, daemon=True, name=f"pdf-generation-proposal-{proposal_id}"
+    ).start()
+
+
 def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: MemoryManager) -> None:
     """
     Attempt PDF generation in a background thread so the approval response
@@ -1247,7 +1271,6 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
     "Cannot operate on a closed database" whenever this thread's session outlived
     the engine it was bound to.
     """
-    import threading
 
     def _generate():
         from app.memory.db import SessionLocal
@@ -1297,6 +1320,4 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
                     proposal_id,
                 )
 
-    threading.Thread(
-        target=_generate, daemon=True, name=f"pdf-generation-proposal-{proposal_id}"
-    ).start()
+    _start_pdf_generation(_generate, proposal_id)

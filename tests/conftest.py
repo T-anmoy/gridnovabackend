@@ -53,6 +53,18 @@ def _isolated_db(monkeypatch):
     # (monkeypatch auto-restores at teardown.)
     monkeypatch.setattr("app.memory.db.SessionLocal", SessionLocal)
 
+    # The PDF background thread opens its own session against this same StaticPool
+    # engine — a single raw SQLite DBAPI connection shared by every session in this
+    # test. That connection isn't safe for two threads to use concurrently (real
+    # deployments give each request its own connection; this sharing is purely a
+    # test-harness convenience), so under tests it runs synchronously instead of on
+    # a real background thread. Production is unaffected — this only patches the
+    # test process's view of the seam in app/api/routes/dashboard.py.
+    monkeypatch.setattr(
+        "app.api.routes.dashboard._start_pdf_generation",
+        lambda generate_fn, proposal_id: generate_fn(),
+    )
+
     def _override_get_db():
         session = SessionLocal()
         try:
