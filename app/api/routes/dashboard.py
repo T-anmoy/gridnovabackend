@@ -201,7 +201,7 @@ def export_leads(
 
 @router.get("/proposals/export")
 def export_proposals(
-    status: Optional[str] = Query(default=None),
+    filter_status: Optional[str] = Query(default=None, alias="status"),
     date_from: Optional[str] = Query(default=None),
     date_to: Optional[str] = Query(default=None),
     lead_id: Optional[int] = Query(default=None),
@@ -212,11 +212,11 @@ def export_proposals(
         raise HTTPException(status_code=403, detail="Only Admin or Management can export proposals.")
 
     status_enum: Optional[ProposalStatus] = None
-    if status:
+    if filter_status:
         try:
-            status_enum = ProposalStatus(status)
+            status_enum = ProposalStatus(filter_status)
         except ValueError:
-            raise HTTPException(status_code=422, detail=f"Unknown proposal status: {status!r}")
+            raise HTTPException(status_code=422, detail=f"Unknown proposal status: {filter_status!r}")
 
     proposals = memory_of(db).list_proposals_for_export(
         status=status_enum,
@@ -685,7 +685,7 @@ def get_proposal_pdf(
 
 @router.get("/proposals")
 def list_proposals(
-    status: Optional[str] = Query(default=None),
+    filter_status: Optional[str] = Query(default=None, alias="status"),
     date_from: Optional[str] = Query(default=None),
     date_to: Optional[str] = Query(default=None),
     lead_id: Optional[int] = Query(default=None),
@@ -695,11 +695,11 @@ def list_proposals(
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
     status_enum: Optional[ProposalStatus] = None
-    if status:
+    if filter_status:
         try:
-            status_enum = ProposalStatus(status)
+            status_enum = ProposalStatus(filter_status)
         except ValueError:
-            raise HTTPException(status_code=422, detail=f"Unknown proposal status: {status!r}")
+            raise HTTPException(status_code=422, detail=f"Unknown proposal status: {filter_status!r}")
 
     # Sales is scoped to its own leads at the query level; others see all.
     assigned_filter = employee.employee_id if employee.is_sales else None
