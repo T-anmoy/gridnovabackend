@@ -129,6 +129,9 @@ class AuthenticatedEmployee:
     def can_adjust_pricing(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
+    def can_manage_proposal_inputs(self) -> bool:
+        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+
 
 async def get_current_employee(
     request: Request,

@@ -66,6 +66,8 @@ class TimelineEventType(str, enum.Enum):
     won = "won"
     lost = "lost"
     escalated = "escalated"
+    proposal_inputs_submitted = "proposal_inputs_submitted"
+    proposal_inputs_reviewed = "proposal_inputs_reviewed"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -94,6 +96,75 @@ class MessageRole(str, enum.Enum):
     customer = "customer"
     agent = "agent"
     employee = "employee"
+
+
+# ── ProposalInputs enums ─────────────────────────────────────────────────────────
+
+class CustomerType(str, enum.Enum):
+    individual = "individual"
+    organisation = "organisation"
+
+
+class ProjectFamily(str, enum.Enum):
+    rooftop_solar = "rooftop_solar"
+    ground_mounted = "ground_mounted"
+    government_institutional = "government_institutional"
+    street_lighting = "street_lighting"
+    water_pump = "water_pump"
+    om_service = "om_service"
+    consulting = "consulting"
+    # TODO: add emerging (BESS/EV/microgrid) once Raju Paul confirms
+
+
+class GovernmentScheme(str, enum.Enum):
+    pm_surya_ghar = "pm_surya_ghar"
+    pm_kusum_a = "pm_kusum_a"
+    pm_kusum_b = "pm_kusum_b"
+    pm_kusum_c = "pm_kusum_c"
+    wbreda = "wbreda"
+    other_government = "other_government"
+    none = "none"
+
+
+class ConnectionType(str, enum.Enum):
+    on_grid = "on_grid"
+    off_grid = "off_grid"
+    hybrid = "hybrid"
+
+
+class ConnectionPhase(str, enum.Enum):
+    single_phase = "single_phase"
+    three_phase = "three_phase"
+
+
+class SiteType(str, enum.Enum):
+    rooftop_residential = "rooftop_residential"
+    rooftop_commercial = "rooftop_commercial"
+    rooftop_institutional = "rooftop_institutional"
+    ground_mounted = "ground_mounted"
+    carport = "carport"
+    other = "other"
+
+
+class ShadingCondition(str, enum.Enum):
+    none = "none"
+    partial_morning = "partial_morning"
+    partial_evening = "partial_evening"
+    heavy = "heavy"
+
+
+class EquipmentTier(str, enum.Enum):
+    standard = "standard"
+    premium = "premium"
+    as_recommended = "as_recommended"
+    # TODO: Raju Paul to define Good/Better/Best tier names formally
+
+
+class InputStatus(str, enum.Enum):
+    submitted = "submitted"                        # just received from form
+    under_review = "under_review"                  # sales team is looking at it
+    approved_for_proposal = "approved_for_proposal"  # ready for Proposal Agent
+    rejected = "rejected"                           # not viable, with reason
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -190,6 +261,7 @@ class Lead(Base):
     project: Mapped[Optional["Project"]] = relationship(back_populates="leads")
     assigned_employee: Mapped[Optional["Employee"]] = relationship(back_populates="leads")
     proposals: Mapped[list["Proposal"]] = relationship(back_populates="lead")
+    proposal_inputs: Mapped[list["ProposalInputs"]] = relationship(back_populates="lead")
     timeline_events: Mapped[list["TimelineEvent"]] = relationship(back_populates="lead")
     messages: Mapped[list["ConversationMessage"]] = relationship(back_populates="lead")
     meetings: Mapped[list["Meeting"]] = relationship(back_populates="lead")
@@ -228,6 +300,78 @@ class Proposal(Base):
 
     lead: Mapped["Lead"] = relationship(back_populates="proposals")
     approved_by: Mapped[Optional["Employee"]] = relationship(back_populates="approved_proposals")
+
+
+class ProposalInputs(Base):
+    """Raw customer-provided site assessment data, submitted via the /proposal/new
+    form. Deliberately separate from Proposal (the AI-generated output) — these
+    have different lifecycles: customer provides inputs -> staff reviews ->
+    AI generates proposal -> staff approves -> customer receives.
+    """
+    __tablename__ = "proposal_inputs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)
+    status: Mapped[InputStatus] = mapped_column(
+        SAEnum(InputStatus), default=InputStatus.submitted, nullable=False
+    )
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Customer & Project ───────────────────────────────────────────────────
+    customer_type: Mapped[CustomerType] = mapped_column(SAEnum(CustomerType), nullable=False)
+    organisation_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    gst_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    project_family: Mapped[ProjectFamily] = mapped_column(SAEnum(ProjectFamily), nullable=False)
+    scheme_linked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scheme_name: Mapped[Optional[GovernmentScheme]] = mapped_column(
+        SAEnum(GovernmentScheme), nullable=True, default=GovernmentScheme.none
+    )
+
+    # ── Site Location ─────────────────────────────────────────────────────────
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    district: Mapped[str] = mapped_column(String, nullable=False)
+    pin_code: Mapped[str] = mapped_column(String, nullable=False)
+    full_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Free text for now — TODO: enum once Raju Paul confirms the full DISCOM list.
+    discom: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    consumer_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    site_type: Mapped[SiteType] = mapped_column(SAEnum(SiteType), nullable=False)
+    roof_area_sqft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    floors: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    shading_condition: Mapped[Optional[ShadingCondition]] = mapped_column(SAEnum(ShadingCondition), nullable=True)
+    structural_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Load & Output ─────────────────────────────────────────────────────────
+    avg_monthly_bill_inr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_monthly_units_kwh: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    peak_load_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    connection_phase: Mapped[Optional[ConnectionPhase]] = mapped_column(SAEnum(ConnectionPhase), nullable=True)
+    desired_output_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    load_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── System Configuration ─────────────────────────────────────────────────
+    connection_type: Mapped[ConnectionType] = mapped_column(SAEnum(ConnectionType), nullable=False)
+    net_metering_required: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    dcr_panels_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ev_charging: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    battery_storage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    equipment_tier: Mapped[Optional[EquipmentTier]] = mapped_column(SAEnum(EquipmentTier), nullable=True)
+    additional_requirements: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Documents ─────────────────────────────────────────────────────────────
+    # List of {type, filename, storage_key} — storage_key is a Cloudflare R2 object
+    # key, null until upload is wired.
+    # TODO: wire actual file upload when R2 credentials are configured.
+    document_refs: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+    # ── Internal notes ────────────────────────────────────────────────────────
+    internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    lead: Mapped["Lead"] = relationship(back_populates="proposal_inputs")
+    reviewed_by: Mapped[Optional["Employee"]] = relationship()
 
 
 class TimelineEvent(Base):
