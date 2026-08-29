@@ -174,3 +174,4 @@ The correct, current workflow against a brand-new database is therefore:
 Writing a real `0000` baseline migration (so `upgrade head` alone works end-to-end
 against a genuinely empty database, the way it should) is a known follow-up — tracked,
 intentionally not done in this change.
+# gridnovabackend
