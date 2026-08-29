@@ -17,3 +17,12 @@ alembic/versions/__pycache__/
 
 # OS
 .DS_Store
+
+# Additional safety entries
+.env.*
+*.sqlite
+.venv_qa/
+*.egg-info/
+dist/
+build/
+.claude/
