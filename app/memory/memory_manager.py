@@ -28,7 +28,9 @@ from app.memory.models import (
     PipelineStage,
     Project,
     Proposal,
+    ProposalInputs,
     ProposalStatus,
+    InputStatus,
     TimelineEvent,
     TimelineEventType,
 )
@@ -595,6 +597,88 @@ class MemoryManager:
         self._db.add(event)
         self._db.flush()
         return event
+
+    # ── Proposal Inputs ────────────────────────────────────────────────────────
+
+    def create_proposal_inputs(
+        self,
+        lead_id: int,
+        performed_by: str,
+        **fields: Any,
+    ) -> ProposalInputs:
+        inputs = ProposalInputs(lead_id=lead_id, status=InputStatus.submitted, **fields)
+        self._db.add(inputs)
+        self._db.flush()
+        self.add_timeline_event(
+            lead_id=lead_id,
+            event_type=TimelineEventType.proposal_inputs_submitted,
+            description="Site assessment submitted for review",
+            created_by=performed_by,
+        )
+        self._audit(
+            "proposal_inputs", str(inputs.id), "created", performed_by,
+            after={"lead_id": lead_id, "status": InputStatus.submitted.value},
+        )
+        return inputs
+
+    def get_proposal_inputs(self, inputs_id: int) -> Optional[ProposalInputs]:
+        return self._db.get(ProposalInputs, inputs_id)
+
+    def list_proposal_inputs(
+        self,
+        status: Optional[InputStatus] = None,
+        lead_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[ProposalInputs], int]:
+        base = select(ProposalInputs)
+        if status is not None:
+            base = base.where(ProposalInputs.status == status)
+        if lead_id is not None:
+            base = base.where(ProposalInputs.lead_id == lead_id)
+
+        total = self._db.execute(
+            select(func.count()).select_from(base.subquery())
+        ).scalar_one()
+
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 200))
+        rows = self._db.execute(
+            base.order_by(ProposalInputs.submitted_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).scalars().all()
+        return list(rows), total
+
+    def review_proposal_inputs(
+        self,
+        inputs_id: int,
+        new_status: InputStatus,
+        performed_by: str,
+        internal_notes: Optional[str] = None,
+        rejection_reason: Optional[str] = None,
+    ) -> ProposalInputs:
+        inputs = self._db.get(ProposalInputs, inputs_id)
+        before = {"status": inputs.status}
+        inputs.status = new_status
+        inputs.reviewed_at = datetime.now(timezone.utc)
+        inputs.reviewed_by_id = performed_by
+        if internal_notes is not None:
+            inputs.internal_notes = internal_notes
+        if rejection_reason is not None:
+            inputs.rejection_reason = rejection_reason
+        self._db.flush()
+        self.add_timeline_event(
+            lead_id=inputs.lead_id,
+            event_type=TimelineEventType.proposal_inputs_reviewed,
+            description=f"Site assessment reviewed: {new_status.value}",
+            created_by=performed_by,
+        )
+        self._audit(
+            "proposal_inputs", str(inputs_id), "reviewed", performed_by,
+            before=before, after={"status": new_status.value},
+        )
+        return inputs
 
     # ── Conversation ───────────────────────────────────────────────────────────
 
