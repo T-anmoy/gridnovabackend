@@ -12,9 +12,9 @@ langchain-core>=0.3.81
 # (major version jump, likely breaking API changes for 0.3.x code).
 # TODO: audit orchestrator compatibility with langchain-core 1.x before upgrading.
 # Do not upgrade past 0.3.x without a dedicated compatibility session.
-langgraph==0.2.60
+langgraph>=1.0.10
 boto3==1.35.84
-weasyprint==62.3
+weasyprint>=68.0
 sentry-sdk[fastapi]==2.19.2
 PyYAML==6.0.2
 httpx==0.27.2
