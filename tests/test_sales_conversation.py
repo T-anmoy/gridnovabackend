@@ -56,7 +56,7 @@ class TestReplyPromptConstraints:
         for stage in ("opening", "understanding", "contact_bridge", "meeting_offer"):
             prompt = llm_client._build_reply_system_prompt(stage, {"capacity_kw": 500}, [], None)
             assert "Never quote a price" in prompt
-            assert "claim something\nhas been sent/approved" in prompt or "sent/approved" in prompt
+            assert "sent or approved" in prompt
 
     def test_price_question_still_gets_no_price_guardrail(self, monkeypatch):
         # Even when the customer directly asks cost, the outgoing system prompt still
@@ -90,7 +90,85 @@ class TestReplyPromptConstraints:
         # actual tone difference needs a real LLM — noted in the summary).
         prompt = llm_client._build_reply_system_prompt("opening", {}, ["name"], None)
         assert "homeowner" in prompt and "industrial" in prompt
-        assert "dial back the playfulness" in prompt
+        assert "in the mood for jokes" in prompt
+
+
+class TestToneCommitments:
+    """The prompt rules that keep Nova from sounding like a chatbot.
+
+    Each was added after watching the live model break it: three stacked questions in
+    one breath, twelve exclamation marks across thirteen replies, and — worst — an
+    example figure from the prompt itself quoted back to a customer whose actual bill
+    was ten times smaller.
+    """
+
+    def _prompt(self, stage="opening"):
+        return llm_client._build_reply_system_prompt(stage, {}, ["name"], None, None)
+
+    def test_one_question_rule_is_stated_as_the_top_rule(self):
+        prompt = self._prompt()
+        assert "THE ONE RULE THAT MATTERS MOST" in prompt
+        assert "Ask ONE question" in prompt
+
+    def test_chatbot_openers_are_banned_by_name(self):
+        prompt = self._prompt()
+        for banned in ("Thanks for sharing that", "That's great to hear",
+                       "I'd be happy to assist", "Just to get a clearer picture"):
+            assert banned in prompt, banned
+
+    def test_performed_enthusiasm_is_curbed(self):
+        assert "Almost no exclamation marks" in self._prompt()
+
+    def test_the_model_is_told_not_to_reuse_example_figures(self):
+        """The live run had Nova tell a customer with a 40,000 bill that "four lakh
+        a month is a serious number" — lifted straight from a prompt example. Every
+        illustrative figure is now a placeholder, and the rule is stated outright."""
+        prompt = self._prompt()
+        assert "NUMBERS BELONG TO THE CONVERSATION" in prompt
+        assert "repeat one to a customer" in prompt
+        assert "<AMOUNT>" in prompt, "example figures must be placeholders, not numbers"
+
+    def test_hospitality_guidance_is_present(self):
+        prompt = self._prompt()
+        assert "HOSPITALITY" in prompt
+        assert "Never pressure" in prompt
+        assert "not now" in prompt
+
+    def test_name_overuse_is_called_out(self):
+        assert "in every message is a" in self._prompt()
+
+    def test_the_rulebook_is_a_cacheable_prefix(self):
+        """Money, not tidiness. OpenAI caches a prompt prefix only from 1024 tokens
+        up, and only on an exact match. With the per-turn context at the TOP the
+        shared prefix was 64 tokens and nothing was ever cached; measured against the
+        live model, moving it to the bottom took caching from 0% to ~49% of all input
+        tokens. Anything that reintroduces per-turn text above the rulebook silently
+        doubles the bill for every reply.
+        """
+        a = llm_client._build_reply_system_prompt("opening", {}, ["name"], None, None)
+        b = llm_client._build_reply_system_prompt(
+            "understanding", {"capacity_kw": 50}, ["email"], None, None
+        )
+        shared = 0
+        while shared < min(len(a), len(b)) and a[shared] == b[shared]:
+            shared += 1
+        # Roughly 4 characters per token; the prefix must clear 1024 with room spare.
+        assert shared > 4500, "shared prefix is only ~%s tokens" % (shared // 4)
+        # And the per-turn context must still actually reach the model.
+        assert "CURRENT STAGE: opening" in a
+        assert "STILL NEEDED: name" in a
+        assert a.index("THE ONE RULE") < a.index("CURRENT STAGE:"), (
+            "rules must come before per-turn context, or the prefix stops caching"
+        )
+
+    def test_the_memory_block_stays_below_the_rulebook(self):
+        """Memory varies per customer, so it belongs with the per-turn context. Above
+        the rulebook it would break the cache prefix for every reply."""
+        prompt = llm_client._build_reply_system_prompt(
+            "understanding", {}, ["email"], None, "What YOU should do differently: slow down.",
+        )
+        assert "slow down" in prompt
+        assert prompt.index("THE ONE RULE") < prompt.index("slow down")
 
 
 # ── Warm degraded fallback (no LLM) ──────────────────────────────────────────────

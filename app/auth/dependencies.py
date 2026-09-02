@@ -129,6 +129,12 @@ class AuthenticatedEmployee:
     def can_adjust_pricing(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
+    def can_query_customer_memory(self) -> bool:
+        """Engineers are deliberately excluded: customer memory is full of PII and
+        commercial context, and the Engineer surface elsewhere is limited to
+        technical fields for exactly that reason."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.management)
+
     def can_manage_proposal_inputs(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 

@@ -26,3 +26,5 @@ alembic/versions/__pycache__/
 dist/
 build/
 .claude/
+
+.venv-win/

@@ -145,6 +145,9 @@ async def chat_message(
             except ValueError:
                 raise HTTPException(status_code=422, detail=f"Unknown lead source: {body.source!r}")
             lead = memory.create_lead(customer_id=customer_id, performed_by="website", source=source)
+            # A returning customer keeps their identity — the agent should never ask
+            # a known person for their name again just because this is a new lead.
+            memory.seed_lead_identity_from_history(lead.id, performed_by="website")
             lead_id = lead.id
 
     dedup_key = _dedup_key(customer_id, body.message)

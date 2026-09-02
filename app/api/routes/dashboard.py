@@ -7,7 +7,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,9 +18,14 @@ from sqlalchemy.orm import Session
 from app.agents.sales_agent import QUALIFICATION_FIELDS, _score_from_fields
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
+from app.config import settings
+from app.governance import policy as gov_policy, registry as gov_registry
+from app.memory import reflection
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import EmployeeRole, LeadSource, PipelineStage, ProposalStatus, TimelineEventType
+from app.memory.models import (
+    EmployeeRole, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
+)
 from app.rules.business_rules import evaluate_lead
 from app.scheduling import availability, booking, google_calendar
 from app.notifications.notifier import notifier
@@ -450,6 +455,11 @@ def approve_proposal(
     # this point would mean two threads issuing queries concurrently against it.
     _trigger_pdf_generation(proposal_id, proposal, db, memory)
 
+    reflection.record_proposal_outcome(
+        memory, proposal_id, reflection.OUTCOME_APPROVED, employee.employee_id
+    )
+    db.commit()
+
     notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id}
 
@@ -497,6 +507,11 @@ def manager_sign_off(
     # the background PDF thread starts, don't re-touch `proposal` after.
     _trigger_pdf_generation(proposal_id, proposal, db, memory)
 
+    reflection.record_proposal_outcome(
+        memory, proposal_id, reflection.OUTCOME_SIGNED_OFF, employee.employee_id
+    )
+    db.commit()
+
     notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id, "signoff_by": employee.employee_id}
 
@@ -531,6 +546,12 @@ def request_revision(
         event_type=TimelineEventType.revision_requested,
         description=f"Revision requested: {body.reason}",
         created_by=employee.employee_id,
+    )
+    # The written reason is the best feedback the Proposal Agent ever gets — a human
+    # saying exactly what was wrong with the draft. Kept verbatim, never paraphrased.
+    reflection.record_proposal_outcome(
+        memory, proposal_id, reflection.OUTCOME_REVISION_REQUESTED,
+        employee.employee_id, reason=body.reason,
     )
     db.commit()
     return {"status": "revision_requested", "proposal_id": proposal_id, "reason": body.reason}
@@ -583,6 +604,9 @@ def adjust_pricing(
     # also preserves a capacity-driven signoff requirement, never just the value one.
     collected = dict(lead.collected_fields or {}) if lead else {}
     new_flag = evaluate_lead(collected, total_value=body.new_value).requires_manager_signoff
+    # Captured before the write — the size and direction of the correction is the
+    # lesson, and it is unrecoverable once the row is overwritten.
+    previous_value = proposal.total_value
 
     updated = memory.adjust_proposal_pricing(
         proposal_id=proposal_id,
@@ -596,6 +620,10 @@ def adjust_pricing(
         event_type=TimelineEventType.pricing_adjusted,
         description=f"Pricing adjusted to {body.new_value:,.0f}: {body.reason}",
         created_by=employee.employee_id,
+    )
+    reflection.record_proposal_outcome(
+        memory, proposal_id, reflection.OUTCOME_PRICING_ADJUSTED,
+        employee.employee_id, reason=body.reason, previous_value=previous_value,
     )
     db.commit()
 
@@ -644,6 +672,11 @@ def send_proposal(
 
     ctx = memory.get_lead_context(proposal.lead_id)
     customer = ctx.get("customer")
+    reflection.record_proposal_outcome(
+        memory, proposal_id, reflection.OUTCOME_SENT, employee.employee_id
+    )
+    db.commit()
+
     if customer:
         notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer.email, accept_path=accept_path)
 
@@ -1239,6 +1272,258 @@ def memory_of(db: Session) -> MemoryManager:
 
 
 _PDF_GENERATION_TIMEOUT_SECONDS = 20.0
+
+
+# ── Customer memory ────────────────────────────────────────────────────────────
+
+class MemoryQuestionRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    # Optional: when the question is asked from an open customer record, pass the id
+    # and skip name resolution entirely.
+    customer_id: Optional[int] = None
+
+
+def _assert_may_read_customer_memory(
+    memory: MemoryManager, customer_id: int, employee: AuthenticatedEmployee
+) -> None:
+    """Same scoping as the rest of the Sales-role surface: unassigned leads are fair
+    game, a customer whose every lead belongs to another rep is not. Admin and
+    Management see everything, as they do elsewhere.
+    """
+    if not employee.is_sales:
+        return
+    dossier = memory.get_customer_dossier(customer_id)
+    leads = dossier.get("leads") or []
+    if not leads:
+        return
+    if all(
+        lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id
+        for lead in leads
+    ):
+        raise HTTPException(
+            status_code=403, detail="This customer's leads are assigned to another rep."
+        )
+
+
+@router.post("/memory/ask")
+def ask_customer_memory(
+    body: MemoryQuestionRequest,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Ask a question about a customer and get an answer from stored memory.
+
+    Read-only. The answer is grounded in retrieved records only — whatever is not
+    on file comes back as not on file, never as a guess.
+    """
+    if not employee.can_query_customer_memory():
+        raise HTTPException(status_code=403, detail="Your role cannot query customer memory.")
+
+    memory = MemoryManager(db)
+    if body.customer_id is not None:
+        if not memory.get_customer_dossier(body.customer_id):
+            raise HTTPException(status_code=404, detail="Customer not found")
+        _assert_may_read_customer_memory(memory, body.customer_id, employee)
+
+    result = orchestrator.answer_customer_question(
+        question=body.question,
+        performed_by=employee.employee_id,
+        customer_id=body.customer_id,
+    )
+
+    # A question that resolved by name still has to pass the same scoping check —
+    # otherwise naming a customer would sidestep the id-based check above.
+    resolved_id = result.get("customer_id")
+    if result.get("resolved") and resolved_id and body.customer_id is None:
+        _assert_may_read_customer_memory(memory, resolved_id, employee)
+
+    if result.get("error"):
+        raise HTTPException(status_code=503, detail=result["error"])
+
+    return {
+        "answer": result.get("answer"),
+        "resolved": result.get("resolved", False),
+        "customer_id": resolved_id,
+        "candidates": result.get("candidates", []),
+        "citations": result.get("citations", []),
+        "retrieval_mode": result.get("recall_mode"),
+    }
+
+
+@router.get("/customers/{customer_id}/memory")
+def get_customer_memory(
+    customer_id: int,
+    kind: Optional[str] = Query(None, description="Filter to one memory kind"),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Everything remembered about one customer — the profile, then the raw
+    memories. This is the audit view: what the agent believes and why."""
+    if not employee.can_query_customer_memory():
+        raise HTTPException(status_code=403, detail="Your role cannot query customer memory.")
+
+    memory = MemoryManager(db)
+    dossier = memory.get_customer_dossier(customer_id)
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    _assert_may_read_customer_memory(memory, customer_id, employee)
+
+    kinds = None
+    if kind:
+        try:
+            kinds = (MemoryKind(kind),)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Unknown memory kind: {kind!r}")
+
+    memories = memory.list_customer_memories(customer_id, kinds=kinds, limit=limit)
+    profile = dossier.get("profile")
+    customer = dossier["customer"]
+
+    return {
+        "customer": {
+            "customer_id": customer.id,
+            "name": customer.name,
+            "email": customer.email,
+            "company": customer.company,
+        },
+        "profile": {
+            "summary": profile.summary,
+            "traits": profile.traits or [],
+            "open_questions": profile.open_questions or [],
+            "agent_notes": profile.agent_notes,
+            "next_best_action": profile.next_best_action,
+            "last_reflected_at": profile.last_reflected_at.isoformat() if profile.last_reflected_at else None,
+            "reflection_count": profile.reflection_count,
+        } if profile else None,
+        "memory_count": memory.count_customer_memories(customer_id),
+        "memories": [
+            {
+                "id": m.id,
+                "kind": m.kind.value,
+                "source": m.source.value,
+                "summary": m.summary,
+                "detail": m.detail,
+                "tags": m.tags or [],
+                "salience": m.salience,
+                "lead_id": m.lead_id,
+                "occurred_at": m.occurred_at.isoformat() if m.occurred_at else None,
+                "created_by": m.created_by,
+            }
+            for m in memories
+        ],
+    }
+
+
+@router.post("/leads/{lead_id}/reflect")
+def reflect_on_lead_now(
+    lead_id: int,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Force a reflection on a lead now, instead of waiting for a milestone.
+
+    Synchronous on purpose — the caller asked for it and wants the result, unlike
+    the automatic path where a customer is waiting on a reply.
+    """
+    if not employee.can_query_customer_memory():
+        raise HTTPException(status_code=403, detail="Your role cannot trigger reflection.")
+
+    from app.memory import reflection
+
+    memory = MemoryManager(db)
+    lead = memory.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    _assert_may_read_customer_memory(memory, lead.customer_id, employee)
+
+    result = reflection.reflect_on_lead(
+        memory, lead_id, trigger=reflection.TRIGGER_MANUAL, performed_by=employee.employee_id
+    )
+    db.commit()
+    return result
+
+
+# ── Agent governance ───────────────────────────────────────────────────────────
+
+@router.get("/governance/agents")
+def list_governed_agents(
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """What every AI agent in this system is permitted and forbidden to do.
+
+    Served from the registry the enforcement layer actually reads, so this can never
+    drift from what the agents are really allowed to do — the failure mode of a
+    governance page maintained by hand.
+    """
+    if not employee.can_view_audit_logs():
+        raise HTTPException(status_code=403, detail="Your role cannot view agent governance.")
+
+    return {
+        "agents": [
+            {
+                "id": spec.id,
+                "name": spec.name,
+                "purpose": spec.purpose,
+                "owner": spec.owner,
+                "autonomy": spec.autonomy,
+                "speaks_to": spec.audience,
+                "uses_llm": spec.uses_llm,
+                "enabled": not gov_policy._disabled(spec.id),
+                "capabilities": list(spec.capabilities),
+                "prohibitions": list(spec.prohibitions),
+                "human_gates": list(spec.human_gates),
+                "guardrails": list(spec.guardrails),
+                "module": spec.module,
+            }
+            for spec in gov_registry.all_specs()
+        ],
+        "limits": {
+            "replies_per_lead_per_24h": settings.agent_daily_action_limit_per_lead,
+            "disabled_agents": list(settings.disabled_agents),
+        },
+    }
+
+
+@router.get("/governance/runs")
+def governance_runs(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """How the agents are performing: volume, failures, latency and model spend.
+
+    Every number is derived from the run records the harness writes, so the report
+    and the audit trail cannot disagree — the one thing an operations view of an
+    autonomous system must never do.
+    """
+    if not employee.can_view_audit_logs():
+        raise HTTPException(status_code=403, detail="Your role cannot view agent runs.")
+
+    memory = MemoryManager(db)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    return memory.agent_run_stats(since)
+
+
+@router.get("/governance/activity")
+def governance_activity(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """What the agents have actually been doing, against what they are allowed to do.
+
+    Two counts that matter more than the rest: `denials` (an agent reached for
+    something governance refused) and `guardrail_blocks` (an agent said something
+    that had to be withheld). Both should be near zero; a rising number is the
+    signal to look at, which is the whole reason they are counted separately.
+    """
+    if not employee.can_view_audit_logs():
+        raise HTTPException(status_code=403, detail="Your role cannot view agent governance.")
+
+    memory = MemoryManager(db)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    return memory.governance_activity(since)
 
 
 def _start_pdf_generation(generate_fn, proposal_id: int) -> None:

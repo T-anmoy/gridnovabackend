@@ -27,6 +27,7 @@ os.environ.setdefault("SLACK_WEBHOOK_URL", "")
 from app.main import app as fastapi_app
 from app.memory.db import Base, get_db
 from app.memory.memory_manager import MemoryManager
+from app.memory import reflection as app_reflection
 import app.memory.models  # noqa: F401 — ensure all models register on Base
 
 
@@ -63,6 +64,16 @@ def _isolated_db(monkeypatch):
     monkeypatch.setattr(
         "app.api.routes.dashboard._start_pdf_generation",
         lambda generate_fn, proposal_id: generate_fn(),
+    )
+
+    # Same reasoning for milestone reflection: it normally runs on a background
+    # thread with its own session, which isn't safe against the shared test
+    # connection. Run it inline instead, so tests see the memories it writes.
+    monkeypatch.setattr(
+        "app.memory.reflection.start_reflection",
+        lambda lead_id, trigger, performed_by="sales_agent": (
+            app_reflection._reflect_with_own_session(lead_id, trigger, performed_by)
+        ),
     )
 
     def _override_get_db():

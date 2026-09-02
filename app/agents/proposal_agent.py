@@ -10,6 +10,13 @@ explicit, authenticated, human-triggered operation via the dashboard API.
 Proposal content is composed deterministically by app.proposals.content_engine
 from config/proposal_content.yaml — no LLM is involved in selecting sections or
 pricing.
+
+MEMORY
+This agent remembers what humans did with its drafts (approved, sent back with a
+reason, repriced, accepted) and reads that back on the next draft. It stays
+deterministic throughout: memory is attached as advisory `drafting_notes` for the
+reviewing employee AFTER pricing is settled, and can never move a price or change
+which sections are selected.
 """
 from __future__ import annotations
 
@@ -17,7 +24,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.memory.models import PipelineStage
-from app.proposals import content_engine
+from app.proposals import content_engine, drafting_notes
 from app.rules.business_rules import evaluate_lead
 
 if TYPE_CHECKING:
@@ -39,6 +46,7 @@ class ProposalAgent:
         lead_id: int,
         performed_by: str,
     ) -> dict:
+        # Authorisation happens in the harness before this method is entered.
         cfg = content_engine.load_content_config()
         ctx = memory.get_lead_context(lead_id)
         lead = ctx.get("lead")
@@ -67,6 +75,22 @@ class ProposalAgent:
         content["total_value"] = total_value
         content["lead_id"] = lead_id
 
+        # What happened to this customer's earlier proposals, and what the Sales
+        # Agent learned about them in conversation. Advisory only: it is attached
+        # AFTER composition and pricing are already settled, so it cannot reach back
+        # and change either — see app/proposals/drafting_notes.py for why that
+        # boundary is absolute. Internal too: the PDF renders named keys and the
+        # sections list, never this.
+        notes = drafting_notes.build_drafting_notes(
+            memory=memory,
+            customer_id=lead.customer_id,
+            lead_id=lead_id,
+            total_value=total_value,
+            used_fallback=used_fallback,
+        )
+        if notes:
+            content["drafting_notes"] = notes
+
         proposal = memory.create_proposal_draft(
             lead_id=lead_id,
             content=content,
@@ -81,6 +105,14 @@ class ProposalAgent:
         # Sales-role scoping (own leads, own proposals) actually resolve to real
         # rows instead of everything staying unassigned forever.
         memory.assign_lead_if_unassigned(lead_id, employee_id=performed_by, performed_by=performed_by)
+
+        # The draft is itself an episode worth remembering — without it, a later
+        # "what have we sent this customer" has outcomes with no starting point.
+        from app.memory import reflection
+
+        reflection.record_proposal_outcome(
+            memory, proposal.id, reflection.OUTCOME_DRAFTED, performed_by
+        )
 
         # Advance pipeline stage
         memory.update_lead_fields(

@@ -207,6 +207,10 @@ class Customer(Base):
     projects: Mapped[list["Project"]] = relationship(back_populates="customer")
     leads: Mapped[list["Lead"]] = relationship(back_populates="customer")
     messages: Mapped[list["ConversationMessage"]] = relationship(back_populates="customer")
+    memories: Mapped[list["CustomerMemory"]] = relationship(back_populates="customer")
+    profile: Mapped[Optional["CustomerProfile"]] = relationship(
+        back_populates="customer", uselist=False
+    )
 
 
 class Project(Base):
@@ -447,3 +451,105 @@ class Meeting(Base):
 
     lead: Mapped["Lead"] = relationship(back_populates="meetings")
     employee: Mapped["Employee"] = relationship(back_populates="meetings")
+
+
+# ── Customer memory (episodic + self-reflection) ───────────────────────────────
+
+class MemoryKind(str, enum.Enum):
+    """What sort of thing a remembered item is.
+
+    `episode` is what happened; the rest are what the agent concluded from it.
+    Keeping them apart matters at recall time — a question about facts should not
+    be answered out of the agent's own self-critique.
+    """
+    episode = "episode"          # something that happened in the conversation
+    preference = "preference"    # a durable customer preference or constraint
+    objection = "objection"      # a concern, hesitation or blocker they raised
+    commitment = "commitment"    # something either side said they would do
+    outcome = "outcome"          # what humans did with the agent's work (approved,
+                                 # revised, repriced, sent, accepted) — the Proposal
+                                 # Agent's feedback signal, and unlike the rest it is
+                                 # recorded deterministically from a real event
+    insight = "insight"          # the agent's reflection on how the lead is going
+    self_critique = "self_critique"  # the agent's reflection on its OWN handling
+
+
+class MemorySource(str, enum.Enum):
+    reflection = "reflection"    # written by the reflection engine
+    system = "system"            # written by deterministic code (milestones)
+    employee = "employee"        # written by a human in the dashboard
+
+
+class CustomerMemory(Base):
+    """One remembered item about one customer.
+
+    This is the episodic store proper: durable, retrievable, and independent of
+    the Sales Agent's short conversation window. Rows are append-only — a memory
+    is never rewritten, so the record of what the agent believed and when stays
+    intact.
+    """
+    __tablename__ = "customer_memories"
+    __table_args__ = (
+        Index("ix_customer_memories_customer", "customer_id", "created_at"),
+        Index("ix_customer_memories_lead", "lead_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    lead_id: Mapped[Optional[int]] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    kind: Mapped[MemoryKind] = mapped_column(SAEnum(MemoryKind), nullable=False)
+    source: Mapped[MemorySource] = mapped_column(
+        SAEnum(MemorySource), nullable=False, default=MemorySource.reflection
+    )
+    # One-line statement of the memory — this is what recall shows and cites.
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional fuller text, including the customer's own words where they matter.
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Lowercased keywords, used by the keyword retrieval path.
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    # 1 (trivia) to 5 (decisive). Ranks recall when many memories match.
+    salience: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # When the thing happened, which is not always when it was recorded — a
+    # reflection run on Friday can record an episode from Tuesday.
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_by: Mapped[str] = mapped_column(String, nullable=False, default="sales_agent")
+    # Populated only when semantic search is enabled; the keyword path ignores it.
+    embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    embedding_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    customer: Mapped["Customer"] = relationship(back_populates="memories")
+
+
+class CustomerProfile(Base):
+    """The agent's current, rewritten-in-place view of one customer.
+
+    Where CustomerMemory is append-only history, this is the living summary: what
+    we believe now, what we still don't know, and what the agent thinks it should
+    do differently next time. Exactly one row per customer.
+    """
+    __tablename__ = "customer_profiles"
+
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id"), primary_key=True
+    )
+    # Rolling narrative — who this customer is and what they are trying to do.
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Stable characteristics inferred over time (decision style, priorities…).
+    traits: Mapped[list] = mapped_column(JSON, default=list)
+    # What the agent still hasn't learned — drives what it asks next.
+    open_questions: Mapped[list] = mapped_column(JSON, default=list)
+    # SELF-REFLECTION: what the agent judges it handled poorly, and what it should
+    # do differently. Deliberately separate from everything above, which is about
+    # the customer rather than about the agent.
+    agent_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    next_best_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_reflected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reflection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # How far the conversation had got at the last reflection, so a re-run only
+    # considers what is genuinely new.
+    last_reflected_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    customer: Mapped["Customer"] = relationship(back_populates="profile")

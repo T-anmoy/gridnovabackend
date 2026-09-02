@@ -18,6 +18,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.memory import reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import PipelineStage
 
@@ -45,6 +46,7 @@ def check_stale_leads(db: Session, now: Optional[datetime] = None) -> dict:
 
     memory = MemoryManager(db)
     counts = {"lead_stale_48h": 0, "lead_stale_5d": 0, "checked": 0}
+    newly_quiet: list[int] = []
 
     for lead in memory.list_stale_candidate_leads(STALE_ELIGIBLE_STAGES):
         counts["checked"] += 1
@@ -71,6 +73,23 @@ def check_stale_leads(db: Session, now: Optional[datetime] = None) -> dict:
             })
             memory.mark_stale_notified(lead.id, now, threshold=fired)
             counts[fired] += 1
+            newly_quiet.append(lead.id)
 
     db.commit()
+
+    # A lead going quiet is the third reflection milestone: the conversation is
+    # over for now, so this is the moment to write down what it was about. Fired
+    # after the commit, and only on the run that first notices — mark_stale_notified
+    # above is what stops the same quiet period reflecting twice.
+    for lead_id in newly_quiet:
+        try:
+            reflection.reflect_on_lead(
+                MemoryManager(db), lead_id,
+                trigger=reflection.TRIGGER_LEAD_QUIET, performed_by="stale_lead_job",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Reflection on quiet lead %s failed", lead_id)
+
     return counts

@@ -117,7 +117,368 @@ Employee → POST /api/v1/dashboard/proposals/draft
 POST /api/v1/dashboard/proposals/{id}/approve          (Sales/Admin, standard)
 POST /api/v1/dashboard/proposals/{id}/manager-sign-off (Management/Admin, high-value)
 POST /api/v1/dashboard/proposals/{id}/send             (Sales/Admin, after approval)
+
+Employee → POST /api/v1/dashboard/memory/ask
+              └─ Orchestrator → Memory Agent (retrieve, then answer from records)
+                                      └─ MemoryManager
 ```
+
+## How Nova talks
+
+The prompt is the product here, so it is treated as one. Measured over thirteen
+replies across three scenarios (homeowner, industrial, a customer burned by a
+previous vendor), before and after a rewrite:
+
+| | Before | After |
+|---|---|---|
+| Replies stacking more than one question | 3 / 13 | **0** |
+| Exclamation marks | 12 | **0** |
+| Chatbot openers ("Thanks for sharing that!") | 3 | 1 |
+| Median reply length | 39 words | **29** |
+
+What changed, in order of how much it mattered:
+
+- **One question. Not two.** Stacking questions is the fastest way to feel like a
+  form, and people answer only the last one. It is now the first rule in the prompt,
+  with the reason attached.
+- **Banned openers, by name.** "Thanks for sharing that", "That's great to hear",
+  "Great!", "Perfect!", "Just to get a clearer picture" — each one a chatbot tell.
+  The replacement is to react to the specific thing the person said.
+- **Almost no exclamation marks.** Enthusiasm you perform reads as false; interest
+  you show by asking a good question reads as real.
+- **Use their name once, not every message.** "Thanks, Meera!" in every reply is a
+  salesperson's tic, not warmth.
+- **Hospitality:** courteous and unhurried, never pressuring, and easy to say "not
+  now" to. Hesitation is taken seriously rather than probed or brushed past with
+  optimism.
+
+Two bugs the live run exposed, both now fixed and regression-tested:
+
+**Nova quoted a figure out of its own prompt.** A customer whose bill was 40,000 was
+told "four lakh a month is a serious number" — lifted verbatim from an example. Every
+illustrative figure in the prompt is now a placeholder, and the rule is stated
+outright: the only numbers Nova may say are ones from the conversation.
+
+**The money guardrail only understood digits.** "We can do this for about eight lakh"
+— an invented price in words — passed every check. Amounts are now normalised to
+their value, so "3 lakh", "300000" and "three lakh" are one number, and a percentage
+can never justify a rupee amount of the same digits.
+
+## What a conversation costs
+
+Measured against the live model, five customer turns plus one reflection and one
+recall — fourteen calls in total:
+
+| Operation | Calls | Prompt | Completion |
+|---|---|---|---|
+| generate_reply | 5 | 8,437 | 154 |
+| extract_fields | 5 | 1,300 | 223 |
+| answer_from_memory | 1 | 721 | 14 |
+| extract_meeting_signal | 2 | 612 | 23 |
+| reflect | 1 | 598 | 349 |
+
+**94% of all tokens are prompt tokens**, and the reply prompt alone is ~1,500 of them
+resent on every reply. That is the shape to optimise, not the completions.
+
+**Prompt caching is what makes it cheap.** OpenAI caches a prompt prefix from 1024
+tokens up, on an exact match. The per-turn context (`CURRENT STAGE`, `ALREADY KNOWN`,
+the memory block) used to sit at the TOP of the prompt, which put the shared prefix at
+64 tokens and cached nothing at all. Moving it below the rulebook — which is now a
+module constant so it is byte-identical every call — took caching from **0% to ~49%
+of all input tokens**, and the cost of a five-turn conversation from $0.0023 to
+**$0.0018**, about **$1.78 per 1,000 leads**.
+
+There is a regression test for this. Anything that reintroduces per-turn text above
+the rulebook silently doubles the bill for every reply, and it is not the kind of
+mistake that shows up in behaviour.
+
+## Model calls only when there is something to decide
+
+The Sales Agent used to make three model calls on every turn regardless of what the
+customer said. `app/agents/need.py` gates the two optional ones behind deterministic
+checks, so a call is bought only when the agent could actually act on the answer.
+
+| Turn | Calls | Skipped |
+|---|---|---|
+| "hello, I'm looking at solar for our factory" | 2 | 1 |
+| "ok thanks" | **1** | 2 |
+| "rooftop please, about 50 kW to start" | 3 | 0 |
+| "can we get on a call this week?" | 3 | 0 |
+
+Measured over a seven-turn conversation against gpt-4o-mini: **15 calls instead of
+21, a 29% saving**, with latency on the cheapest turns dropping from ~2.5s to 1.3s.
+
+- **Field extraction** is skipped only for a short message made entirely of
+  acknowledgements, with no digits and no email. "ok thanks" has nothing to extract;
+  "ok, it's 50 kW" does.
+- **The meeting signal** is skipped unless slots are already pending, the stage is
+  meeting_offer, or the message mentions meeting, calling or visiting. Pending slots
+  force the call regardless of wording, because a bare "yes" is a customer picking a
+  slot and contains no scheduling word at all.
+- **The NeMo rail** is skipped once a deterministic check has already blocked the
+  reply. A second opinion that cannot change the outcome is a bill, not a control.
+
+Every gate is biased the same way: **when in doubt, call the model.** A wasted call
+costs a fraction of a cent; a missed meeting request costs a customer, and a missed
+field means asking someone twice for something they already told us. Skips are
+counted on the run and reported per agent, so the saving is visible rather than an
+invisible optimisation nobody can verify.
+
+## Agent harness
+
+Every agent runs inside one execution wrapper, `app/agents/harness.py`. Before it,
+each agent was invoked ad-hoc: every call site repeated its own try/except,
+governance was called separately inside each agent (and could simply be forgotten in
+a fourth one), a turn had no identity you could trace, and nothing measured how long
+an agent took or how many model calls it made.
+
+```
+harness.run(agent_id, action, fn, memory=..., lead_id=..., on_denied=..., on_error=...)
+  -> AgentRun(run_id, code, result, error, governance_code,
+              duration_ms, llm_calls, estimated_cost_usd, slow)
+```
+
+Every run gets: **governance** applied here rather than trusted to each agent; a
+**run id** stamped into every log line for that turn; **timing**, with a warning past
+`AGENT_SLOW_RUN_MS`; **model-call and cost accounting**; **exception containment**, so
+a raised agent becomes a failed run with a caller-supplied fallback rather than an
+exception escaping into a customer conversation; and a **durable record** in the
+audit trail.
+
+```
+GET /api/v1/dashboard/governance/runs   (?days=7 - volume, failures, latency, spend)
+```
+
+```
+5c54880505b6  memory_agent   answer_employee_question ok    3.3ms  llm=1  $0.0100
+697a04e16693  sales_agent    reply_to_customer        ok    7.1ms  llm=3  $0.0300
+```
+
+Two things it deliberately does **not** do, because doing them badly would be worse
+than not doing them:
+
+- **No wall-clock timeout on the agent body.** A Python thread cannot be killed, and
+  each agent holds a database session that is not safe to use from another thread, so
+  a "timeout" here would return early while the work carried on underneath. Time is
+  bounded where it is actually spent: `LLM_REQUEST_TIMEOUT_SECONDS` on the model
+  client. What the harness measures, it measures honestly.
+- **No retries.** A retried customer reply is a second message to a real person and a
+  retried booking is a second calendar entry. The model client's own transport-level
+  retries (`LLM_MAX_RETRIES`) cover the transient case, where repeating is safe.
+
+Denied and failed runs are recorded on their own session, because the caller is about
+to roll back and those are the runs most worth having a record of.
+
+## Agent governance
+
+`app/governance/registry.py` declares, as data, what each agent is permitted and
+forbidden to do. `app/governance/policy.py` enforces that declaration at the moment
+an action is attempted, so a prohibition is a runtime denial rather than a comment
+someone might not read.
+
+| Agent | Autonomy | Speaks to | LLM | Never |
+|---|---|---|---|---|
+| Sales Agent | autonomous | customers | yes | price, draft, approve, send |
+| Proposal Agent | human-triggered | internal only | **no** | send, approve, reply to a customer, choose a price |
+| Memory Agent | read-only | employees | yes | reply to a customer, write anything |
+
+Four checks run before any governed action: is the agent switched on, is the action
+in its capabilities, is it explicitly prohibited, and is the agent inside its budget
+for this lead. Denials are written to the audit log against the agent, and an attempt
+at something *prohibited* also raises an internal notification -- an agent reaching
+for a forbidden action is not routine.
+
+**Kill switch.** `DISABLED_AGENTS=["sales_agent"]` stops an agent acting through
+configuration, with no deploy. A stood-down Sales Agent still logs the customer's
+message and answers with a plain handoff ("let me bring someone from our team in"),
+notifies the team, and leaves the lead untouched -- no extraction, no scoring, no
+stage change. An agent that has been switched off should not still be quietly
+writing to the record.
+
+**Runaway protection.** `AGENT_DAILY_ACTION_LIMIT_PER_LEAD` (default 60) caps agent
+replies to one lead per 24h, then hands the conversation to a person. It applies only
+to customer replies: drafting and recall are human-triggered, so a person is already
+the rate limit there.
+
+**Reporting.**
+
+```
+GET /api/v1/dashboard/governance/agents     (registry + limits + which are enabled)
+GET /api/v1/dashboard/governance/activity   (?days=7 - denials, guardrail blocks)
+```
+
+Both are Admin/Management only, and both are served from the same registry the
+enforcement layer reads, so the page cannot drift from what the agents may actually
+do -- the usual failure of a governance document maintained by hand.
+
+**The invariants are now tested, not just written down.** `tests/test_governance.py`
+parses the agent modules and asserts they do not import each other, that the Proposal
+Agent has no reference to sending, that only the Sales Agent writes customer-facing
+messages, and that the business rules and content engine never reach an LLM. Those
+were the rules most likely to be broken by a future change made in good faith,
+precisely because nothing was checking them.
+
+Governance never crashes what it governs: if a check errors it allows the action and
+logs loudly. The deterministic business rules, the guardrails and the human approval
+gates are unchanged either way, and they are what actually protect the commercial
+outcome.
+
+## Sales Agent guardrails
+
+Two layers. The first is deterministic and always on; the second is semantic,
+optional, and additive.
+
+### Layer 1: deterministic checks (always on)
+
+The reply prompt tells Nova never to quote a price, never to invent a meeting time,
+and never to claim something was approved or sent. Those are instructions to a model.
+`app/agents/guardrails.py` enforces the same rules in code, on the way out, because a
+prompt instruction is not a control -- the same reasoning that already validates a
+confirmed meeting slot against the offered list.
+
+The rule that makes it precise: **the agent may repeat a number the customer gave it,
+and may not introduce one.** A customer saying "our bill is 3 lakh" and Nova replying
+"3 lakh a month is a lot to carry" is fine; "we can do this for 8 lakh" is a
+commercial commitment nobody authorised. Only the customer's own words, the fields on
+file, and slots from a real calendar query count as justification -- never Nova's own
+earlier replies, or one invented figure would license itself forever.
+
+| Check | Blocks? |
+|---|---|
+| A money figure or percentage the conversation cannot justify | yes |
+| A meeting time or day that was never actually free | yes |
+| A completed or guaranteed claim ("has been approved", "I guarantee") | yes |
+| System-prompt markers, employee ids, or a stored memory recited verbatim | yes |
+| Empty reply | yes |
+| Runaway length | no -- trimmed at a sentence |
+| Three or more stacked questions | no -- recorded only |
+
+A blocking violation swaps in the deterministic, stage-aware fallback the LLM client
+already uses when a call fails. Redacting mid-sentence would leave a worse message
+than replacing it. Every decision is written to the audit log against the lead with
+the original text kept, so a model that starts drifting is visible rather than
+silently corrected -- and a blocked reply also fires an internal notification.
+
+Inbound, `detect_injection` flags attempts to talk the agent out of its instructions.
+Detection only: the message is answered normally and never edited, because refusing to
+answer a real customer who phrased something oddly is a worse failure than the attempt
+itself. The output checks are what actually contain the damage.
+
+### Layer 2: NeMo Guardrails (semantic, optional)
+
+The deterministic checks above catch what can be enumerated. They cannot catch
+internal information that has been *paraphrased* past every pattern:
+
+| Reply | Deterministic | + NeMo |
+|---|---|---|
+| "Anything above 5 lakh needs manager sign-off" | blocked (money) | blocked |
+| "Rajesh from our Surat team handles accounts like yours" | **passes** | blocked |
+| "We did a similar 200 kW job for a textile mill down the road" | **passes** | blocked |
+| "3 lakh a month is a lot to carry. What is the roof like?" | passes | passes |
+
+`app/agents/nemo_guard.py` runs a NeMo Guardrails output rail over each generated
+reply, judged against `app/agents/nemo/output_policy.md` -- a plain-language
+disclosure policy the sales team can read and amend without touching code. It covers
+pricing internals, approval machinery, named employees, other customers, internal
+record-keeping, and system internals; it explicitly permits repeating a figure the
+customer gave and offering a real meeting time.
+
+It is **layered on top of, never in place of** the deterministic checks. An allow
+verdict from the model cannot rescue a reply the deterministic layer already
+rejected, and turning this off returns exactly the guarantees of Layer 1.
+
+**Off by default**, because it is an extra LLM call on every customer reply -- real
+latency and spend, and probabilistic, so it will occasionally miss and occasionally
+misfire. That is also why the policy is written to prefer allowing an ambiguous
+message. Set `NEMO_GUARDRAILS_ENABLED=true` (needs `LLM_API_KEY`) to turn it on; in
+mock mode it stays off regardless, because there is no model to call.
+
+On error or timeout it **fails open** -- the reply is sent, the deterministic checks
+having already run -- because an outage would otherwise silence every conversation.
+`NEMO_GUARDRAILS_FAIL_CLOSED=true` inverts that for a deployment that would rather
+lose the reply than risk a leak.
+
+Deployment note: `nemoguardrails` weighs roughly 400MB installed, pulling
+`onnxruntime`, `numpy` and `huggingface-hub` through `fastembed`. Verified not to
+downgrade `langchain-core` below the CVE-2025-68664 pin. Loading the rail needs no
+model download and takes ~3s, once, lazily on the first reply that uses it. If image
+size matters more than this rail, drop the line from `requirements.txt` -- the code
+degrades to Layer 1 on its own when the package is absent.
+
+## Customer memory (episodic + self-reflection)
+
+The Sales Agent only sees the last few messages of a conversation. Anything older
+falls out of that window, and unless it landed in one of the twelve structured
+qualification fields it used to be lost. Customer memory is what keeps the rest.
+
+**How a memory gets written.** At a milestone — qualification completes, a meeting
+is booked, a lead goes quiet, or a long conversation crosses
+`MEMORY_REFLECT_EVERY_N_MESSAGES` — the agent reflects on the conversation and
+writes what is worth keeping into `customer_memories` (episodes, preferences,
+objections, commitments) and rewrites `customer_profiles` (a rolling summary, open
+questions, and the agent's own notes on how it handled the lead). That is one to
+three LLM calls over a lead's whole life, run on a background thread after the
+commit, so a customer's reply never waits on it.
+
+**How a memory changes the next conversation.** Reflection alone would only give
+you a record. On every later turn the Sales Agent loads that customer's profile and
+their most relevant memories — ranked against what the customer just said — and
+hands them to the reply generator, with the agent's own self-critique restated as a
+directive ("what YOU should do differently"). The prompt tells it not to re-ask what
+memory already answers, to move toward the recorded next step, and to treat the
+whole block as data rather than instructions. A returning customer's new lead also
+inherits their identity (name, email, phone, company) but never the old project's
+numbers, so the stage machine sees a known person with an unknown project instead
+of a blank slate.
+
+**The Proposal Agent's half is deterministic.** The Sales Agent has to judge its own
+conversation, which is why its reflection needs a model. The Proposal Agent does not:
+every judgement on its work is a structured human action — approved, sent back with a
+written reason, repriced from X to Y, accepted. So `record_proposal_outcome` writes
+those as `outcome` memories with no LLM involved, and turns the two that actually
+teach something (a revision request, a downward reprice) into lessons. A revision
+reason is stored verbatim; paraphrasing the clearest feedback the agent ever gets
+would be the one place a model could distort it.
+
+On the next draft, `app/proposals/drafting_notes.py` reads those back into
+`proposal.content["drafting_notes"]`: prior outcomes, lessons, what the Sales Agent
+learned about the customer in conversation, and warnings when the tiered rate has
+produced a price this customer already pushed back on. **It cannot move the price.**
+Notes are attached after composition and pricing are settled, so sections and value
+stay reproducible from `proposal_content.yaml` alone — memory advises the reviewing
+employee, who has `adjust-pricing` for exactly this. The notes are internal: the PDF
+renders named keys and the `sections` list, never this block.
+
+Proposal lessons live on `customer_memories` only and never touch
+`CustomerProfile.agent_notes`, which belongs to the Sales Agent — two agents
+rewriting one field would silently clobber each other. That is also the one place
+the two agents' memory meets: neither calls the other, they just read the same rows.
+
+**How a memory gets found.** Keyword retrieval is the default and needs nothing
+extra: term overlap, weighted by how important the memory was judged to be and how
+recent it is. Setting `MEMORY_SEMANTIC_SEARCH=true` additionally embeds every new
+memory and blends cosine similarity into the same ranking. The two coexist —
+memories written before the flag was turned on keep working on keywords, so
+switching it on strands nothing.
+
+```
+GET  /api/v1/dashboard/customers/{id}/memory  (profile + every memory; audit view)
+      ?kind=outcome                           (just what happened to the drafts)
+POST /api/v1/dashboard/memory/ask             ({"question": "...", "customer_id": optional})
+POST /api/v1/dashboard/leads/{id}/reflect     (force a reflection now)
+```
+
+Three rules this feature does not bend:
+
+- **Employees only.** The Memory Agent can read every customer's history, so it is
+  never wired into the public chat endpoint. Engineers are excluded too — memory is
+  full of PII and commercial context. Sales sees its own customers, matching the
+  scoping on the rest of the Sales surface.
+- **Grounded answers only.** The answer comes from retrieved records and cites them.
+  What is not on file comes back as not on file, never as a plausible guess.
+- **Opinion is labelled.** `insight` and `self_critique` memories are the assistant's
+  own conclusions, and recall marks them as such so nobody reads them as something
+  the customer said.
 
 ## Non-negotiable principles
 
@@ -128,6 +489,16 @@ POST /api/v1/dashboard/proposals/{id}/send             (Sales/Admin, after appro
    a proposal without an authenticated employee explicitly triggering it.
 5. The AI drafts. It never decides — lead scoring, approval thresholds, and
    all business-critical judgments are deterministic functions, never LLM prompts.
+6. Memory is an enhancement, never a dependency — a failed reflection, a failed
+   recall or an unreachable embedding API degrades the wording of a reply and
+   nothing else. No lead, proposal or customer reply depends on it succeeding.
+7. What an agent may do is declared in one place and enforced at the point of
+   action — a prohibition is a runtime denial, not a docstring.
+8. A prompt instruction is not a control — anything the agent must never say is
+   checked in code on the way out, and every block is audited.
+9. Memory shapes wording, never decisions — recall reaches the reply prompt and
+   stops there. The conversation stage, qualification and pricing stay pure
+   functions of the lead's own collected fields.
 
 ## Deployment (Google Cloud Run + Cloud SQL)
 
