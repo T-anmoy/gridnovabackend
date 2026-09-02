@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.memory.models import (
@@ -17,6 +17,8 @@ from app.memory.models import (
     Channel,
     ConversationMessage,
     Customer,
+    CustomerMemory,
+    CustomerProfile,
     Employee,
     EmployeeRole,
     Lead,
@@ -24,6 +26,8 @@ from app.memory.models import (
     LeadSource,
     Meeting,
     MeetingStatus,
+    MemoryKind,
+    MemorySource,
     MessageRole,
     PipelineStage,
     Project,
@@ -262,6 +266,48 @@ class MemoryManager:
             created_by=performed_by,
         )
         return lead
+
+    def seed_lead_identity_from_history(self, lead_id: int, performed_by: str = "website") -> list[str]:
+        """Carry a returning customer's identity onto a brand-new lead.
+
+        Only identity fields — name, email, phone, company. Those describe the
+        PERSON and stay true across inquiries. Project fields (capacity, location,
+        project_type, budget, timeline) are deliberately NOT carried over: a second
+        inquiry is usually a different project, and inheriting last year's 150 kW
+        would quietly qualify a lead nobody has actually qualified.
+
+        Without this, memory and the conversation stage contradict each other on a
+        returning customer — the stage machine sees an empty lead and drives the
+        agent to ask for a name that its own memory already contains. Returns the
+        field names it seeded.
+        """
+        lead = self._db.get(Lead, lead_id)
+        if not lead or (lead.collected_fields or {}):
+            return []
+
+        customer = self._db.get(Customer, lead.customer_id)
+        if not customer or is_placeholder_email(customer.email):
+            return []
+
+        seeded = {}
+        if customer.name:
+            seeded["name"] = customer.name
+        if customer.email:
+            seeded["email"] = customer.email
+        if customer.phone:
+            seeded["phone"] = customer.phone
+        if customer.company:
+            seeded["company"] = customer.company
+        if not seeded:
+            return []
+
+        lead.collected_fields = seeded
+        self._db.flush()
+        self._audit(
+            "lead", str(lead_id), "identity_seeded_from_history", performed_by,
+            after={"fields": list(seeded)},
+        )
+        return list(seeded)
 
     def get_open_lead_for_customer(self, customer_id: int) -> Optional[Lead]:
         """Most recently created lead for this customer that hasn't reached a
@@ -731,6 +777,414 @@ class MemoryManager:
             "proposals": proposals,
             "timeline": timeline,
             "messages": messages,
+        }
+
+    # ── Customer memory (episodic + reflection) ────────────────────────────────
+
+    def record_agent_run(
+        self,
+        summary: dict,
+        lead_id: Optional[int] = None,
+        customer_id: Optional[int] = None,
+    ) -> None:
+        """Write one harness run to the audit trail.
+
+        Entity type "agent_run" rather than "agent": a run is one execution with
+        timing and cost, while an "agent" row is a governance decision. Keeping them
+        apart means "how are the agents performing" and "what were they refused" stay
+        two separate questions with two separate answers.
+        """
+        self._audit(
+            "agent_run", summary.get("run_id", "unknown"),
+            f"{summary.get('agent')}.{summary.get('action')}",
+            performed_by=summary.get("agent", "unknown"),
+            after={**summary, "lead_id": lead_id, "customer_id": customer_id},
+        )
+
+    def agent_run_stats(self, since: datetime) -> dict:
+        """Per-agent run health since a point in time: volume, failures, latency and
+        model spend. Read from the same audit rows the harness writes, so the numbers
+        cannot disagree with the record."""
+        rows = list(
+            self._db.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "agent_run",
+                    AuditLog.created_at >= since,
+                )
+            ).scalars()
+        )
+
+        per_agent: dict = {}
+        for entry in rows:
+            payload = entry.after_value or {}
+            agent = payload.get("agent", "unknown")
+            bucket = per_agent.setdefault(agent, {
+                "runs": 0, "ok": 0, "denied": 0, "failed": 0, "slow": 0,
+                "llm_calls": 0, "estimated_cost_usd": 0.0, "_durations": [],
+            })
+            bucket["runs"] += 1
+            code = payload.get("code", "ok")
+            bucket[code] = bucket.get(code, 0) + 1
+            if payload.get("slow"):
+                bucket["slow"] += 1
+            bucket["llm_calls"] += int(payload.get("llm_calls") or 0)
+            bucket["estimated_cost_usd"] += float(payload.get("estimated_cost_usd") or 0)
+            bucket["_durations"].append(float(payload.get("duration_ms") or 0))
+
+        for bucket in per_agent.values():
+            durations = sorted(bucket.pop("_durations"))
+            bucket["estimated_cost_usd"] = round(bucket["estimated_cost_usd"], 6)
+            if durations:
+                bucket["median_ms"] = round(durations[len(durations) // 2], 1)
+                # p95 by nearest rank — honest on small samples, where an
+                # interpolated percentile would imply precision that isn't there.
+                bucket["p95_ms"] = round(durations[min(len(durations) - 1,
+                                                       int(len(durations) * 0.95))], 1)
+                bucket["slowest_ms"] = round(durations[-1], 1)
+
+        return {
+            "since": since.isoformat(),
+            "total_runs": len(rows),
+            "by_agent": per_agent,
+        }
+
+    def governance_activity(self, since: datetime) -> dict:
+        """Aggregate what the agents did since a point in time, from the audit trail.
+
+        Built by walking the agent and lead audit rows rather than a purpose-built
+        counter table: the audit log is already the record of truth, and a separate
+        counter could disagree with it, which is the one thing a governance report
+        must never do.
+        """
+        rows = list(
+            self._db.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type.in_(("agent", "lead")),
+                    AuditLog.created_at >= since,
+                )
+            ).scalars()
+        )
+
+        per_agent: dict = {}
+        for entry in rows:
+            if entry.entity_type != "agent":
+                continue
+            payload = entry.after_value or {}
+            bucket = per_agent.setdefault(
+                entry.entity_id,
+                {"allowed": 0, "denied": 0, "denials_by_code": {}, "actions": {}},
+            )
+            action = payload.get("action", entry.action)
+            bucket["actions"][action] = bucket["actions"].get(action, 0) + 1
+            if payload.get("allowed"):
+                bucket["allowed"] += 1
+            else:
+                bucket["denied"] += 1
+                code = payload.get("code", "unknown")
+                bucket["denials_by_code"][code] = bucket["denials_by_code"].get(code, 0) + 1
+
+        blocked = sum(1 for e in rows if e.action == "reply_blocked_by_guardrail")
+        flagged = sum(1 for e in rows if e.action == "reply_flagged_by_guardrail")
+        messages = int(
+            self._db.execute(
+                select(func.count(ConversationMessage.id)).where(
+                    ConversationMessage.role == MessageRole.agent,
+                    ConversationMessage.created_at >= since,
+                )
+            ).scalar_one_or_none() or 0
+        )
+
+        return {
+            "since": since.isoformat(),
+            "agent_messages_sent": messages,
+            "guardrail_blocks": blocked,
+            "guardrail_flags": flagged,
+            "governance_denials": sum(a["denied"] for a in per_agent.values()),
+            "by_agent": per_agent,
+        }
+
+    def count_agent_messages_since(self, lead_id: int, since: datetime) -> int:
+        """How many replies the agent has sent this lead since a point in time.
+
+        The measure the governance budget runs on: it counts what actually reached
+        the customer, so a loop shows up here whether it came from a retrying
+        integration or a script hitting the endpoint.
+        """
+        return int(
+            self._db.execute(
+                select(func.count(ConversationMessage.id)).where(
+                    ConversationMessage.lead_id == lead_id,
+                    ConversationMessage.role == MessageRole.agent,
+                    ConversationMessage.created_at >= since,
+                )
+            ).scalar_one_or_none() or 0
+        )
+
+    def record_agent_action(
+        self,
+        agent_id: str,
+        action: str,
+        allowed: bool,
+        code: str = "ok",
+        reason: str = "",
+        lead_id: Optional[int] = None,
+        detail: Optional[dict] = None,
+    ) -> None:
+        """Write a governance decision to the audit trail, against the agent.
+
+        Entity type "agent" keeps these separate from the lead and proposal trails,
+        so "what have the agents been doing" is one query rather than a filter over
+        everything that ever changed.
+        """
+        self._audit(
+            "agent", agent_id,
+            f"{action}_allowed" if allowed else f"{action}_denied",
+            performed_by=agent_id,
+            after={
+                "action": action, "allowed": allowed, "code": code,
+                "reason": reason, "lead_id": lead_id, **(detail or {}),
+            },
+        )
+
+    def record_guardrail_block(
+        self,
+        lead_id: int,
+        violations: list,
+        original_reply: str,
+        sent_reply: str,
+        blocked: bool,
+        performed_by: str = "guardrails",
+    ) -> None:
+        """Write a guardrail decision to the audit trail.
+
+        The original text is kept, truncated: without it there is no way to tell a
+        one-off slip from a model that has started drifting, and quietly swapping the
+        reply while leaving no record would be the worst of both worlds.
+        """
+        self._audit(
+            "lead", str(lead_id),
+            "reply_blocked_by_guardrail" if blocked else "reply_flagged_by_guardrail",
+            performed_by,
+            before={"generated_reply": (original_reply or "")[:1000]},
+            after={
+                "violations": violations,
+                "sent_reply": (sent_reply or "")[:1000],
+                "blocked": blocked,
+            },
+        )
+
+    def add_customer_memory(
+        self,
+        customer_id: int,
+        kind: MemoryKind,
+        summary: str,
+        detail: Optional[str] = None,
+        tags: Optional[list] = None,
+        salience: int = 3,
+        lead_id: Optional[int] = None,
+        source: MemorySource = MemorySource.reflection,
+        created_by: str = "sales_agent",
+        occurred_at: Optional[datetime] = None,
+        embedding: Optional[list] = None,
+        embedding_model: Optional[str] = None,
+    ) -> CustomerMemory:
+        """Append one memory. Memories are never updated in place — a corrected
+        belief is a new row, so the record of what was believed when survives."""
+        memory = CustomerMemory(
+            customer_id=customer_id,
+            lead_id=lead_id,
+            kind=kind,
+            source=source,
+            summary=summary.strip(),
+            detail=(detail or None),
+            tags=[str(t).lower() for t in (tags or [])],
+            salience=max(1, min(5, int(salience or 3))),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
+            created_by=created_by,
+            embedding=embedding,
+            embedding_model=embedding_model,
+        )
+        self._db.add(memory)
+        self._db.flush()
+        return memory
+
+    def list_customer_memories(
+        self,
+        customer_id: int,
+        kinds: Optional[tuple] = None,
+        limit: Optional[int] = None,
+    ) -> list[CustomerMemory]:
+        stmt = select(CustomerMemory).where(CustomerMemory.customer_id == customer_id)
+        if kinds:
+            stmt = stmt.where(CustomerMemory.kind.in_(kinds))
+        stmt = stmt.order_by(CustomerMemory.occurred_at.desc(), CustomerMemory.id.desc())
+        if limit:
+            stmt = stmt.limit(limit)
+        return list(self._db.execute(stmt).scalars())
+
+    def count_customer_memories(self, customer_id: int) -> int:
+        return int(
+            self._db.execute(
+                select(func.count(CustomerMemory.id))
+                .where(CustomerMemory.customer_id == customer_id)
+            ).scalar_one_or_none() or 0
+        )
+
+    def last_accepted_proposal_value(self, customer_id: int) -> Optional[float]:
+        """The most recent price this customer actually said yes to, across every
+        lead they have ever had. The reference point for any later draft."""
+        row = self._db.execute(
+            select(Proposal.total_value)
+            .join(Lead, Proposal.lead_id == Lead.id)
+            .where(
+                Lead.customer_id == customer_id,
+                Proposal.accepted_at.isnot(None),
+                Proposal.total_value.isnot(None),
+            )
+            .order_by(Proposal.accepted_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return float(row) if row is not None else None
+
+    def last_adjusted_down_value(self, customer_id: int) -> Optional[float]:
+        """The value a human last corrected a proposal DOWN to for this customer.
+
+        Read from the audit log rather than the proposal row, because the row only
+        holds where the price ended up — the fact that someone moved it, and from
+        what, lives in the audit trail.
+        """
+        rows = self._db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == "proposal",
+                AuditLog.action == "pricing_adjusted",
+            )
+            .order_by(AuditLog.created_at.desc())
+        ).scalars()
+
+        for entry in rows:
+            before = entry.before_value or {}
+            after = entry.after_value or {}
+            old_value, new_value = before.get("total_value"), after.get("total_value")
+            if old_value is None or new_value is None or new_value >= old_value:
+                continue
+            proposal = self._db.get(Proposal, int(entry.entity_id))
+            if not proposal:
+                continue
+            lead = self._db.get(Lead, proposal.lead_id)
+            if lead and lead.customer_id == customer_id:
+                return float(new_value)
+        return None
+
+    def get_customer_profile(self, customer_id: int) -> Optional[CustomerProfile]:
+        return self._db.get(CustomerProfile, customer_id)
+
+    def upsert_customer_profile(
+        self,
+        customer_id: int,
+        summary: Optional[str] = None,
+        traits: Optional[list] = None,
+        open_questions: Optional[list] = None,
+        agent_notes: Optional[str] = None,
+        next_best_action: Optional[str] = None,
+        last_reflected_message_id: Optional[int] = None,
+        performed_by: str = "sales_agent",
+    ) -> CustomerProfile:
+        """Create or rewrite the living profile. Only fields actually supplied are
+        replaced, so a partial reflection never blanks out what an earlier, fuller
+        one established."""
+        profile = self._db.get(CustomerProfile, customer_id)
+        created = profile is None
+        if created:
+            profile = CustomerProfile(customer_id=customer_id)
+            self._db.add(profile)
+
+        if summary is not None:
+            profile.summary = summary
+        if traits is not None:
+            profile.traits = list(traits)
+        if open_questions is not None:
+            profile.open_questions = list(open_questions)
+        if agent_notes is not None:
+            profile.agent_notes = agent_notes
+        if next_best_action is not None:
+            profile.next_best_action = next_best_action
+        if last_reflected_message_id is not None:
+            profile.last_reflected_message_id = last_reflected_message_id
+
+        profile.last_reflected_at = datetime.now(timezone.utc)
+        profile.reflection_count = (profile.reflection_count or 0) + 1
+        self._db.flush()
+        self._audit(
+            "customer_profile", str(customer_id),
+            "profile_created" if created else "profile_updated",
+            performed_by,
+            after={"reflection_count": profile.reflection_count},
+        )
+        return profile
+
+    def find_customers(self, query: str, limit: int = 5) -> list[Customer]:
+        """Resolve a free-text mention of a customer — a name, an email, a company —
+        to real customer rows. Placeholder-email customers are excluded unless the
+        query matches their name, so an un-identified walk-in never wins a search
+        for a real person."""
+        term = (query or "").strip().lower()
+        if not term:
+            return []
+        like = f"%{term}%"
+        stmt = (
+            select(Customer)
+            .where(
+                or_(
+                    func.lower(Customer.name).like(like),
+                    func.lower(Customer.email).like(like),
+                    func.lower(Customer.company).like(like),
+                )
+            )
+            .order_by(Customer.updated_at.desc())
+            .limit(limit)
+        )
+        return list(self._db.execute(stmt).scalars())
+
+    def get_customer_dossier(self, customer_id: int) -> dict:
+        """Everything known about one customer, assembled for recall.
+
+        Deliberately broader than get_lead_context: that one is scoped to a single
+        lead for the agents, this one spans every lead the customer has ever had,
+        which is the whole point of customer-level memory.
+        """
+        customer = self._db.get(Customer, customer_id)
+        if not customer:
+            return {}
+        leads = list(
+            self._db.execute(
+                select(Lead).where(Lead.customer_id == customer_id)
+                .order_by(Lead.created_at)
+            ).scalars()
+        )
+        lead_ids = [lead.id for lead in leads]
+        proposals = []
+        meetings = []
+        if lead_ids:
+            proposals = list(
+                self._db.execute(
+                    select(Proposal).where(Proposal.lead_id.in_(lead_ids))
+                    .order_by(Proposal.date_created)
+                ).scalars()
+            )
+            meetings = list(
+                self._db.execute(
+                    select(Meeting).where(Meeting.lead_id.in_(lead_ids))
+                    .order_by(Meeting.scheduled_at)
+                ).scalars()
+            )
+        return {
+            "customer": customer,
+            "profile": self._db.get(CustomerProfile, customer_id),
+            "leads": leads,
+            "proposals": proposals,
+            "meetings": meetings,
+            "memories": self.list_customer_memories(customer_id),
         }
 
     # ── Employee ───────────────────────────────────────────────────────────────

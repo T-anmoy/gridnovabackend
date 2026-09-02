@@ -115,6 +115,13 @@ def accept_proposal(token: str, request: Request, db: Session = Depends(get_db))
         description="Customer accepted the proposal online",
         created_by="customer",
     )
+    # The strongest signal the Proposal Agent gets: a price a real customer said
+    # yes to. Every later draft for them is read against this number.
+    from app.memory import reflection
+
+    reflection.record_proposal_outcome(
+        memory, proposal.id, reflection.OUTCOME_ACCEPTED, performed_by="customer"
+    )
     db.commit()
     return {"status": "accepted", "proposal_id": proposal.id,
             "accepted_at": proposal.accepted_at.isoformat(), "already_accepted": False}

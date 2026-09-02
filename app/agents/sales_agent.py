@@ -9,8 +9,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
+from app.agents import guardrails, need
+from app.governance import policy, registry
 from app.llm.client import llm_client
-from app.memory.models import Channel, LeadScore, MessageRole, PipelineStage, TimelineEventType
+from app.memory.models import (
+    Channel, LeadScore, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
+)
 from app.rules.business_rules import REQUIRED_FIELDS, check_missing_fields, evaluate_lead
 
 if TYPE_CHECKING:
@@ -27,6 +31,10 @@ QUALIFICATION_FIELDS = [
 # these BEFORE asking for contact details — that ordering is the whole point of the
 # staged redesign.
 SITUATIONAL_FIELDS = ["project_type", "location", "capacity_kw", "timeline"]
+
+# How many remembered items to put in front of the reply generator. Small on purpose:
+# the point is to shape a reply, not to hand the model a dossier to recite.
+_MEMORY_LINES_IN_PROMPT = 5
 
 
 def determine_conversation_stage(collected: dict) -> str:
@@ -68,6 +76,24 @@ def _build_history(messages: list) -> list[dict]:
     return history
 
 
+def _justifiable_text(
+    message: str,
+    history: list[dict],
+    collected: dict,
+    available_slots: Optional[list[str]],
+) -> str:
+    """Everything a reply is entitled to assert, as one blob for the guardrails.
+
+    Only the CUSTOMER's own words count, never Nova's earlier replies — otherwise a
+    figure the model invented once would justify itself forever afterwards.
+    """
+    parts = [message]
+    parts += [turn.get("content", "") for turn in history if turn.get("role") == "user"]
+    parts += [f"{k} {v}" for k, v in (collected or {}).items() if v is not None]
+    parts += list(available_slots or [])
+    return "\n".join(str(p) for p in parts)
+
+
 class SalesAgent:
     """
     Qualifies a customer lead through conversational field collection.
@@ -88,6 +114,10 @@ class SalesAgent:
         message: str,
         channel: Channel = Channel.website,
     ) -> dict:
+        # Governance runs in the harness now (app/agents/harness.py), which calls
+        # stand_down below when it refuses. Sub-actions taken part-way through a turn
+        # — booking a meeting — are still authorised individually further down.
+
         # Log the inbound customer message
         memory.log_message(
             channel=channel,
@@ -99,20 +129,44 @@ class SalesAgent:
         # Stamp customer activity so stale-lead detection resets on every reply.
         memory.record_customer_message(lead_id)
 
+        # Detection only — the message is answered normally either way. Refusing to
+        # reply would punish a real customer for phrasing something oddly, and the
+        # output guardrails below are what actually contain an attempt that lands.
+        injection = guardrails.detect_injection(message)
+        if injection:
+            logger.warning(
+                "Possible prompt-injection attempt in customer message",
+                extra={"lead_id": lead_id, "customer_id": customer_id, "matched": injection},
+            )
+            from app.notifications.notifier import notifier
+
+            notifier.notify("prompt_injection_suspected", {
+                "lead_id": lead_id, "customer_id": customer_id, "matched": injection,
+            })
+
         # Retrieve existing context
         ctx = memory.get_lead_context(lead_id)
         lead = ctx["lead"]
         existing_fields = dict(lead.collected_fields or {})
+        # Captured before any update so a milestone fires on the TRANSITION into a
+        # stage, not on every turn spent sitting in it.
+        previous_stage = lead.pipeline_stage
         history = _build_history(ctx["messages"])
 
         # Field extraction — LLM does data work only, never makes decisions
         # Prompt-injection safety: the system prompt instructs the model to ignore
         # any instructions embedded in customer_message, treating it as data only.
-        extracted = llm_client.extract_fields(
-            user_message=message,
-            conversation_history=history,
-            lead_id=lead_id,
-        )
+        if need.needs_field_extraction(message, existing_fields):
+            extracted = llm_client.extract_fields(
+                user_message=message,
+                conversation_history=history,
+                lead_id=lead_id,
+            )
+        else:
+            # "ok thanks" carries nothing to extract; asking a model to confirm that
+            # is money spent to learn nothing.
+            need.skipped("extract_fields", "message is a bare acknowledgement", lead_id)
+            extracted = {}
 
         # Merge extracted fields (never overwrite with None/empty)
         new_fields = {k: v for k, v in extracted.items() if k in QUALIFICATION_FIELDS and v}
@@ -162,6 +216,13 @@ class SalesAgent:
         # Deterministic conversation stage — decides HOW Nova talks, never the LLM.
         conv_stage = determine_conversation_stage(merged)
 
+        # What we remember about this person from earlier conversations, including
+        # the agent's own note on what it handled badly last time. Loaded AFTER the
+        # identity step above, because a mid-chat email match can move us onto a
+        # different customer record — and their memory, not the placeholder's, is
+        # the one that matters.
+        memory_context = self._recall_context(memory, customer_id, message)
+
         # Meeting scheduling — detect intent / confirmation, offer real slots (also
         # proactively once fully qualified), and auto-book once the customer confirms a
         # slot that was actually offered.
@@ -179,18 +240,49 @@ class SalesAgent:
         # - Everything else is a warm, stage-aware LLM reply. Real available slots (if
         #   any) are handed to the generator so it phrases them without inventing times.
         if scheduling.get("reply_text"):
+            # Code-generated from a real calendar booking. There is no model output
+            # here to guard, and the time it names is one the calendar just accepted.
             reply = scheduling["reply_text"]
         else:
             available_human = scheduling.get("offered_slots_human") or None
-            reply = llm_client.generate_reply(
+            generated = llm_client.generate_reply(
                 user_message=message,
                 stage=conv_stage,
                 collected_fields=merged,
                 missing_fields=missing,
                 conversation_history=history,
                 available_slots=available_human,
+                memory_context=memory_context,
                 lead_id=lead_id,
             )
+
+            # Everything the reply is allowed to assert: what the customer actually
+            # said, what is on file, and slots a real free/busy query returned. A
+            # figure or a time outside this set was invented by the model.
+            checked = guardrails.enforce(
+                generated,
+                allowed_text=_justifiable_text(message, history, merged, available_human),
+                memory_context=memory_context,
+                user_message=message,
+                fallback=llm_client._fallback_reply(conv_stage, missing, available_human),
+            )
+            reply = checked.reply
+            if checked.violations:
+                memory.record_guardrail_block(
+                    lead_id=lead_id,
+                    violations=checked.violations,
+                    original_reply=generated,
+                    sent_reply=reply,
+                    blocked=checked.blocked,
+                )
+                if checked.blocked:
+                    from app.notifications.notifier import notifier
+
+                    notifier.notify("agent_reply_blocked", {
+                        "lead_id": lead_id,
+                        "codes": checked.codes,
+                        "stage": conv_stage,
+                    })
 
         # Log agent reply
         memory.log_message(
@@ -202,8 +294,21 @@ class SalesAgent:
             agent_name="Nova",
         )
 
+        # Milestone reflection. The agent only DECIDES that a milestone was reached —
+        # the orchestrator node fires it after committing, because a reflection
+        # running before the commit would read a conversation missing this very turn
+        # (and, on a single-writer backend, contend with the open write transaction).
+        reflection_trigger = self._reflection_trigger(
+            memory=memory,
+            lead_id=lead_id,
+            previous_stage=previous_stage,
+            new_stage=stage,
+            meeting_booked=scheduling.get("meeting_booked"),
+        )
+
         return {
             "reply_text": reply,
+            "reflection_trigger": reflection_trigger,
             "collected_fields": merged,
             "missing_fields": missing,
             "lead_score": score.value,
@@ -214,6 +319,151 @@ class SalesAgent:
             "offered_slots": scheduling.get("offered_slots", []),
             "meeting_booked": scheduling.get("meeting_booked"),
         }
+
+    @staticmethod
+    def stand_down(
+        memory: "MemoryManager",
+        decision,
+        customer_id: int,
+        lead_id: int,
+        message: str,
+        channel: Channel,
+    ) -> dict:
+        """What the agent does when governance says it may not act.
+
+        The customer gets a plain handoff rather than silence or an error, the team
+        is notified so someone actually picks it up, and the lead is left untouched:
+        no extraction, no scoring, no stage change. An agent that has been stood down
+        should not still be quietly writing to the record.
+        """
+        memory.log_message(
+            channel=channel, role=MessageRole.customer, content=message,
+            lead_id=lead_id, customer_id=customer_id,
+        )
+        memory.record_customer_message(lead_id)
+
+        reply = (
+            "Thanks for that — let me bring someone from our team in to pick this up "
+            "with you properly. They'll be in touch shortly."
+        )
+        memory.log_message(
+            channel=channel, role=MessageRole.agent, content=reply,
+            lead_id=lead_id, customer_id=customer_id, agent_name="Nova",
+        )
+        from app.notifications.notifier import notifier
+
+        notifier.notify("agent_stood_down", {
+            "lead_id": lead_id, "customer_id": customer_id,
+            "code": decision.code, "reason": decision.reason,
+        })
+
+        lead = memory.get_lead(lead_id)
+        collected = dict(lead.collected_fields or {}) if lead else {}
+        return {
+            "reply_text": reply,
+            "collected_fields": collected,
+            "missing_fields": check_missing_fields(collected),
+            "lead_score": lead.lead_score.value if lead and lead.lead_score else None,
+            "is_qualified": False,
+            "lead_id": lead_id,
+            "customer_id": customer_id,
+            "meeting_intent": False,
+            "offered_slots": [],
+            "meeting_booked": None,
+            "governance": {"allowed": False, "code": decision.code,
+                           "reason": decision.reason},
+        }
+
+    @staticmethod
+    def _recall_context(
+        memory: "MemoryManager", customer_id: int, message: str
+    ) -> Optional[str]:
+        """What the agent remembers about this customer, shaped for the reply prompt.
+
+        This is the closing half of the reflection loop: reflection writes memory
+        down at a milestone, and this reads it back on every later turn so the agent
+        actually behaves differently instead of just having a record.
+
+        Retrieval is ranked against what the customer just said, so a question about
+        shading surfaces the shading objection rather than a generic briefing. Recall
+        is a plain tool, imported here in the method body — the Sales Agent still
+        never calls another agent.
+
+        Returns None for a customer with nothing remembered, which is the common
+        case on a first conversation and costs nothing.
+        """
+        from app.memory import recall
+
+        try:
+            profile = memory.get_customer_profile(customer_id)
+            memories = memory.list_customer_memories(customer_id)
+            if not profile and not memories:
+                return None
+
+            lines = []
+            if profile:
+                if profile.summary:
+                    lines.append(f"Who they are: {profile.summary}")
+                if profile.traits:
+                    lines.append(f"How they operate: {', '.join(str(t) for t in profile.traits)}")
+                if profile.open_questions:
+                    lines.append(
+                        "Still unknown: " + "; ".join(str(q) for q in profile.open_questions)
+                    )
+                if profile.next_best_action:
+                    lines.append(f"Suggested next step: {profile.next_best_action}")
+                if profile.agent_notes:
+                    # The self-critique, stated as a directive — a note filed away and
+                    # never read back would leave the agent repeating the same mistake.
+                    lines.append(f"What YOU should do differently: {profile.agent_notes}")
+
+            top = recall.rank_memories(
+                memories, message, top_k=_MEMORY_LINES_IN_PROMPT
+            )
+            profile_notes = (profile.agent_notes or "") if profile else ""
+            for m in top:
+                if m.kind == MemoryKind.self_critique and m.summary in profile_notes:
+                    # Already surfaced above as a directive. Only skip the ones the
+                    # profile actually carries — the Proposal Agent writes lessons as
+                    # self_critique memories and never touches the profile, so a blanket
+                    # skip would hide "the customer rejected our price" from the very
+                    # conversation where it matters most.
+                    continue
+                when = m.occurred_at.strftime("%d %b %Y") if m.occurred_at else "undated"
+                lines.append(f"- ({m.kind.value}, {when}) {m.summary}")
+
+            return "\n".join(lines) if lines else None
+        except Exception:
+            logger.exception("Memory recall failed for customer %s — replying without it", customer_id)
+            return None
+
+    @staticmethod
+    def _reflection_trigger(
+        memory: "MemoryManager",
+        lead_id: int,
+        previous_stage,
+        new_stage,
+        meeting_booked: Optional[dict],
+    ) -> Optional[str]:
+        """Which milestone (if any) this turn just crossed.
+
+        Ordered by how much a reflection is worth at each: a booked meeting is the
+        richest moment to look back on, qualification next, and the message-interval
+        check last — that one exists only so a long conversation that never qualifies
+        still gets remembered.
+        """
+        from app.memory import reflection
+
+        if meeting_booked:
+            return reflection.TRIGGER_MEETING_BOOKED
+        if new_stage == PipelineStage.qualified and previous_stage != PipelineStage.qualified:
+            return reflection.TRIGGER_QUALIFIED
+        try:
+            if reflection.should_reflect_on_interval(memory, lead_id):
+                return reflection.TRIGGER_INTERVAL
+        except Exception:
+            logger.exception("Reflection interval check failed for lead %s", lead_id)
+        return None
 
     def _handle_scheduling(
         self,
@@ -249,12 +499,20 @@ class SalesAgent:
         pending = lead.pending_meeting_slots if lead else None
         offered_iso = list(pending.get("slots", [])) if isinstance(pending, dict) else []
 
-        signal = llm_client.extract_meeting_signal(
-            user_message=message,
-            conversation_history=history,
-            offered_slots_iso=offered_iso,
-            lead_id=lead_id,
-        )
+        # The expensive part of this method used to run on every single turn and have
+        # its answer thrown away moments later. It is only worth asking when the
+        # scheduling code below could actually act on the reply.
+        if need.needs_meeting_signal(message, conv_stage, pending):
+            signal = llm_client.extract_meeting_signal(
+                user_message=message,
+                conversation_history=history,
+                offered_slots_iso=offered_iso,
+                lead_id=lead_id,
+            )
+        else:
+            need.skipped("extract_meeting_signal", "nothing pending and no meeting talk", lead_id)
+            signal = {"intent": False, "confirmed_slot_iso": None}
+
         result["intent"] = signal.get("intent", False)
         confirmed_iso = signal.get("confirmed_slot_iso")
 
@@ -272,6 +530,13 @@ class SalesAgent:
 
         # 1) Customer confirmed a real, previously-offered slot → auto-book it.
         if confirmed_iso and confirmed_iso in offered_iso:
+            # Booking puts a real event in a real employee's calendar, so it is
+            # authorised on its own rather than riding on the reply's permission.
+            if not policy.authorize(
+                registry.SALES_AGENT.id, registry.BOOK_MEETING, memory=memory, lead_id=lead_id
+            ).allowed:
+                logger.warning("Booking not permitted for lead %s; offering slots only", lead_id)
+                return result
             try:
                 slot_dt = datetime.fromisoformat(confirmed_iso)
                 employee_id = availability.is_slot_free(memory, slot_dt, duration)
