@@ -922,6 +922,7 @@ def list_employees(
             "name": e.name,
             "email": e.email,
             "role": e.role,
+            "is_active": e.is_active,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in memory_of(db).list_employees()
@@ -971,6 +972,64 @@ def update_employee_role(
         "clerk_synced": synced,
         "local_mirror": True,
     }
+
+
+@router.patch("/employees/{employee_id}/deactivate")
+def deactivate_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Deactivate an employee. Never deletes the row — every historical lead,
+    proposal, meeting and audit-log reference keeps pointing at a real employee.
+    A deactivated employee is also blocked at sign-in (see
+    app/auth/dependencies.py) so this actually stops them, not just labels them.
+    """
+    if not employee.can_manage_employees():
+        raise HTTPException(status_code=403, detail="Only Admin can deactivate employees.")
+
+    memory = memory_of(db)
+    target = memory.get_employee(employee_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if not target.is_active:
+        return {"employee_id": employee_id, "is_active": False}
+
+    # A system must never be able to deactivate its way into having zero admins.
+    if target.role == EmployeeRole.admin and memory.count_active_admins(exclude_employee_id=employee_id) == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot deactivate the last remaining active Admin.",
+        )
+
+    memory.set_employee_active(employee_id, active=False, performed_by=employee.employee_id)
+    db.commit()
+    return {"employee_id": employee_id, "is_active": False}
+
+
+@router.patch("/employees/{employee_id}/reactivate")
+def reactivate_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Reactivate a previously deactivated employee. Audit-logged like every
+    other change to an employee's standing."""
+    if not employee.can_manage_employees():
+        raise HTTPException(status_code=403, detail="Only Admin can reactivate employees.")
+
+    memory = memory_of(db)
+    target = memory.get_employee(employee_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if target.is_active:
+        return {"employee_id": employee_id, "is_active": True}
+
+    memory.set_employee_active(employee_id, active=True, performed_by=employee.employee_id)
+    db.commit()
+    return {"employee_id": employee_id, "is_active": True}
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
@@ -1448,6 +1507,7 @@ def reflect_on_lead_now(
 
 @router.get("/governance/agents")
 def list_governed_agents(
+    db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
     """What every AI agent in this system is permitted and forbidden to do.
@@ -1459,6 +1519,7 @@ def list_governed_agents(
     if not employee.can_view_audit_logs():
         raise HTTPException(status_code=403, detail="Your role cannot view agent governance.")
 
+    memory = memory_of(db)
     return {
         "agents": [
             {
@@ -1469,7 +1530,7 @@ def list_governed_agents(
                 "autonomy": spec.autonomy,
                 "speaks_to": spec.audience,
                 "uses_llm": spec.uses_llm,
-                "enabled": not gov_policy._disabled(spec.id),
+                "enabled": not gov_policy._disabled(spec.id, memory=memory),
                 "capabilities": list(spec.capabilities),
                 "prohibitions": list(spec.prohibitions),
                 "human_gates": list(spec.human_gates),

@@ -85,12 +85,13 @@ class TestReplyPromptConstraints:
         assert "Tue 12 Aug, 11:00 IST" in prompt
         assert "never invent or" in prompt
 
-    def test_calibration_guidance_present(self):
-        # The homeowner-vs-industrial calibration lives in the prompt (observing the
-        # actual tone difference needs a real LLM — noted in the summary).
+    def test_matching_customer_energy_is_present(self):
+        # Replaces the old per-segment (homeowner vs industrial) calibration with a
+        # general rule: match whatever energy THIS customer actually brought, rather
+        # than assuming tone from their segment.
         prompt = llm_client._build_reply_system_prompt("opening", {}, ["name"], None)
-        assert "homeowner" in prompt and "industrial" in prompt
-        assert "in the mood for jokes" in prompt
+        assert "Match the customer's energy" in prompt
+        assert "short, direct replies" in prompt
 
 
 class TestToneCommitments:
@@ -110,14 +111,14 @@ class TestToneCommitments:
         assert "THE ONE RULE THAT MATTERS MOST" in prompt
         assert "Ask ONE question" in prompt
 
-    def test_chatbot_openers_are_banned_by_name(self):
+    def test_generic_filler_language_is_banned_by_name(self):
         prompt = self._prompt()
-        for banned in ("Thanks for sharing that", "That's great to hear",
-                       "I'd be happy to assist", "Just to get a clearer picture"):
+        assert "hollow filler" in prompt
+        for banned in ("industry-leading", "trusted provider"):
             assert banned in prompt, banned
 
     def test_performed_enthusiasm_is_curbed(self):
-        assert "Almost no exclamation marks" in self._prompt()
+        assert "Never perform enthusiasm that isn't earned" in self._prompt()
 
     def test_the_model_is_told_not_to_reuse_example_figures(self):
         """The live run had Nova tell a customer with a 40,000 bill that "four lakh
@@ -130,12 +131,12 @@ class TestToneCommitments:
 
     def test_hospitality_guidance_is_present(self):
         prompt = self._prompt()
-        assert "HOSPITALITY" in prompt
-        assert "Never pressure" in prompt
-        assert "not now" in prompt
+        assert "consultative advisor" in prompt
+        assert "never oversell" in prompt
+        assert "address the hesitation honestly" in prompt
 
-    def test_name_overuse_is_called_out(self):
-        assert "in every message is a" in self._prompt()
+    def test_every_message_leaves_a_clear_next_step(self):
+        assert "leave the customer knowing exactly what happens" in self._prompt()
 
     def test_the_rulebook_is_a_cacheable_prefix(self):
         """Money, not tidiness. OpenAI caches a prompt prefix only from 1024 tokens

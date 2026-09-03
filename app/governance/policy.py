@@ -63,7 +63,17 @@ class Decision:
         return self.allowed
 
 
-def _disabled(agent_id: str) -> bool:
+def _disabled(agent_id: str, memory: Optional["MemoryManager"] = None) -> bool:
+    """Whether an agent is switched off right now.
+
+    A DB-backed override (set via the /api/v1/governance/agents API, runtime — no
+    redeploy) takes precedence when one exists; DISABLED_AGENTS remains the
+    deploy-time default for any agent that has never been toggled through the API.
+    """
+    if memory is not None:
+        override = memory.get_agent_override(agent_id)
+        if override is not None:
+            return not override.enabled
     return agent_id in {a.strip() for a in settings.disabled_agents if a.strip()}
 
 
@@ -107,7 +117,7 @@ def _evaluate(
         return Decision(False, UNKNOWN_AGENT, f"No registered agent {agent_id!r}.",
                         agent_id, action)
 
-    if _disabled(agent_id):
+    if _disabled(agent_id, memory=memory):
         return Decision(False, AGENT_DISABLED,
                         f"{spec.name} is switched off by configuration.", agent_id, action)
 

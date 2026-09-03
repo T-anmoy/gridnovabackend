@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+class DeactivatedEmployeeError(Exception):
+    """Raised when a deactivated employee's credentials are otherwise valid."""
+
+
 def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name: str = "", email: str = "") -> None:
     """Get-or-create the local Employee mirror row for an authenticated identity.
 
@@ -34,17 +38,23 @@ def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name:
     the Google Calendar connection flow for any employee who hadn't been
     manually pre-seeded. Committed immediately so it survives independent of
     whatever the route handler does with its own session afterward.
+
+    Raises DeactivatedEmployeeError for an existing employee whose access has
+    been switched off — a deactivated employee must not be re-activated by the
+    mere act of presenting a still-valid Clerk session.
     """
     from app.memory.memory_manager import MemoryManager
 
     memory = MemoryManager(db)
-    memory.get_or_create_employee(
+    emp = memory.get_or_create_employee(
         employee_id,
         name or employee_id,
         email or f"{employee_id}@no-email.local",
         role.value,
     )
     db.commit()
+    if not emp.is_active:
+        raise DeactivatedEmployeeError(employee_id)
 
 
 @lru_cache(maxsize=1)
@@ -157,7 +167,10 @@ async def get_current_employee(
             role = EmployeeRole(dev_role)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Unknown role: {dev_role}")
-        _provision_employee(db, dev_id, role)
+        try:
+            _provision_employee(db, dev_id, role)
+        except DeactivatedEmployeeError:
+            raise HTTPException(status_code=403, detail="This account has been deactivated.")
         return AuthenticatedEmployee(employee_id=dev_id, role=role)
 
     # ── JWT verification ───────────────────────────────────────────────────────
@@ -189,7 +202,10 @@ async def get_current_employee(
 
     email = payload.get("email", "")
     name = payload.get("name", "")
-    _provision_employee(db, employee_id, role, name=name, email=email)
+    try:
+        _provision_employee(db, employee_id, role, name=name, email=email)
+    except DeactivatedEmployeeError:
+        raise HTTPException(status_code=403, detail="This account has been deactivated.")
 
     return AuthenticatedEmployee(
         employee_id=employee_id,

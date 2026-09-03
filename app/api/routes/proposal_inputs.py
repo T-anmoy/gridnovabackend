@@ -24,7 +24,9 @@ from app.memory.models import (
     ProjectFamily,
     ShadingCondition,
     SiteType,
+    TimelineEventType,
 )
+from app.orchestrator.orchestrator import orchestrator
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/proposal-inputs")
@@ -242,4 +244,61 @@ def review_proposal_inputs(
     )
     db.commit()
 
-    return _serialize(updated)
+    result = _serialize(updated)
+
+    if body.status == InputStatus.approved_for_proposal:
+        result["proposal_draft"] = _trigger_auto_draft(
+            memory=memory,
+            db=db,
+            lead_id=updated.lead_id,
+            inputs_id=inputs_id,
+            performed_by=employee.employee_id,
+        )
+
+    return result
+
+
+def _trigger_auto_draft(
+    memory: MemoryManager, db: Session, lead_id: int, inputs_id: int, performed_by: str,
+) -> dict:
+    """Call the Proposal Agent's real drafting entry point — the same
+    orchestrator.request_proposal_draft() the dashboard's manual "Draft
+    proposal" button uses — now that a reviewer has approved this lead's site
+    assessment for one.
+
+    This only succeeds when the Lead itself already satisfies the same
+    readiness gate every other draft trigger does (app.rules.business_rules.
+    REQUIRED_FIELDS on Lead.collected_fields — a separate schema from
+    ProposalInputs, which this endpoint does not touch or map onto). Approving
+    a site assessment for a lead nobody has qualified yet is a valid action in
+    its own right, so a failure here never blocks or reverts the review that
+    already committed above — it is reported back for the reviewer to see, not
+    raised as an error.
+    """
+    lead = memory.get_lead(lead_id)
+    if not lead:
+        return {"triggered": False, "reason": "Lead not found"}
+
+    outcome = orchestrator.request_proposal_draft(
+        lead_id=lead_id, customer_id=lead.customer_id, performed_by=performed_by,
+    )
+    proposal_id = outcome.get("proposal_id")
+    if proposal_id is None:
+        return {
+            "triggered": False,
+            "reason": outcome.get("error") or "Lead is not yet ready for a proposal draft.",
+            "missing_fields": outcome.get("missing_fields", []),
+        }
+
+    version = outcome.get("proposal_version")
+    memory.add_timeline_event(
+        lead_id=lead_id,
+        event_type=TimelineEventType.proposal_auto_drafted_from_inputs,
+        description=(
+            f"Proposal v{version} auto-drafted from approved "
+            f"site assessment (proposal_inputs #{inputs_id})"
+        ),
+        created_by=performed_by,
+    )
+    db.commit()
+    return {"triggered": True, "proposal_id": proposal_id, "version": version}

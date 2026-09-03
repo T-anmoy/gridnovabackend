@@ -13,6 +13,7 @@ from sqlalchemy import select, func, distinct, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.memory.models import (
+    AgentGovernanceOverride,
     AuditLog,
     Channel,
     ConversationMessage,
@@ -247,6 +248,13 @@ class MemoryManager:
         project_id: Optional[int] = None,
         source: LeadSource = LeadSource.website_chat,
     ) -> Lead:
+        # Every Lead needs a real Project, not an optional one — a caller that
+        # already has one (e.g. the public estimate form, which has real project
+        # details to attach) passes project_id explicitly; everyone else gets an
+        # empty one created here so Lead.project_id is never left null.
+        if project_id is None:
+            project = self.create_project(customer_id, performed_by=performed_by)
+            project_id = project.id
         lead = Lead(
             customer_id=customer_id,
             project_id=project_id,
@@ -1364,6 +1372,85 @@ class MemoryManager:
             before=before, after={"role": role},
         )
         return emp
+
+    def count_active_admins(self, exclude_employee_id: Optional[str] = None) -> int:
+        """How many active Admins exist, optionally excluding one — the guard a
+        deactivate call uses so the system can never deactivate its way into
+        having zero admins."""
+        from app.memory.models import EmployeeRole as _Role
+
+        q = select(func.count(Employee.id)).where(
+            Employee.role == _Role.admin, Employee.is_active.is_(True)
+        )
+        if exclude_employee_id is not None:
+            q = q.where(Employee.id != exclude_employee_id)
+        return int(self._db.execute(q).scalar_one_or_none() or 0)
+
+    def set_employee_active(
+        self, employee_id: str, active: bool, performed_by: str
+    ) -> Optional[Employee]:
+        """Deactivate or reactivate an employee. Never deletes the row — every
+        historical FK (leads, proposals, audit log) keeps pointing at a real
+        employee regardless of this flag."""
+        emp = self._db.get(Employee, employee_id)
+        if not emp:
+            return None
+        before = {"is_active": emp.is_active}
+        emp.is_active = active
+        self._db.flush()
+        self._audit(
+            "employee", employee_id, "deactivated" if not active else "reactivated",
+            performed_by, before=before, after={"is_active": active},
+        )
+        return emp
+
+    # ── Agent governance overrides ──────────────────────────────────────────────
+
+    def get_agent_override(self, agent_id: str) -> Optional["AgentGovernanceOverride"]:
+        return self._db.get(AgentGovernanceOverride, agent_id)
+
+    def set_agent_override(
+        self, agent_id: str, enabled: bool, performed_by: str
+    ) -> "AgentGovernanceOverride":
+        """Toggle an agent's DB-backed kill-switch override, replacing whatever
+        DISABLED_AGENTS said for this agent until this row is changed again.
+
+        Audited with an explicit before/after enabled state — who changed what,
+        from what to what — since disabling the wrong agent live can stop real
+        customer conversations.
+        """
+        override = self._db.get(AgentGovernanceOverride, agent_id)
+        if override is None:
+            before = {"enabled": None, "source": "env_var"}
+            override = AgentGovernanceOverride(
+                agent_id=agent_id, enabled=enabled, updated_by=performed_by
+            )
+            self._db.add(override)
+        else:
+            before = {"enabled": override.enabled, "source": "database"}
+            override.enabled = enabled
+            override.updated_by = performed_by
+        self._db.flush()
+        self._audit(
+            "agent_governance", agent_id, "kill_switch_toggled", performed_by,
+            before=before, after={"enabled": enabled, "source": "database"},
+        )
+        return override
+
+    def list_agent_governance_audit(self, agent_id: str, limit: int = 50) -> list[AuditLog]:
+        """Recent governance history for one agent — both denial/authorisation
+        decisions (entity_type='agent') and kill-switch toggles
+        (entity_type='agent_governance'), newest first."""
+        q = (
+            select(AuditLog)
+            .where(
+                AuditLog.entity_id == agent_id,
+                AuditLog.entity_type.in_(("agent", "agent_governance")),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+        return list(self._db.execute(q).scalars().all())
 
     # ── Analytics ──────────────────────────────────────────────────────────────
 

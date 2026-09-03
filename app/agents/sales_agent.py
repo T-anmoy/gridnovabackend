@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Optional
 from app.agents import guardrails, need
 from app.governance import policy, registry
 from app.llm.client import llm_client
+from app.llm.company_facts import COMPANY_FACTS
 from app.memory.models import (
     Channel, LeadScore, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
 )
@@ -85,9 +86,14 @@ def _justifiable_text(
     """Everything a reply is entitled to assert, as one blob for the guardrails.
 
     Only the CUSTOMER's own words count, never Nova's earlier replies — otherwise a
-    figure the model invented once would justify itself forever afterwards.
+    figure the model invented once would justify itself forever afterwards. The one
+    exception is COMPANY_FACTS: those figures (e.g. "4,800+ street lamps") are
+    comma-grouped numbers a verified fact, not a conversational claim, and
+    app/agents/guardrails.py's money check cannot otherwise tell one apart from an
+    invented price — so they are always justified, not conditioned on anything the
+    customer said.
     """
-    parts = [message]
+    parts = [message, COMPANY_FACTS]
     parts += [turn.get("content", "") for turn in history if turn.get("role") == "user"]
     parts += [f"{k} {v}" for k, v in (collected or {}).items() if v is not None]
     parts += list(available_slots or [])

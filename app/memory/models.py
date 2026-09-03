@@ -68,6 +68,7 @@ class TimelineEventType(str, enum.Enum):
     escalated = "escalated"
     proposal_inputs_submitted = "proposal_inputs_submitted"
     proposal_inputs_reviewed = "proposal_inputs_reviewed"
+    proposal_auto_drafted_from_inputs = "proposal_auto_drafted_from_inputs"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -78,6 +79,7 @@ class MeetingStatus(str, enum.Enum):
 
 class LeadSource(str, enum.Enum):
     website_chat = "website_chat"
+    website_estimate_form = "website_estimate_form"
     whatsapp = "whatsapp"
     instagram = "instagram"
     cold_call = "cold_call"
@@ -178,6 +180,11 @@ class Employee(Base):
     role: Mapped[EmployeeRole] = mapped_column(SAEnum(EmployeeRole), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    # Deactivation is a flag, never a delete — every historical FK (leads, proposals,
+    # meetings, audit log) keeps pointing at a real row. A deactivated employee is
+    # blocked at authentication (see app/auth/dependencies.py) rather than removed.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     # Google Calendar connection (per-employee, opt-in). The refresh token is stored
     # encrypted at rest (Fernet) — never in plain text. See app/security/encryption.py.
     google_calendar_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -237,7 +244,10 @@ class Lead(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
-    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    # Every Lead has a real Project — MemoryManager.create_lead() creates an empty
+    # one automatically when the caller doesn't supply project_id. Backfilled for
+    # pre-existing rows in migration 0015_project_required.
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     # Which outreach channel this lead came from — for conversion-by-source analytics.
     source: Mapped[LeadSource] = mapped_column(
         SAEnum(LeadSource), nullable=False,
@@ -418,6 +428,23 @@ class AuditLog(Base):
     before_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     after_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AgentGovernanceOverride(Base):
+    """DB-backed kill-switch override for one agent, keyed by the registry's
+    agent id. DISABLED_AGENTS (an env var) is the deploy-time default; a row here
+    takes precedence over it, so an Admin can toggle an agent off in the running
+    process without a redeploy. Absence of a row means "no override" — governance
+    falls back to the env var, exactly as it always has.
+    """
+    __tablename__ = "agent_governance_overrides"
+
+    agent_id: Mapped[str] = mapped_column(String, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    updated_by: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class Meeting(Base):

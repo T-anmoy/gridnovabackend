@@ -10,6 +10,8 @@ venv/
 
 # Databases
 *.db
+*.db.bak*
+*.db-*
 
 # Test / tooling caches
 .pytest_cache/
