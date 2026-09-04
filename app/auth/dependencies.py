@@ -115,6 +115,15 @@ class AuthenticatedEmployee:
     def can_approve_manager_signoff(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.management)
 
+    def can_approve_partner_signoff(self) -> bool:
+        """The 3rd, highest approval tier (app/rules/approval_engine.py). There
+        is no distinct 'Partner' EmployeeRole — Admin is the most senior role
+        that actually exists in this system, so this tier maps to Admin only,
+        the same way can_manage_employees() does. If a real Partner-vs-Admin
+        distinction is ever wanted, that's a role-model change, not a
+        permission-check change."""
+        return self.role == EmployeeRole.admin
+
     def can_edit_lead(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
@@ -147,6 +156,16 @@ class AuthenticatedEmployee:
 
     def can_manage_proposal_inputs(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+
+    def can_view_assigned_work(self) -> bool:
+        """Intentionally False for every role, including Subcontractor.
+
+        Not a broken check — there is genuinely nothing to view yet. Work
+        Orders don't exist. This role starts maximally restricted and gets
+        expanded deliberately once there's something real to grant access to,
+        rather than starting broad and being tightened later.
+        """
+        return False
 
 
 async def get_current_employee(

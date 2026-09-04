@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Optional
 from app.agents import guardrails, need
 from app.governance import policy, registry
 from app.llm.client import llm_client
-from app.llm.company_facts import COMPANY_FACTS
+from app.llm.company_facts import COMPANY_FACTS, RESPONSE_TIME_COMMITMENT
 from app.memory.models import (
     Channel, LeadScore, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
 )
@@ -199,13 +199,15 @@ class SalesAgent:
         )
 
         # Fill in the customer record in place once we learn who they are. If the
-        # extracted email turns out to belong to a different existing customer, this
-        # merges into that record (and returns it), so we adopt its id going forward.
-        if new_fields.get("name") or new_fields.get("email"):
+        # extracted email OR phone turns out to belong to a different existing
+        # customer, this merges into that record (and returns it), so we adopt
+        # its id going forward.
+        if new_fields.get("name") or new_fields.get("email") or new_fields.get("phone"):
             surviving = memory.update_customer_details(
                 customer_id=customer_id,
                 name=new_fields.get("name"),
                 email=new_fields.get("email"),
+                phone=new_fields.get("phone"),
                 performed_by="sales_agent",
             )
             if surviving is not None:
@@ -350,7 +352,7 @@ class SalesAgent:
 
         reply = (
             "Thanks for that — let me bring someone from our team in to pick this up "
-            "with you properly. They'll be in touch shortly."
+            f"with you properly. They'll be in touch {RESPONSE_TIME_COMMITMENT}."
         )
         memory.log_message(
             channel=channel, role=MessageRole.agent, content=reply,

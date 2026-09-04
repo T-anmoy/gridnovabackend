@@ -26,6 +26,7 @@ from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
     EmployeeRole, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
 )
+from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
 from app.scheduling import availability, booking, google_calendar
 from app.notifications.notifier import notifier
@@ -828,6 +829,56 @@ def get_proposal_detail(
             }
             for v in detail["versions"]
         ],
+    }
+
+
+@router.get("/proposals/{proposal_id}/required-approval-tier")
+def get_required_approval_tier(
+    proposal_id: int,
+    discount_percent: float = Query(default=0.0, ge=0),
+    margin_percent: Optional[float] = Query(default=None),
+    is_flagged_risk: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """The 3-tier Approval Engine's determination for a real proposal —
+    additive and read-only. Does NOT change what actually gates approval
+    today: /proposals/{id}/approve and /manager-sign-off still run on
+    Proposal.requires_manager_signoff exactly as before. This exists so the
+    richer, multi-factor determination is consultable (e.g. by a future
+    frontend) without touching the 2-tier flow that currently works.
+
+    discount_percent, margin_percent and is_flagged_risk are query params,
+    not read off the Proposal, because none of those three are tracked on it
+    yet — only total_value is. Pass real figures here if you have them from
+    elsewhere; omit what you don't.
+    """
+    if employee.is_engineer:
+        raise HTTPException(status_code=403, detail="Your role cannot view approval-tier information.")
+
+    memory = memory_of(db)
+    proposal = memory.get_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    tier = approval_engine.determine_required_approval_tier(
+        proposal_value=proposal.total_value,
+        discount_percent=discount_percent,
+        margin_percent=margin_percent,
+        is_flagged_risk=is_flagged_risk,
+    )
+    return {
+        "proposal_id": proposal_id,
+        "required_tier": tier.value,
+        "based_on": {
+            "proposal_value": proposal.total_value,
+            "discount_percent": discount_percent,
+            "margin_percent": margin_percent,
+            "is_flagged_risk": is_flagged_risk,
+        },
+        # The existing 2-tier gate, unchanged — shown alongside for comparison,
+        # not replaced by the value above.
+        "current_2tier_requires_manager_signoff": proposal.requires_manager_signoff,
     }
 
 

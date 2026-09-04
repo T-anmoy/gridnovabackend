@@ -5,6 +5,7 @@ Every mutating method writes an AuditLog entry as part of the same operation.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -22,6 +23,8 @@ from app.memory.models import (
     CustomerProfile,
     Employee,
     EmployeeRole,
+    Equipment,
+    EquipmentCategory,
     Lead,
     LeadScore,
     LeadSource,
@@ -48,6 +51,30 @@ PLACEHOLDER_EMAIL_DOMAIN = "pending.gridnova.internal"
 
 def is_placeholder_email(email: Optional[str]) -> bool:
     return bool(email) and email.endswith("@" + PLACEHOLDER_EMAIL_DOMAIN)
+
+
+def _normalize_email(email: Optional[str]) -> Optional[str]:
+    """Canonical form for matching AND storage — case and surrounding whitespace
+    are formatting, not identity. Every new Customer row is stored in this form
+    from here on, so a future exact-string lookup stays correct too."""
+    return email.strip().lower() if email else None
+
+
+_PHONE_NON_DIGITS_RE = re.compile(r"\D+")
+
+
+def _normalize_phone(phone: Optional[str]) -> Optional[str]:
+    """Canonical form for phone-based matching: digits only, with a leading
+    India country code stripped when present — the same assumption
+    app/llm/client.py's mock phone-extraction regex already makes (an optional
+    +91/91 prefix ahead of a 10-digit Indian mobile number), reused here rather
+    than invented fresh."""
+    if not phone:
+        return None
+    digits = _PHONE_NON_DIGITS_RE.sub("", phone)
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    return digits or None
 
 
 def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -100,24 +127,81 @@ class MemoryManager:
 
     # ── Customer ───────────────────────────────────────────────────────────────
 
+    def _find_matching_customer(
+        self,
+        *,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+        email_is_weak: bool = False,
+        exclude_customer_id: Optional[int] = None,
+    ) -> Optional[Customer]:
+        """Shared identity-resolution core behind both get_or_create_customer
+        and update_customer_details — the two places a duplicate can be
+        created or missed. Matches on email first (case/whitespace-
+        normalized, exact), then falls back to phone.
+
+        `email_is_weak` is supplied by the caller rather than derived from
+        `email` alone: get_or_create_customer has only the incoming email to
+        judge by, but update_customer_details must judge by the CUSTOMER'S
+        actual current email (which may be real even when this particular
+        call passes no fresh email) — see its docstring.
+
+        Phone only resolves a match when email_is_weak, or the candidate's
+        own email is a placeholder — i.e. at least one side has no real,
+        distinct identity to contradict the other. Two people who each carry
+        a real, distinct email are never merged just because they share a
+        phone (a family or office line is a real possibility).
+        """
+        normalized_email = _normalize_email(email)
+        if normalized_email:
+            q = select(Customer).where(func.lower(Customer.email) == normalized_email)
+            if exclude_customer_id is not None:
+                q = q.where(Customer.id != exclude_customer_id)
+            match = self._db.execute(q).scalars().first()
+            if match:
+                return match
+
+        normalized_phone = _normalize_phone(phone)
+        if normalized_phone:
+            q = select(Customer).where(Customer.phone.isnot(None))
+            if exclude_customer_id is not None:
+                q = q.where(Customer.id != exclude_customer_id)
+            candidates = self._db.execute(q.order_by(Customer.id)).scalars().all()
+            for candidate in candidates:
+                if _normalize_phone(candidate.phone) != normalized_phone:
+                    continue
+                if email_is_weak or is_placeholder_email(candidate.email):
+                    return candidate
+        return None
+
     def get_or_create_customer(
         self,
         email: str,
         name: str,
         performed_by: str = "system",
+        phone: Optional[str] = None,
         **kwargs: Any,
     ) -> Customer:
-        customer = self._db.execute(
-            select(Customer).where(Customer.email == email)
-        ).scalar_one_or_none()
-
+        """Resolve to an existing Customer by email first, then by phone, before
+        ever creating a new row — this is the one gateway every intake path
+        (chat, the public estimate form) goes through, so it is where
+        duplication gets caught or not. See _find_matching_customer for the
+        matching rules (email normalization, phone as a weak-identity fallback).
+        """
+        normalized_email = _normalize_email(email)
+        customer = self._find_matching_customer(
+            email=email, phone=phone, email_is_weak=(not email or is_placeholder_email(email)),
+        )
         if customer:
             return customer
 
-        customer = Customer(email=email, name=name, **kwargs)
+        customer = Customer(email=normalized_email, name=name, phone=phone, **kwargs)
         self._db.add(customer)
         self._db.flush()
-        self._audit("customer", str(customer.id), "created", performed_by, after={"email": email, "name": name})
+        self._audit(
+            "customer", str(customer.id), "created", performed_by,
+            after={"email": normalized_email, "name": name, "phone": phone},
+        )
         return customer
 
     def create_placeholder_customer(self, performed_by: str = "website") -> Customer:
@@ -153,42 +237,72 @@ class MemoryManager:
         name: Optional[str],
         email: Optional[str],
         performed_by: str,
+        phone: Optional[str] = None,
     ) -> Optional[Customer]:
-        """Fill in a (typically placeholder) customer's real name/email in place, once
-        the conversation reveals them — same customer_id, same lead, same history.
+        """Fill in a (typically placeholder) customer's real name/email/phone in
+        place, once the conversation reveals them — same customer_id, same
+        lead, same history.
 
-        If the newly-extracted email already belongs to a DIFFERENT real customer
-        (someone messaging again from a new session), that's not this same person's
-        record to overwrite — merge this customer's leads/history into the existing one
-        instead, logged distinctly. Returns the surviving Customer (the existing one on
-        a merge), so callers can adopt the effective customer_id.
+        If the newly-extracted email OR phone already belongs to a DIFFERENT
+        real customer (someone messaging again from a new session, or the
+        same person now identifiable by a phone that matches an earlier,
+        still-anonymous visit), that's not this same person's record to
+        overwrite — merge this customer's leads/history into the existing one
+        instead, logged distinctly. Returns the surviving Customer (the
+        existing one on a merge), so callers can adopt the effective
+        customer_id.
+
+        Phone only triggers a merge under the same safety rule
+        _find_matching_customer always applies: at least one side must lack a
+        real, distinct email. Two people who each already have a real,
+        different email are never merged just because a phone matches.
         """
         customer = self._db.get(Customer, customer_id)
         if not customer:
             return None
 
-        # Collision → merge, never overwrite someone else's email.
-        if email and not is_placeholder_email(email) and email != customer.email:
-            existing = self._db.execute(
-                select(Customer).where(Customer.email == email, Customer.id != customer_id)
-            ).scalar_one_or_none()
-            if existing:
-                self._merge_customers(source=customer, target=existing, performed_by=performed_by)
-                # A late name can still enrich the surviving record if it lacked one.
-                if name and not existing.name:
-                    existing.name = name
-                    self._db.flush()
-                return existing
+        # Same normalization as get_or_create_customer — case/whitespace are
+        # formatting, not identity, and both collision-detection paths must
+        # agree on what "the same email" means.
+        email = _normalize_email(email)
 
-        before = {"name": customer.name, "email": customer.email}
+        email_changed = bool(email) and not is_placeholder_email(email) and email != customer.email
+        phone_changed = bool(phone) and _normalize_phone(phone) != _normalize_phone(customer.phone)
+
+        existing = None
+        if email_changed or phone_changed:
+            # The "weak identity" side of the phone fallback is this customer's
+            # REAL current email — its own stored email if this call supplies
+            # none fresh, not the (possibly absent) `email` argument alone.
+            effective_email = email or customer.email
+            existing = self._find_matching_customer(
+                email=email if email_changed else None,
+                phone=phone,
+                email_is_weak=is_placeholder_email(effective_email),
+                exclude_customer_id=customer_id,
+            )
+
+        if existing:
+            self._merge_customers(source=customer, target=existing, performed_by=performed_by)
+            # Late-arriving details can still enrich the surviving record if it lacked them.
+            if name and not existing.name:
+                existing.name = name
+            if phone and not existing.phone:
+                existing.phone = phone
+            self._db.flush()
+            return existing
+
+        before = {"name": customer.name, "email": customer.email, "phone": customer.phone}
         if name:
             customer.name = name
         if email:
             customer.email = email
+        if phone:
+            customer.phone = phone
         self._db.flush()
         self._audit(
             "customer", str(customer_id), "details_updated", performed_by,
-            before=before, after={"name": customer.name, "email": customer.email},
+            before=before, after={"name": customer.name, "email": customer.email, "phone": customer.phone},
         )
         return customer
 
@@ -224,10 +338,31 @@ class MemoryManager:
     # ── Project ────────────────────────────────────────────────────────────────
 
     def create_project(self, customer_id: int, performed_by: str = "system", **kwargs: Any) -> Project:
-        project = Project(customer_id=customer_id, **kwargs)
+        from app.memory import reference_id as refid
+
+        # reference_id is NOT NULL, so it must be computed before the INSERT —
+        # generated once, here, and never recomputed afterward. created_at is
+        # set explicitly to the same value used for both the ID's year and the
+        # row's own timestamp, rather than relying on the column's default to
+        # coincidentally match.
+        created_at = datetime.now(timezone.utc)
+        reference = refid.generate_reference_id(
+            self._db,
+            state=kwargs.get("state"),
+            project_family=kwargs.get("project_family"),
+            year=created_at.year,
+        )
+
+        project = Project(
+            customer_id=customer_id, reference_id=reference, created_at=created_at, **kwargs,
+        )
         self._db.add(project)
         self._db.flush()
-        self._audit("project", str(project.id), "created", performed_by, after={"customer_id": customer_id, **kwargs})
+
+        self._audit(
+            "project", str(project.id), "created", performed_by,
+            after={"customer_id": customer_id, "reference_id": project.reference_id, **kwargs},
+        )
         return project
 
     def update_project(self, project_id: int, performed_by: str, **fields: Any) -> Project:
@@ -1451,6 +1586,66 @@ class MemoryManager:
             .limit(limit)
         )
         return list(self._db.execute(q).scalars().all())
+
+    # ── Equipment / SKU master ───────────────────────────────────────────────────
+
+    def create_equipment(
+        self,
+        category: "EquipmentCategory",
+        brand: str,
+        model_name: str,
+        performed_by: str,
+        specification: Optional[str] = None,
+        is_dcr_compliant: bool = False,
+        procurement_price_inr: Optional[float] = None,
+    ) -> "Equipment":
+        item = Equipment(
+            category=category,
+            brand=brand,
+            model_name=model_name,
+            specification=specification,
+            is_dcr_compliant=is_dcr_compliant,
+            procurement_price_inr=procurement_price_inr,
+        )
+        self._db.add(item)
+        self._db.flush()
+        self._audit(
+            "equipment", str(item.id), "created", performed_by,
+            after={
+                "category": category.value if hasattr(category, "value") else category,
+                "brand": brand, "model_name": model_name,
+            },
+        )
+        return item
+
+    def get_equipment(self, equipment_id: int) -> Optional["Equipment"]:
+        return self._db.get(Equipment, equipment_id)
+
+    def list_equipment(
+        self,
+        category: Optional["EquipmentCategory"] = None,
+        is_active: Optional[bool] = None,
+    ) -> list["Equipment"]:
+        q = select(Equipment)
+        if category is not None:
+            q = q.where(Equipment.category == category)
+        if is_active is not None:
+            q = q.where(Equipment.is_active == is_active)
+        return list(self._db.execute(q.order_by(Equipment.id)).scalars().all())
+
+    def update_equipment(self, equipment_id: int, performed_by: str, **fields: Any) -> Optional["Equipment"]:
+        """Edit or deactivate an equipment entry. Never deletes the row — see
+        the class docstring on Equipment for why a discontinued SKU still
+        needs to mean something to whatever historically references it."""
+        item = self._db.get(Equipment, equipment_id)
+        if not item:
+            return None
+        before = {k: getattr(item, k) for k in fields}
+        for k, v in fields.items():
+            setattr(item, k, v)
+        self._db.flush()
+        self._audit("equipment", str(equipment_id), "updated", performed_by, before=before, after=fields)
+        return item
 
     # ── Analytics ──────────────────────────────────────────────────────────────
 

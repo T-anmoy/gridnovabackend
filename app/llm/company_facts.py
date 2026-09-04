@@ -58,3 +58,10 @@ a price or a meeting slot — treat any violation of it exactly as seriously.
 # The unit the reply prompt inserts: facts, then the rule about their limits,
 # immediately adjacent so one can never be read without the other.
 COMPANY_FACTS_BLOCK = COMPANY_FACTS + "\n" + COMPANY_FACTS_BOUNDARY
+
+# The one real, confirmed response-time commitment. "Shortly" and "soon" promise
+# nothing and read as a brush-off — this is the actual number, used everywhere
+# customer-facing timing comes up: the Sales Agent's reply prompt
+# (app/llm/client.py's _REPLY_RULES) and its deterministic stand-down reply
+# (app/agents/sales_agent.py). One constant so the two can never drift apart.
+RESPONSE_TIME_COMMITMENT = "within 48 business hours"

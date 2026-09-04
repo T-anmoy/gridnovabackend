@@ -12,7 +12,7 @@ depends on. Real conversational tone quality still needs a real LLM call to judg
 import inspect
 
 from app.llm.client import llm_client
-from app.llm.company_facts import COMPANY_FACTS_BLOCK
+from app.llm.company_facts import COMPANY_FACTS_BLOCK, RESPONSE_TIME_COMMITMENT
 
 
 def _prompt(stage="opening"):
@@ -86,3 +86,94 @@ class TestCallingContractUnchanged:
             lead_id=None,
         )
         assert isinstance(reply, str) and reply
+
+
+class TestTimingCommitmentReplacesVagueWords:
+    """Regression tests for the URGENT FIX session: a live customer transcript
+    showed Nova saying 'shortly'/'soon' for follow-up timing — vague, and worse,
+    unenforced. The prompt must now instruct the one real, confirmed commitment
+    instead, every time timing comes up."""
+
+    def test_the_real_commitment_phrase_is_present(self):
+        assert RESPONSE_TIME_COMMITMENT == "within 48 business hours"
+        assert RESPONSE_TIME_COMMITMENT in _prompt()
+
+    def test_the_rule_banning_vague_timing_words_is_present(self):
+        prompt = _prompt()
+        assert "Never use a vague word for when someone will hear back" in prompt
+        assert "Use\nthat exact phrase every single time timing comes up" in prompt \
+            or "Use that exact phrase every single time timing comes up" in prompt
+
+    def test_shortly_appears_only_inside_named_bad_examples_not_as_guidance(self):
+        """'shortly' must survive only where the prompt calls it out as banned or
+        quotes it inside a worked "Bad:" example — never inside a "Good:" example
+        or as something the prompt actually tells Nova to say. Exactly two
+        legitimate occurrences today: the banned-words list, and the literal bad
+        transcript line quoted in a "Bad:" example — "shortly" in the
+        contact-capture example, "soon" in the proposal-request example. A
+        regression that starts recommending either again would push this up."""
+        prompt = _prompt()
+        assert prompt.lower().count("shortly") == 2
+        assert prompt.lower().count("soon") == 2
+        # Never inside a "Good:" line specifically.
+        for line in prompt.splitlines():
+            if line.strip().startswith("Good:"):
+                assert "shortly" not in line.lower()
+                assert "soon" not in line.lower()
+
+
+class TestAntiFillerAcknowledgmentRule:
+    """Regression tests for the same URGENT FIX session: the live transcript
+    stacked a bare acknowledgment ('Got it', 'Thanks for confirming that') in
+    front of every question. The prompt must explicitly ban that shape, in any
+    phrasing, not just the two literal phrases the transcript happened to use."""
+
+    def test_rule_text_present(self):
+        prompt = _prompt()
+        assert "whose only job is to acknowledge or restate what the customer" in prompt
+        assert "Never give it its own sentence" in prompt
+
+    def test_new_worked_examples_are_present(self):
+        prompt = _prompt()
+        assert "Kolkata's one of our core markets" in prompt
+        assert "9 kW is a solid, common size for us" in prompt
+
+
+class TestCompanyFactsAppearNaturallyInNewExamples:
+    """A real, verified figure — not a generic 'thousands of installs' — should
+    show up in the worked example for exactly the scenario the bad transcript
+    got wrong (contact capture on a residential job)."""
+
+    def test_verified_residential_figure_used_in_contact_capture_example(self):
+        prompt = _prompt()
+        assert "1,200+ PM Surya Ghar homes done already" in prompt
+        # And it must be the same verified figure quoted in COMPANY_FACTS itself —
+        # never a second, independently-typed copy of the number.
+        assert "1,200+ PM Surya Ghar residential installations" in prompt
+
+
+class TestStandDownAlsoUsesTheRealCommitment:
+    """stand_down() is a deterministic, non-LLM reply — but it is just as
+    customer-facing as the LLM path, and it said 'shortly' too. Same fix,
+    same constant."""
+
+    def test_stand_down_reply_uses_the_real_commitment(self, memory, db_session):
+        from app.agents.sales_agent import sales_agent
+        from app.governance.policy import Decision
+        from app.memory.models import Channel
+
+        customer = memory.get_or_create_customer(email="standdown@example.com", name="C")
+        db_session.commit()
+        lead = memory.create_lead(customer_id=customer.id)
+        db_session.commit()
+
+        decision = Decision(
+            allowed=False, code="agent_disabled", reason="test",
+            agent_id="sales_agent", action="reply",
+        )
+        result = sales_agent.stand_down(
+            memory=memory, decision=decision, customer_id=customer.id,
+            lead_id=lead.id, message="hi", channel=Channel.website,
+        )
+        assert RESPONSE_TIME_COMMITMENT in result["reply_text"]
+        assert "shortly" not in result["reply_text"].lower()

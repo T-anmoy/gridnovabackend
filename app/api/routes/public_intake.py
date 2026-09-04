@@ -138,6 +138,7 @@ def submit_estimate_request(
     project = memory.create_project(
         customer_id=customer.id,
         performed_by="website",
+        state=body.state,
         location=_location(body.state, body.city),
         roof_type=body.roof_type,
         monthly_electricity_bill=body.average_bill,

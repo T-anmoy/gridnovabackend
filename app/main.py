@@ -8,7 +8,9 @@ from fastapi.responses import JSONResponse
 from app.api.routes.agent_governance import router as agent_governance_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.equipment import router as equipment_router
 from app.api.routes.health import router as health_router
+from app.api.routes.pricing import router as pricing_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
@@ -55,6 +57,8 @@ app.include_router(public_proposals_router)
 app.include_router(proposal_inputs_router)
 app.include_router(public_intake_router)
 app.include_router(agent_governance_router)
+app.include_router(equipment_router)
+app.include_router(pricing_router)
 
 
 @app.exception_handler(Exception)

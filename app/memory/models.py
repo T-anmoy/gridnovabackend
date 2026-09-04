@@ -21,6 +21,11 @@ class EmployeeRole(str, enum.Enum):
     sales = "sales"
     management = "management"
     engineer = "engineer"
+    # Deliberately maximally restricted for now — see
+    # AuthenticatedEmployee.can_view_assigned_work() in app/auth/dependencies.py.
+    # There is nothing for this role to access yet (Work Orders don't exist);
+    # granting broad access now that gets tightened later is the wrong default.
+    subcontractor = "subcontractor"
 
 
 class LeadScore(str, enum.Enum):
@@ -169,6 +174,13 @@ class InputStatus(str, enum.Enum):
     rejected = "rejected"                           # not viable, with reason
 
 
+class EquipmentCategory(str, enum.Enum):
+    module = "module"
+    inverter = "inverter"
+    structure = "structure"
+    bos_component = "bos_component"  # balance-of-system: cables, connectors, earthing, etc.
+
+
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class Employee(Base):
@@ -225,7 +237,18 @@ class Project(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    # GNE-{STATE}-{TYPE}-{YEAR}-{SEQUENCE}, e.g. GNE-WB-RES-2026-00125 — generated
+    # once at creation (see app/memory/reference_id.py + MemoryManager.create_project)
+    # and never recomputed afterward, so it must be immutable once assigned.
+    reference_id: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
     project_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Free-text state name (e.g. "West Bengal") — feeds the reference_id's state
+    # code at creation time; not an enum because no state enum exists anywhere
+    # in this codebase yet (see ProposalInputs.state, the same shape).
+    state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    project_family: Mapped[Optional[ProjectFamily]] = mapped_column(
+        SAEnum(ProjectFamily), nullable=True
+    )
     capacity_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     timeline: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -237,6 +260,41 @@ class Project(Base):
 
     customer: Mapped["Customer"] = relationship(back_populates="projects")
     leads: Mapped[list["Lead"]] = relationship(back_populates="project")
+
+
+class ProjectSequenceCounter(Base):
+    """One row per (state code, type code, year) bucket — the atomic counter
+    app/memory/reference_id.py increments to assign the next reference_id
+    sequence number. See that module for why this is a real DB-level atomic
+    increment (INSERT ... ON CONFLICT ... RETURNING), not a naive count+1.
+    """
+    __tablename__ = "project_sequence_counters"
+
+    counter_key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class Equipment(Base):
+    """Equipment/SKU master — empty, ready for real data. Deactivate old or
+    discontinued items via is_active; never hard-delete, same discipline as
+    Employee (a Proposal or historical record may reference a SKU that's since
+    been discontinued, and that reference must stay meaningful)."""
+    __tablename__ = "equipment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[EquipmentCategory] = mapped_column(SAEnum(EquipmentCategory), nullable=False)
+    brand: Mapped[str] = mapped_column(String, nullable=False)
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    # Free text for now — wattage, capacity, etc. No structured spec schema
+    # exists yet across categories this different (a module's spec and a
+    # cable's spec share nothing), so this isn't a placeholder to "fix" later
+    # so much as the honest shape for a first version.
+    specification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_dcr_compliant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Cost to Grid Nova — TBD from Raju Paul, hence nullable.
+    procurement_price_inr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Lead(Base):
