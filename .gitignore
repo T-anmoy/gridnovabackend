@@ -30,3 +30,4 @@ build/
 .claude/
 
 .venv-win/
+uvicorn.log
