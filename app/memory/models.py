@@ -85,6 +85,7 @@ class MeetingStatus(str, enum.Enum):
 class LeadSource(str, enum.Enum):
     website_chat = "website_chat"
     website_estimate_form = "website_estimate_form"
+    website_booking = "website_booking"
     whatsapp = "whatsapp"
     instagram = "instagram"
     cold_call = "cold_call"

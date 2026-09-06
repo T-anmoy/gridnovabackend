@@ -12,6 +12,7 @@ from app.api.routes.equipment import router as equipment_router
 from app.api.routes.health import router as health_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
+from app.api.routes.public_booking import router as public_booking_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
 from app.config import settings
@@ -56,6 +57,7 @@ app.include_router(dashboard_router)
 app.include_router(public_proposals_router)
 app.include_router(proposal_inputs_router)
 app.include_router(public_intake_router)
+app.include_router(public_booking_router)
 app.include_router(agent_governance_router)
 app.include_router(equipment_router)
 app.include_router(pricing_router)
