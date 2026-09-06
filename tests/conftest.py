@@ -97,6 +97,7 @@ def reset_chat_inmemory_state():
     tests so results don't depend on test ordering (e.g. the rate-limit test
     otherwise poisons later chat tests in the same process)."""
     import app.api.routes.chat as chat
+    import app.api.routes.pricing as pricing
     import app.api.routes.public_booking as public_booking
     import app.api.routes.public_proposals as public_proposals
     chat._request_log.clear()
@@ -105,6 +106,7 @@ def reset_chat_inmemory_state():
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
+    pricing._instant_estimate_request_log.clear()
     yield
     chat._request_log.clear()
     chat._recent_messages.clear()
@@ -112,6 +114,7 @@ def reset_chat_inmemory_state():
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
+    pricing._instant_estimate_request_log.clear()
 
 
 @pytest.fixture

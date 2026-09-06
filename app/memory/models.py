@@ -7,11 +7,34 @@ from sqlalchemy import (
     Index, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 from app.memory.db import Base
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """DateTime(timezone=True) that survives SQLite's dialect dropping tzinfo.
+
+    Postgres stores and returns real timezone-aware timestamps, so this is a no-op
+    there. SQLite has no native timestamp type — it stores the value as a plain
+    string and hands back a naive datetime on every read, silently discarding the
+    UTC marker every write in this codebase already attaches (_now() and every
+    other timestamp in this module always uses datetime.now(timezone.utc)). Left
+    unfixed, that naive value flows straight into API responses via .isoformat(),
+    producing a string with no timezone designator — which a browser parses as
+    local time, not UTC, corrupting every displayed timestamp by the viewer's UTC
+    offset (e.g. exactly 5:30h for IST).
+    """
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
@@ -191,7 +214,7 @@ class Employee(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     role: Mapped[EmployeeRole] = mapped_column(SAEnum(EmployeeRole), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
     # Deactivation is a flag, never a delete — every historical FK (leads, proposals,
     # meetings, audit log) keeps pointing at a real row. A deactivated employee is
@@ -221,8 +244,8 @@ class Customer(Base):
     phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     gst: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     industry: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="customer")
     leads: Mapped[list["Lead"]] = relationship(back_populates="customer")
@@ -256,8 +279,8 @@ class Project(Base):
     budget: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     roof_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     monthly_electricity_bill: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 
     customer: Mapped["Customer"] = relationship(back_populates="projects")
     leads: Mapped[list["Lead"]] = relationship(back_populates="project")
@@ -295,7 +318,7 @@ class Equipment(Base):
     # Cost to Grid Nova — TBD from Raju Paul, hence nullable.
     procurement_price_inr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
 
 class Lead(Base):
@@ -318,17 +341,17 @@ class Lead(Base):
         SAEnum(PipelineStage), default=PipelineStage.new, nullable=False
     )
     assigned_employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
-    follow_up_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    follow_up_date: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     decision_maker: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Meeting slots most recently offered to the customer in conversation, so a later
     # confirmation maps to a real, calendar-verified slot instead of an invented time.
     pending_meeting_slots: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Stale-lead follow-up: when the customer last messaged, and when we last fired a
     # staleness notification (so the same threshold isn't re-notified repeatedly).
-    last_customer_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    stale_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    last_customer_message_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    stale_notified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 
     customer: Mapped["Customer"] = relationship(back_populates="leads")
     project: Mapped[Optional["Project"]] = relationship(back_populates="leads")
@@ -360,12 +383,12 @@ class Proposal(Base):
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
     pdf_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     total_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    date_created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    date_sent: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    date_created: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    date_sent: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     # Customer-facing online acceptance (a lightweight accept-link, not e-signature).
     accept_token: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
-    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     approved_by_employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
     requires_manager_signoff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     used_fallback_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -388,8 +411,8 @@ class ProposalInputs(Base):
     status: Mapped[InputStatus] = mapped_column(
         SAEnum(InputStatus), default=InputStatus.submitted, nullable=False
     )
-    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     reviewed_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -455,7 +478,7 @@ class TimelineEvent(Base):
     event_type: Mapped[TimelineEventType] = mapped_column(SAEnum(TimelineEventType), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
     lead: Mapped["Lead"] = relationship(back_populates="timeline_events")
 
@@ -470,7 +493,7 @@ class ConversationMessage(Base):
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole), nullable=False)
     agent_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
     lead: Mapped[Optional["Lead"]] = relationship(back_populates="messages")
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="messages")
@@ -486,7 +509,7 @@ class AuditLog(Base):
     performed_by: Mapped[str] = mapped_column(String, nullable=False)
     before_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     after_value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
 
 class AgentGovernanceOverride(Base):
@@ -501,7 +524,7 @@ class AgentGovernanceOverride(Base):
     agent_id: Mapped[str] = mapped_column(String, primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now, onupdate=_now
+        UTCDateTime, default=_now, onupdate=_now
     )
     updated_by: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -526,14 +549,14 @@ class Meeting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)
     employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
-    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     google_event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     meet_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[MeetingStatus] = mapped_column(
         SAEnum(MeetingStatus), default=MeetingStatus.scheduled, nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
     lead: Mapped["Lead"] = relationship(back_populates="meetings")
     employee: Mapped["Employee"] = relationship(back_populates="meetings")
@@ -597,8 +620,8 @@ class CustomerMemory(Base):
     salience: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     # When the thing happened, which is not always when it was recorded — a
     # reflection run on Friday can record an episode from Tuesday.
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
     created_by: Mapped[str] = mapped_column(String, nullable=False, default="sales_agent")
     # Populated only when semantic search is enabled; the keyword path ignores it.
     embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
@@ -630,12 +653,12 @@ class CustomerProfile(Base):
     # the customer rather than about the agent.
     agent_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     next_best_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    last_reflected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reflected_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     reflection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # How far the conversation had got at the last reflection, so a re-run only
     # considers what is genuinely new.
     last_reflected_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 
     customer: Mapped["Customer"] = relationship(back_populates="profile")

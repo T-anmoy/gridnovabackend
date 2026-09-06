@@ -15,9 +15,11 @@ for internal use.
 """
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,7 @@ from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.pricing import engine as pricing_engine
+from app.pricing import instant_estimate as instant_estimate_module
 from app.pricing.engine import PricingInputs
 
 router = APIRouter(prefix="/api/v1/pricing")
@@ -145,4 +148,121 @@ def full_breakdown(
         "gst_amount": result.gst_amount,
         "total_inr": result.total,
         "category_totals": result.category_totals,
+    }
+
+
+# ── Instant estimate (expanded /solar-calculator flow) ─────────────────────────
+# Public, unauthenticated, additive — /estimate and /breakdown above are
+# completely untouched. Same hand-rolled per-IP rate limiter pattern as
+# app/api/routes/public_intake.py (each public route file keeps its own,
+# rather than sharing one — the established convention here).
+
+_INSTANT_ESTIMATE_RATE_LIMIT = 20
+_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS = 60
+_instant_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+
+
+def _client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+
+def _check_instant_estimate_rate_limit(request: Request) -> None:
+    ip = _client_ip(request)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
+    _instant_estimate_request_log[ip] = [t for t in _instant_estimate_request_log[ip] if t > cutoff]
+    if len(_instant_estimate_request_log[ip]) >= _INSTANT_ESTIMATE_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before trying again.")
+    _instant_estimate_request_log[ip].append(now)
+
+
+class InstantEstimateRequest(BaseModel):
+    segment: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    sizing_method: str = Field(min_length=1)  # "by_units" | "by_bill" | "by_roof_area"
+    monthly_units_kwh: Optional[float] = Field(default=None, gt=0)
+    monthly_bill_inr: Optional[float] = Field(default=None, gt=0)
+    usable_roof_area_sqft: Optional[float] = Field(default=None, gt=0)
+    connection_phase: Optional[str] = None
+    tier: str = "good"
+    roof_type: Optional[str] = None
+    floors: Optional[int] = Field(default=None, ge=1)
+    shading: Optional[str] = None
+    access_difficulty: Optional[str] = None
+    is_remote: bool = False
+    is_housing_society: bool = False
+
+    @model_validator(mode="after")
+    def _at_least_one_sizing_value(self):
+        if (
+            self.monthly_units_kwh is None
+            and self.monthly_bill_inr is None
+            and self.usable_roof_area_sqft is None
+        ):
+            raise ValueError(
+                "Provide at least one of monthly_units_kwh, monthly_bill_inr, "
+                "or usable_roof_area_sqft."
+            )
+        return self
+
+
+@router.post("/instant-estimate")
+def instant_estimate(
+    body: InstantEstimateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Public, unauthenticated — the expanded /solar-calculator flow: real
+    sizing (consumption and/or roof-area based, phase-capped), tier and
+    access-difficulty pricing, and the real PM Surya Ghar subsidy. Returns a
+    complete, itemized breakdown, or an indicative range (never a false
+    confident number) when shading was reported as significant."""
+    _check_instant_estimate_rate_limit(request)
+
+    memory = MemoryManager(db)
+    try:
+        result = instant_estimate_module.calculate_instant_estimate(
+            memory,
+            instant_estimate_module.InstantEstimateInputs(
+                segment=body.segment,
+                state=body.state,
+                sizing_method=body.sizing_method,
+                monthly_units_kwh=body.monthly_units_kwh,
+                monthly_bill_inr=body.monthly_bill_inr,
+                usable_roof_area_sqft=body.usable_roof_area_sqft,
+                connection_phase=body.connection_phase,
+                tier=body.tier,
+                roof_type=body.roof_type,
+                floors=body.floors,
+                shading=body.shading,
+                access_difficulty=body.access_difficulty,
+                is_remote=body.is_remote,
+                is_housing_society=body.is_housing_society,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {
+        "recommended_size_kw": result.recommended_size_kw,
+        "sizing_detail": {
+            "consumption_based_kw": result.consumption_based_kw,
+            "area_based_kw": result.area_based_kw,
+            "phase_capped": result.phase_capped,
+        },
+        "tier": result.tier,
+        "base_cost": result.base_cost,
+        "tier_cost": result.tier_cost,
+        "adders": result.adders,
+        "component_breakdown": result.component_breakdown,
+        "subtotal_before_tax": result.subtotal_before_tax,
+        "gst_amount": result.gst_amount,
+        "subsidy_inr": result.subsidy_inr,
+        "net_cost": result.net_cost,
+        "is_indicative_range": result.is_indicative_range,
+        "net_cost_range_min": result.net_cost_range_min,
+        "net_cost_range_max": result.net_cost_range_max,
+        "note": result.note,
     }

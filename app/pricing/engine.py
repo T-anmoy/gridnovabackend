@@ -124,6 +124,28 @@ PLACEHOLDER_OPTIONAL_SERVICE_PRICES: dict[str, float] = {
     "monitoring_app_premium": 5_000.0,
 }
 
+# Equipment-quality tier multiplier for the public instant-estimate flow (Good/
+# Better/Best) — applied on top of the fully-computed subtotal, same pattern as
+# every other modifier in this module. [PLACEHOLDER — real tier economics
+# pending Raju Paul]
+PLACEHOLDER_TIER_MULTIPLIER: dict[str, float] = {
+    "good": 1.00,
+    "better": 1.10,
+    "best": 1.25,
+}
+KNOWN_TIERS = tuple(PLACEHOLDER_TIER_MULTIPLIER.keys())
+
+# Site-access-difficulty multiplier — separate from roof TYPE (already covered
+# by PLACEHOLDER_ROOF_TYPE_MODIFIER above): this is about reaching the site at
+# all (stairs-only access, tight lane, no crane access), not what the roof is
+# made of. [PLACEHOLDER]
+PLACEHOLDER_ACCESS_DIFFICULTY_MODIFIER: dict[str, float] = {
+    "easy": 1.00,
+    "moderate": 1.05,
+    "difficult": 1.12,
+}
+PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER = 1.00  # unspecified
+
 # Blended, single GST rate applied to the whole subtotal. Real GST treatment
 # for a solar EPC contract is genuinely nuanced (modules vs. balance-of-system
 # vs. installation service can attract different rates, and intra-state vs.
@@ -269,6 +291,25 @@ def calculate_gst(subtotal: float, state: str) -> float:
     # `state` accepted for interface stability — the placeholder rate does not
     # yet vary by it. See PLACEHOLDER_GST_RATE_PERCENT above.
     return subtotal * (PLACEHOLDER_GST_RATE_PERCENT / 100.0)
+
+
+# ── Layer 11: tier multiplier (public instant-estimate flow only) ──────────────
+
+def calculate_tier_multiplier(tier: str) -> float:
+    """Raises ValueError for an unrecognized tier — like segment, this is a
+    closed, validated vocabulary a caller controls (a UI toggle), not free text."""
+    tier_key = _normalize_key(tier)
+    if tier_key not in PLACEHOLDER_TIER_MULTIPLIER:
+        raise ValueError(f"Unknown tier: {tier!r}. Expected one of {KNOWN_TIERS}.")
+    return PLACEHOLDER_TIER_MULTIPLIER[tier_key]
+
+
+# ── Layer 12: access difficulty (public instant-estimate flow only) ────────────
+
+def calculate_access_difficulty_modifier(access_difficulty: Optional[str]) -> float:
+    return PLACEHOLDER_ACCESS_DIFFICULTY_MODIFIER.get(
+        _normalize_key(access_difficulty), PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER
+    )
 
 
 # ── Combined estimate ────────────────────────────────────────────────────────────
