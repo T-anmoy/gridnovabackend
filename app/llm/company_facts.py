@@ -19,10 +19,17 @@ specifically so the model never fills a gap on its own.
 """
 from __future__ import annotations
 
-COMPANY_FACTS = """GRID NOVA ENERGY — VERIFIED FACTS
+from app.pricing.subsidy import (
+    MAX_SUBSIDY_INR,
+    RATE_PER_KW_FIRST_2KW,
+    RATE_PER_KW_THIRD_KW,
+    SUBSIDY_ELIGIBLE_UP_TO_KW,
+)
+
+COMPANY_FACTS = f"""GRID NOVA ENERGY — VERIFIED FACTS
 
 Company: Grid Nova Energy Pvt. Ltd.
-Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107
+Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal
 Contact: +91 98747 74440, info@gridnova.in, www.gridnova.in
 
 Track record (verified, exact figures — never round or approximate these):
@@ -30,16 +37,23 @@ Track record (verified, exact figures — never round or approximate these):
 - 330+ 10kW WBREDA schools powered
 - 2,350+ PM-KUSUM solar pumps installed
 - 1,200+ PM Surya Ghar residential installations
+- 1.3 MWp EPC project delivered for Showa India
 
 Services offered (8 areas):
-Rooftop Solar (Residential/Society/Commercial/Industrial), Ground-Mounted Solar,
-Government & Institutional Solar, Solar Street Lighting, Solar Water Pumps,
-O&M Services, Energy Consulting & Project Services, and emerging solutions
-(BESS/EV/microgrid — explicitly NOT yet available, do not offer these as current services).
+Rooftop Solar (Residential/Housing Society/Commercial/Industrial/Institutional),
+Ground-Mounted Solar, Government & Institutional Solar, Solar Street Lighting,
+Solar Water Pumps (PM-KUSUM), O&M Services, Energy Consulting & Project Services,
+and emerging solutions (BESS/EV/microgrid — explicitly NOT yet available, do not
+offer these as current services).
 
-Primary service areas: West Bengal and Bihar. Other eastern states considered
-on a feasibility basis — never promise service outside West Bengal/Bihar without
-this caveat.
+Service coverage: Grid Nova now serves customers across India, not a limited
+region — this supersedes any earlier West Bengal/Bihar-only guidance.
+
+PM Surya Ghar residential rooftop subsidy (Central Financial Assistance):
+₹{RATE_PER_KW_FIRST_2KW:,.0f}/kW for the first 2kW, ₹{RATE_PER_KW_THIRD_KW:,.0f} for the 3rd kW,
+capped at ₹{MAX_SUBSIDY_INR:,.0f} for any system of {SUBSIDY_ELIGIBLE_UP_TO_KW:.0f}kW or more.
+Applies to genuine individual residential rooftop only — never Housing
+Society/RWA or any commercial/industrial/government segment.
 
 Leadership: Michael Gomes (Managing Partner), Shouvik Biswas (Partner),
 Raju Paul (Partner), Srinjay Das (VP Business), Moloy Das (GM Projects),

@@ -11,8 +11,10 @@ depends on. Real conversational tone quality still needs a real LLM call to judg
 """
 import inspect
 
+from app.agents import guardrails
+from app.agents.sales_agent import _justifiable_text
 from app.llm.client import llm_client
-from app.llm.company_facts import COMPANY_FACTS_BLOCK, RESPONSE_TIME_COMMITMENT
+from app.llm.company_facts import COMPANY_FACTS, COMPANY_FACTS_BLOCK, RESPONSE_TIME_COMMITMENT
 
 
 def _prompt(stage="opening"):
@@ -177,3 +179,102 @@ class TestStandDownAlsoUsesTheRealCommitment:
         )
         assert RESPONSE_TIME_COMMITMENT in result["reply_text"]
         assert "shortly" not in result["reply_text"].lower()
+
+
+class TestNovaHasARealIdentity:
+    """Regression tests for the identity rebuild: Nova must introduce itself
+    by name, sound warm rather than flat, and never claim to be human. Real
+    conversational quality still needs a real LLM call to judge (see this
+    file's own module docstring) — these check the prompt actually instructs
+    it, the same pattern every other tone assertion in this file already uses.
+    """
+
+    def test_identity_section_present(self):
+        prompt = _prompt()
+        assert "IDENTITY" in prompt
+        # Normalized (source wraps this phrase across lines; the wrap is
+        # cosmetic to an LLM reader, not a break in the actual instruction).
+        flat = " ".join(prompt.split())
+        assert "Nova, Grid Nova Energy's AI assistant" in flat
+
+    def test_never_claim_to_be_human_is_explicit(self):
+        prompt = _prompt()
+        flat = " ".join(prompt.split())
+        assert "Never claim to be human" in flat
+        assert "never overstate what you can do" in flat.lower()
+
+    def test_at_least_two_distinct_warm_opening_greeting_examples(self):
+        """Phase 1 asked for 2-3 concrete example greetings, not one script to
+        recite — confirms real variety exists, not a single canned line."""
+        prompt = _prompt()
+        greetings = [
+            "Hi, I'm Nova from Grid Nova Energy",
+            "Hey there, Nova here from Grid Nova Energy",
+            "Hi — I'm Nova, Grid Nova Energy's assistant",
+        ]
+        present = [g for g in greetings if g in prompt]
+        assert len(present) >= 2
+
+    def test_the_old_flat_line_is_named_as_the_bad_example(self):
+        """The specific weak line this session set out to fix is present only
+        as the named Bad contrast, not as guidance to actually say."""
+        prompt = _prompt()
+        assert "I'm with Grid Nova Energy, and I'm here to assist you" in prompt
+        for line in prompt.splitlines():
+            if line.strip().startswith("Good:"):
+                assert "I'm with Grid Nova Energy, and I'm here to assist you" not in line
+
+    def test_reintroduction_is_explicitly_limited_to_the_first_message(self):
+        prompt = _prompt()
+        flat = " ".join(prompt.split())
+        assert "never reintroduce yourself again unless the customer directly asks" in flat
+
+
+class TestExpandedCompanyFacts:
+    """Regression tests for the Phase 2 fact expansion — every new fact must
+    actually be present, and the subsidy figures must be the SAME numbers
+    app.pricing.subsidy uses, not a second, independently-typed copy."""
+
+    def test_showa_india_project_present(self):
+        assert "1.3 MWp EPC project delivered for Showa India" in COMPANY_FACTS
+
+    def test_nationwide_coverage_supersedes_the_old_regional_limit(self):
+        assert "serves customers across India" in COMPANY_FACTS
+        assert "West Bengal and Bihar" not in COMPANY_FACTS
+
+    def test_subsidy_figures_match_the_real_pricing_module_not_a_second_copy(self):
+        from app.pricing import subsidy as subsidy_module
+
+        assert f"₹{subsidy_module.RATE_PER_KW_FIRST_2KW:,.0f}/kW" in COMPANY_FACTS
+        assert f"₹{subsidy_module.RATE_PER_KW_THIRD_KW:,.0f}" in COMPANY_FACTS
+        assert f"₹{subsidy_module.MAX_SUBSIDY_INR:,.0f}" in COMPANY_FACTS
+
+    def test_head_office_now_includes_the_state(self):
+        assert "Kolkata – 700107, West Bengal" in COMPANY_FACTS
+
+
+class TestFactBoundaryRuleStillEnforced:
+    """The 'only state facts that appear in company_facts.py' rule is enforced
+    by a real, deterministic mechanism — guardrails.check_money() blocking any
+    money-shaped figure the conversation can't justify — not just prompt text.
+    This proves that mechanism still works after the fact expansion, using the
+    exact allow-list (_justifiable_text) sales_agent.py builds in production."""
+
+    def test_a_fabricated_figure_outside_company_facts_is_blocked(self):
+        allowed = _justifiable_text(
+            message="hi", history=[], collected={}, available_slots=None,
+        )
+        fabricated_reply = "We've completed 10,000+ solar installations across India."
+        result = guardrails.enforce(fabricated_reply, allowed_text=allowed, fallback="fallback reply")
+        assert result.blocked is True
+        assert guardrails.NEW_MONEY in result.codes
+        assert result.reply == "fallback reply"
+
+    def test_a_real_verified_figure_is_not_blocked(self):
+        allowed = _justifiable_text(
+            message="hi", history=[], collected={}, available_slots=None,
+        )
+        real_reply = "We've done 1,200+ PM Surya Ghar residential installations already."
+        result = guardrails.enforce(real_reply, allowed_text=allowed, fallback="fallback reply")
+        assert result.blocked is False
+        assert result.reply == real_reply
