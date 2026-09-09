@@ -69,3 +69,17 @@ class TestSuccessPath:
              patch("app.pdf.generator.upload_to_r2", return_value="https://r2.example/fake.pdf"):
             result = generate_and_upload_pdf(_PROPOSAL_DATA, _CONTENT_CONFIG, proposal_id=1)
         assert result == "https://r2.example/fake.pdf"
+
+
+class TestDateFieldUsesIST:
+    def test_date_field_is_ist_formatted_not_raw_utc(self):
+        """The proposal PDF's "Date:" header is customer-facing text — it must
+        show a real IST date, not the server's raw UTC date."""
+        from datetime import datetime, timezone
+
+        from app.pdf.generator import _build_html
+        from app.timezones import format_ist_date
+
+        html = _build_html(_PROPOSAL_DATA, _CONTENT_CONFIG)
+        expected = format_ist_date(datetime.now(timezone.utc))
+        assert f"Date: {expected}" in html

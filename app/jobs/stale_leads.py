@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.memory import reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import PipelineStage
+from app.timezones import format_ist_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def check_stale_leads(db: Session, now: Optional[datetime] = None) -> dict:
         if fired:
             notifier.notify(fired, {
                 "lead_id": lead.id,
-                "last_customer_message_at": last_msg.isoformat(),
+                "last_customer_message_at": format_ist_datetime(last_msg),
                 "pipeline_stage": lead.pipeline_stage.value,
             })
             memory.mark_stale_notified(lead.id, now, threshold=fired)

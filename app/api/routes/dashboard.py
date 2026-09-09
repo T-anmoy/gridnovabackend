@@ -1360,6 +1360,55 @@ def schedule_meeting(
     }
 
 
+@router.get("/meetings")
+def list_meetings(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """All meetings across every lead, newest-first — the Meetings dashboard page's
+    data source. Same {items, page, page_size, total} shape as GET /audit-log.
+    Sales sees only meetings on their own connected calendar (matching
+    can_schedule_meeting()'s own admin/sales split); Admin/Management see every
+    meeting. Engineers have no reason to see customer-identifying meeting data
+    (same "nothing to access yet" restriction already applied to their lead view)."""
+    if employee.is_engineer:
+        raise HTTPException(status_code=403, detail="Your role cannot view meetings.")
+
+    memory = memory_of(db)
+    assigned_filter = employee.employee_id if employee.is_sales else None
+    meetings, total = memory.paginate_meetings(employee_id=assigned_filter, page=page, page_size=page_size)
+
+    return {
+        "items": [
+            {
+                "id": m.id,
+                "lead_id": m.lead_id,
+                "employee_id": m.employee_id,
+                "employee_name": m.employee.name if m.employee else None,
+                "customer": (
+                    {
+                        "id": m.lead.customer.id,
+                        "name": m.lead.customer.name,
+                        "email": m.lead.customer.email,
+                        "phone": m.lead.customer.phone,
+                    }
+                    if m.lead and m.lead.customer else None
+                ),
+                "scheduled_at": m.scheduled_at.isoformat(),
+                "duration_minutes": m.duration_minutes,
+                "status": m.status,
+                "meet_link": m.meet_link,
+            }
+            for m in meetings
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
+
+
 # ── Internal jobs ─────────────────────────────────────────────────────────────
 
 @router.post("/internal/check-stale-leads")

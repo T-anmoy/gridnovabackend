@@ -74,6 +74,25 @@ class TestStaleDetection:
         kinds = [e[0] for e in events]
         assert kinds == ["lead_stale_48h", "lead_stale_5d"]
 
+    def test_notification_timestamp_is_ist_formatted_not_raw_iso(self, memory, db_session, monkeypatch):
+        """Same bug class as the meeting-scheduled timeline text: the Slack/log
+        notification payload must carry a human-readable IST time, not a raw
+        UTC ISO string, for the field a human actually reads."""
+        from app.jobs.stale_leads import _as_utc
+        from app.timezones import format_ist_datetime
+
+        events = []
+        monkeypatch.setattr("app.notifications.notifier.notifier", _CaptureNotifier(events))
+        lead_id = _seed_lead(memory, db_session, email="ist49@example.com", last_msg_age_hours=49)
+        actual_last_msg = _as_utc(memory.get_lead(lead_id).last_customer_message_at)
+        check_stale_leads(db_session)
+
+        assert events
+        payload = events[0][1]
+        assert payload["last_customer_message_at"] == format_ist_datetime(actual_last_msg)
+        assert payload["last_customer_message_at"] != actual_last_msg.isoformat()
+        assert "IST" in payload["last_customer_message_at"]
+
     def test_qualified_lead_excluded(self, memory, db_session, monkeypatch):
         events = []
         monkeypatch.setattr("app.notifications.notifier.notifier", _CaptureNotifier(events))

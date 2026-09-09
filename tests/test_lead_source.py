@@ -77,3 +77,25 @@ class TestSourceFiltering:
         r = client.get(f"/api/v1/dashboard/leads/{lead.id}", headers=admin_headers())
         assert r.status_code == 200
         assert r.json()["source"] == "referral"
+
+
+class TestLeadOrdering:
+    """list_leads() previously had no order_by at all, so the dashboard's Leads
+    view could render in arbitrary (effectively insertion/oldest-first) order.
+    Newest-first is the expected order everywhere leads are listed."""
+
+    def test_leads_are_returned_newest_first(self, client, memory, db_session):
+        ids = []
+        for i in range(4):
+            c = memory.get_or_create_customer(email=f"order-{i}@example.com", name="C")
+            db_session.commit()
+            lead = memory.create_lead(customer_id=c.id, source=LeadSource.referral)
+            db_session.commit()
+            ids.append(lead.id)
+
+        r = client.get("/api/v1/dashboard/leads", headers=admin_headers())
+        assert r.status_code == 200
+        returned_ids = [i["id"] for i in r.json() if i["id"] in ids]
+        # Same insertion order as `ids` (oldest -> newest); the endpoint must
+        # reverse that, newest first.
+        assert returned_ids == list(reversed(ids))

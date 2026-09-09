@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.config import settings
+from app.timezones import format_ist_date
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def _build_html(proposal_data: dict, content_config: dict) -> str:
         company_name=company.get("name", "Grid Nova Energy"),
         version=proposal_data.get("version", 1),
         customer_name=proposal_data.get("customer_name", "[Customer]"),
-        date=datetime.now(timezone.utc).strftime("%d %B %Y"),
+        date=format_ist_date(datetime.now(timezone.utc)),
         proposal_id=proposal_data.get("proposal_id", ""),
         lead_id=proposal_data.get("lead_id", ""),
         manager_signoff_note="\n".join(notes),

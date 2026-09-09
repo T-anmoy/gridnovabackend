@@ -137,3 +137,23 @@ class TestDeactivatedEmployeeCannotSignIn:
             headers={"X-Employee-Id": "emp-sales-16", "X-Employee-Role": "sales"},
         )
         assert memory.get_employee("emp-sales-16").is_active is False
+
+
+class TestEmployeeOrdering:
+    """list_employees() previously had no `.desc()` on its order_by, so the
+    dashboard's Employees view rendered oldest-first instead of newest-first —
+    the same bug class already fixed for Leads (see test_lead_source.py's
+    TestLeadOrdering) and Proposals."""
+
+    def test_employees_are_returned_newest_first(self, client, memory, db_session):
+        ids = []
+        for i in range(4):
+            emp = _seed_employee(memory, db_session, f"emp-order-{i}", name=f"Order {i}")
+            ids.append(emp.id)
+
+        r = client.get("/api/v1/dashboard/employees", headers=admin_headers())
+        assert r.status_code == 200
+        returned_ids = [e["id"] for e in r.json() if e["id"] in ids]
+        # Same insertion order as `ids` (oldest -> newest); the endpoint must
+        # reverse that, newest first.
+        assert returned_ids == list(reversed(ids))

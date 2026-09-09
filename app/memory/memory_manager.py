@@ -524,6 +524,7 @@ class MemoryManager:
             q = q.where(Lead.assigned_employee_id == assigned_employee_id)
         if source is not None:
             q = q.where(Lead.source == source)
+        q = q.order_by(Lead.created_at.desc(), Lead.id.desc())
         return list(self._db.execute(q).scalars().all())
 
     # ── Stale-lead follow-up ─────────────────────────────────────────────────────
@@ -1440,6 +1441,34 @@ class MemoryManager:
             ).scalars()
         )
 
+    def paginate_meetings(
+        self,
+        employee_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Meeting], int]:
+        """Filtered, paginated meetings across all leads, newest-first — the same
+        page/page_size/total shape as paginate_audit_logs. employee_id scopes to
+        meetings on that one employee's calendar (how Sales' own view is scoped);
+        omitted, every meeting is returned (Admin/Management)."""
+        base = select(Meeting)
+        if employee_id:
+            base = base.where(Meeting.employee_id == employee_id)
+
+        total = self._db.execute(
+            select(func.count()).select_from(base.subquery())
+        ).scalar_one()
+
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 200))
+        rows = self._db.execute(
+            base.options(joinedload(Meeting.lead).joinedload(Lead.customer), joinedload(Meeting.employee))
+            .order_by(Meeting.scheduled_at.desc(), Meeting.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).scalars().all()
+        return list(rows), total
+
     # ── Audit retrieval ────────────────────────────────────────────────────────
 
     def list_audit_logs(self, entity_type: Optional[str] = None, entity_id: Optional[str] = None) -> list[AuditLog]:
@@ -1487,7 +1516,7 @@ class MemoryManager:
 
     def list_employees(self) -> list[Employee]:
         return list(
-            self._db.execute(select(Employee).order_by(Employee.created_at)).scalars()
+            self._db.execute(select(Employee).order_by(Employee.created_at.desc())).scalars()
         )
 
     def update_employee_role(

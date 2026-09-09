@@ -110,6 +110,20 @@ class TestProposalsList:
         assert len(body["items"]) == 2
         assert body["total"] >= 3
 
+    def test_proposals_are_returned_newest_first(self, client, memory, db_session):
+        ids = []
+        for i in range(4):
+            _, _, proposal_id = _seed_lead_with_proposal(memory, db_session, email=f"order-{i}@example.com")
+            ids.append(proposal_id)
+        r = client.get(
+            "/api/v1/dashboard/proposals",
+            params={"page_size": 200},
+            headers=admin_headers(),
+        )
+        assert r.status_code == 200
+        returned_ids = [i["id"] for i in r.json()["items"] if i["id"] in ids]
+        assert returned_ids == list(reversed(ids))
+
     def test_engineer_projection_hides_pricing(self, client, memory, db_session):
         _seed_lead_with_proposal(memory, db_session, email="eng@example.com")
         r = client.get("/api/v1/dashboard/proposals", headers=engineer_headers())
@@ -283,3 +297,77 @@ class TestAuditLog:
         body = r.json()
         assert set(body) == {"items", "page", "page_size", "total"}
         assert all(i["entity_type"] == "proposal" for i in body["items"])
+
+
+def _seed_meeting(memory, db_session, *, email, employee_id, scheduled_at):
+    customer = memory.get_or_create_customer(email=email, name=f"Cust {email}")
+    db_session.commit()
+    lead = memory.create_lead(customer_id=customer.id)
+    db_session.commit()
+    memory.get_or_create_employee(employee_id, employee_id, f"{employee_id}@gridnova.in", "sales")
+    db_session.commit()
+    meeting = memory.create_meeting(
+        lead_id=lead.id, employee_id=employee_id,
+        scheduled_at=scheduled_at, duration_minutes=30, performed_by="test",
+        meet_link="https://meet.google.com/xyz",
+    )
+    db_session.commit()
+    return lead.id, meeting.id
+
+
+class TestMeetingsList:
+    def test_requires_auth(self, client):
+        assert client.get("/api/v1/dashboard/meetings").status_code == 401
+
+    def test_engineer_blocked(self, client):
+        assert client.get("/api/v1/dashboard/meetings", headers=engineer_headers()).status_code == 403
+
+    def test_admin_sees_all_with_customer_context_newest_first(self, client, memory, db_session):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        _seed_meeting(memory, db_session, email="m1@example.com", employee_id="emp-sales-1",
+                      scheduled_at=now + timedelta(days=1))
+        _seed_meeting(memory, db_session, email="m2@example.com", employee_id="emp-sales-1",
+                      scheduled_at=now + timedelta(days=3))
+
+        r = client.get("/api/v1/dashboard/meetings", headers=admin_headers())
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(body) == {"items", "page", "page_size", "total"}
+        assert body["total"] >= 2
+        emails = [i["customer"]["email"] for i in body["items"]]
+        assert "m1@example.com" in emails and "m2@example.com" in emails
+        # Newest-first: the day+3 meeting must precede the day+1 meeting.
+        idx = {i["customer"]["email"]: n for n, i in enumerate(body["items"])}
+        assert idx["m2@example.com"] < idx["m1@example.com"]
+        item = next(i for i in body["items"] if i["customer"]["email"] == "m1@example.com")
+        assert item["status"] == "scheduled"
+        assert item["meet_link"] == "https://meet.google.com/xyz"
+        assert "scheduled_at" in item and "duration_minutes" in item
+
+    def test_sales_scoped_to_own_calendar_only(self, client, memory, db_session):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        _seed_meeting(memory, db_session, email="mine@example.com", employee_id="emp-sales-1",
+                      scheduled_at=now + timedelta(days=1))
+        _seed_meeting(memory, db_session, email="theirs@example.com", employee_id="emp-sales-x",
+                      scheduled_at=now + timedelta(days=2))
+
+        r = client.get("/api/v1/dashboard/meetings", headers=sales_headers("emp-sales-1"))
+        assert r.status_code == 200, r.text
+        emails = [i["customer"]["email"] for i in r.json()["items"]]
+        assert "mine@example.com" in emails
+        assert "theirs@example.com" not in emails
+
+    def test_pagination(self, client, memory, db_session):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        for i in range(3):
+            _seed_meeting(memory, db_session, email=f"page{i}@example.com", employee_id="emp-sales-1",
+                          scheduled_at=now + timedelta(days=i + 1))
+
+        r = client.get("/api/v1/dashboard/meetings", params={"page": 1, "page_size": 2}, headers=admin_headers())
+        body = r.json()
+        assert len(body["items"]) == 2
+        assert body["total"] >= 3
+        assert body["page"] == 1 and body["page_size"] == 2
