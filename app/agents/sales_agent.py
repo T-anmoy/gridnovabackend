@@ -17,6 +17,7 @@ from app.memory.models import (
     Channel, LeadScore, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
 )
 from app.rules.business_rules import REQUIRED_FIELDS, check_missing_fields, evaluate_lead
+from app.timezones import format_ist_datetime
 
 if TYPE_CHECKING:
     from app.memory.memory_manager import MemoryManager
@@ -564,7 +565,7 @@ class SalesAgent:
                         "meet_link": meeting.meet_link,
                     }
                     result["reply_text"] = (
-                        f"You're booked for {self._format_slot(slot_dt, settings)}. "
+                        f"You're booked for {format_ist_datetime(slot_dt)}. "
                         "A calendar invite with the Google Meet link is on its way to your inbox."
                     )
                     return result
@@ -601,15 +602,8 @@ class SalesAgent:
              "offered_at": datetime.now(ZoneInfo("UTC")).isoformat()},
         )
         result["offered_slots"] = offered
-        result["offered_slots_human"] = [self._format_slot(s, settings) for s in top]
+        result["offered_slots_human"] = [format_ist_datetime(s) for s in top]
         return result
-
-    @staticmethod
-    def _format_slot(slot, settings) -> str:
-        from zoneinfo import ZoneInfo
-
-        local = slot.astimezone(ZoneInfo(settings.business_timezone))
-        return local.strftime("%a %d %b, %H:%M IST")
 
 
 sales_agent = SalesAgent()
