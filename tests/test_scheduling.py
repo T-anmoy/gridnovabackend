@@ -109,6 +109,64 @@ class TestBooking:
         ctx = memory.get_lead_context(lead_id)
         assert any(e.event_type == TimelineEventType.meeting_scheduled for e in ctx["timeline"])
 
+    def test_timeline_description_is_ist_formatted_not_raw_iso(self, memory, db_session, monkeypatch):
+        """Regression test for the real bug: a staff user saw "Meeting scheduled
+        for 2026-09-09T06:30:00+00:00" — a raw UTC ISO string — on a lead's
+        timeline instead of a real, human-readable IST time."""
+        from app.timezones import format_ist_datetime
+
+        emp = _connect_employee(memory, db_session)
+        _, lead_id = _seed_lead(memory, db_session)
+        monkeypatch.setattr(google_calendar, "get_busy_intervals", lambda *a, **k: [])
+        monkeypatch.setattr(
+            google_calendar, "insert_event",
+            lambda **k: {"google_event_id": "ev-ist", "meet_link": "https://meet.google.com/ist"},
+        )
+        slot = datetime.now(timezone.utc) + timedelta(days=1)
+        booking.book_meeting(
+            memory=memory, lead_id=lead_id, employee_id=emp,
+            scheduled_at=slot, duration_minutes=30, performed_by="test",
+        )
+        db_session.commit()
+
+        ctx = memory.get_lead_context(lead_id)
+        event = next(e for e in ctx["timeline"] if e.event_type == TimelineEventType.meeting_scheduled)
+        assert format_ist_datetime(slot) in event.description
+        assert "IST" in event.description
+        assert slot.isoformat() not in event.description
+
+    def test_meeting_booked_notification_is_ist_formatted_not_raw_iso(self, memory, db_session, monkeypatch):
+        """The Slack/log notification fired on booking carries the same
+        scheduled_at value — it must not leak a raw ISO string into human-read
+        notification text either."""
+        from app.notifications.notifier import LogNotifier
+        from app.timezones import format_ist_datetime
+
+        events = []
+
+        class _CaptureNotifier(LogNotifier):
+            def notify(self, event_type, payload):
+                events.append((event_type, payload))
+
+        monkeypatch.setattr("app.notifications.notifier.notifier", _CaptureNotifier())
+
+        emp = _connect_employee(memory, db_session)
+        _, lead_id = _seed_lead(memory, db_session)
+        monkeypatch.setattr(google_calendar, "get_busy_intervals", lambda *a, **k: [])
+        monkeypatch.setattr(
+            google_calendar, "insert_event",
+            lambda **k: {"google_event_id": "ev-notif", "meet_link": "https://meet.google.com/notif"},
+        )
+        slot = datetime.now(timezone.utc) + timedelta(days=1)
+        booking.book_meeting(
+            memory=memory, lead_id=lead_id, employee_id=emp,
+            scheduled_at=slot, duration_minutes=30, performed_by="test",
+        )
+
+        assert events and events[0][0] == "meeting_booked"
+        assert events[0][1]["scheduled_at"] == format_ist_datetime(slot)
+        assert events[0][1]["scheduled_at"] != slot.isoformat()
+
     def test_race_condition_prevents_double_book(self, memory, db_session, monkeypatch):
         emp = _connect_employee(memory, db_session)
         _, lead_id = _seed_lead(memory, db_session)

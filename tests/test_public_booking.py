@@ -112,6 +112,8 @@ class TestBookingEndpoint:
         # Free at the availability-style check inside is_slot_free... but make it
         # busy so is_slot_free itself returns None (nobody free) — the most direct
         # way to exercise the "slot already taken" path through the real endpoint.
+        # Only the exact requested slot is busy — every other slot in the window is
+        # genuinely free, so real alternatives exist for the endpoint to offer.
         monkeypatch.setattr(
             google_calendar, "get_busy_intervals",
             lambda *a, **k: [(slot, slot + timedelta(minutes=30))],
@@ -127,13 +129,28 @@ class TestBookingEndpoint:
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
         assert detail["code"] == "slot_unavailable"
+        # The exact requested time is named, not just a generic message.
+        assert detail["requested_slot"] == slot.isoformat()
+        # Real, currently-free nearby alternatives are offered — the caller
+        # chooses, nothing here auto-selects on their behalf.
+        assert detail["alternatives"], "expected real alternative slots to be offered"
+        alt_times = {a["scheduled_at"] for a in detail["alternatives"]}
+        assert slot.isoformat() not in alt_times
+        for alt in detail["alternatives"]:
+            assert "scheduled_at" in alt and "label" in alt
 
     def test_true_check_then_act_race_still_caught_by_db_unique_index(
         self, client, memory, db_session, monkeypatch
     ):
-        """is_slot_free reports free (so the endpoint proceeds), but book_meeting's
-        own re-verification inside the lock finds it just got taken — the DB-level
-        partial unique index (migration 0009) is the actual backstop."""
+        """Two near-simultaneous booking requests for the same slot: the first
+        (simulated directly via book_meeting, as if it landed a moment earlier)
+        wins. is_slot_free then reports free for the second (so the endpoint
+        proceeds), but book_meeting's own re-verification inside the lock finds
+        it just got taken — the DB-level partial unique index (migration 0009)
+        is the actual backstop. The loser must get a real slot_unavailable
+        response naming the exact conflicting time it asked for, with real
+        alternative slots attached — nothing here implies a slot was already
+        chosen for it."""
         emp = _connect_employee(memory, db_session)
         slot = _slot()
         monkeypatch.setattr(google_calendar, "get_busy_intervals", lambda *a, **k: [])
@@ -159,7 +176,16 @@ class TestBookingEndpoint:
             json={"name": "Race Loser", "email": "raceloser@example.com", "scheduled_at": slot.isoformat()},
         )
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "slot_unavailable"
+        detail = r.json()["detail"]
+        assert detail["code"] == "slot_unavailable"
+        assert detail["requested_slot"] == slot.isoformat()
+        assert "alternatives" in detail
+        # The response must never present an already-picked replacement — only a
+        # plain list the caller can pick from (possibly empty if none are free).
+        assert isinstance(detail["alternatives"], list)
+        assert "scheduled_at" not in detail  # no top-level substitute slot
+        for alt in detail["alternatives"]:
+            assert alt["scheduled_at"] != slot.isoformat()
 
     def test_malformed_input_rejected(self, client, memory, db_session):
         r = client.post(

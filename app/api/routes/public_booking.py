@@ -17,7 +17,6 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
@@ -28,6 +27,7 @@ from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import LeadSource
 from app.scheduling import availability, booking, google_calendar
+from app.timezones import format_ist_datetime
 
 router = APIRouter(prefix="/api/v1/public/booking")
 
@@ -48,6 +48,10 @@ _recent_emails: dict[str, datetime] = {}
 
 MAX_DAYS_AHEAD = 30
 DEFAULT_DAYS_AHEAD = 14
+
+# How many genuinely-free nearby slots to offer alongside a slot_unavailable
+# error, so the caller has real options rather than just a dead end.
+NEARBY_ALTERNATIVES_COUNT = 3
 
 # Same lightweight pattern public_intake.py uses — this codebase does not use
 # pydantic's EmailStr (would need the email-validator package, which isn't
@@ -83,9 +87,41 @@ def _check_email_cooldown(email: str) -> None:
     _recent_emails[key] = now
 
 
-def _format_slot_label(slot: datetime) -> str:
-    local = slot.astimezone(ZoneInfo(settings.business_timezone))
-    return local.strftime("%a %d %b, %H:%M IST")
+def _nearby_alternatives(memory: MemoryManager, requested_slot: datetime, duration_minutes: int) -> list[dict]:
+    """Genuinely-free slots closest in time to the one that was just refused.
+
+    Calls availability.get_available_slots() fresh, right now — never reuses an
+    earlier /availability response — so what's offered here is guaranteed free at
+    the moment of this response, not stale. Sorted by closeness to what the caller
+    actually asked for; this never invents or auto-picks a slot on the caller's
+    behalf, it only surfaces real options for them to choose from.
+    """
+    try:
+        slots = availability.get_available_slots(
+            memory, duration_minutes=duration_minutes, days_ahead=DEFAULT_DAYS_AHEAD,
+        )
+    except availability.NoConnectedCalendarsError:
+        return []
+    # Exclude the exact requested slot itself — it just proved unavailable.
+    slots = [s for s in slots if s != requested_slot]
+    slots.sort(key=lambda s: abs((s - requested_slot).total_seconds()))
+    nearest = slots[:NEARBY_ALTERNATIVES_COUNT]
+    return [{"scheduled_at": s.isoformat(), "label": format_ist_datetime(s)} for s in nearest]
+
+
+def _raise_slot_unavailable(memory: MemoryManager, requested_slot: datetime, duration_minutes: int) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "slot_unavailable",
+            "message": (
+                f"The {format_ist_datetime(requested_slot)} slot is no longer available — "
+                "it was just taken. Please pick another time."
+            ),
+            "requested_slot": requested_slot.isoformat(),
+            "alternatives": _nearby_alternatives(memory, requested_slot, duration_minutes),
+        },
+    )
 
 
 class AvailabilityResponse(BaseModel):
@@ -124,7 +160,7 @@ def get_public_availability(
         duration_minutes=duration,
         days_ahead=days_ahead,
         slots=[
-            {"scheduled_at": s.isoformat(), "label": _format_slot_label(s)}
+            {"scheduled_at": s.isoformat(), "label": format_ist_datetime(s)}
             for s in slots
         ],
     )
@@ -194,13 +230,7 @@ def create_public_booking(
             detail={"code": "no_calendars_connected", "message": str(exc)},
         )
     if not employee_id:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "slot_unavailable",
-                "message": "That slot is no longer available — it was just taken. Please pick another time.",
-            },
-        )
+        _raise_slot_unavailable(memory, scheduled_at, duration)
 
     customer = memory.get_or_create_customer(
         email=body.email,
@@ -240,12 +270,9 @@ def create_public_booking(
             performed_by="website",
         )
         db.commit()
-    except booking.SlotUnavailableError as exc:
+    except booking.SlotUnavailableError:
         db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "slot_unavailable", "message": str(exc)},
-        )
+        _raise_slot_unavailable(memory, scheduled_at, duration)
     except google_calendar.GoogleCalendarNotConfiguredError as exc:
         db.rollback()
         raise HTTPException(

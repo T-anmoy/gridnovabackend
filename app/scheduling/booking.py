@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.memory.models import Meeting, TimelineEventType
 from app.scheduling import availability, google_calendar
+from app.timezones import format_ist_datetime
 
 if TYPE_CHECKING:
     from app.memory.memory_manager import MemoryManager
@@ -105,7 +106,7 @@ def book_meeting(
         memory.add_timeline_event(
             lead_id=lead_id,
             event_type=TimelineEventType.meeting_scheduled,
-            description=f"Meeting scheduled for {scheduled_at.isoformat()} with {employee_id}",
+            description=f"Meeting scheduled for {format_ist_datetime(scheduled_at)} with {employee_id}",
             created_by=performed_by,
         )
 
@@ -114,7 +115,7 @@ def book_meeting(
         meeting_id=meeting.id,
         lead_id=lead_id,
         employee_id=employee_id,
-        scheduled_at=scheduled_at.isoformat(),
+        scheduled_at=format_ist_datetime(scheduled_at),
     )
 
     return meeting
