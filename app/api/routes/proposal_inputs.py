@@ -9,15 +9,18 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
+    INSTALLATION_PHOTO_SLOTS,
     ConnectionPhase,
     ConnectionType,
+    ConsumerPriorityClass,
     CustomerType,
+    DiscomConsumerCategory,
     EquipmentTier,
     GovernmentScheme,
     InputStatus,
@@ -37,6 +40,27 @@ class DocumentRef(BaseModel):
     filename: str
     # Cloudflare R2 object key — null until upload is wired (see TODO on the model).
     storage_key: Optional[str] = None
+
+
+class ConsumptionMonth(BaseModel):
+    month: str  # "YYYY-MM"
+    units_kwh: Optional[float] = None
+    bill_inr: Optional[float] = None
+
+
+class InstallationPhotoRef(BaseModel):
+    filename: str
+    # Same R2-upload TODO as DocumentRef above.
+    storage_key: Optional[str] = None
+
+
+class SignatureRef(BaseModel):
+    filename: str
+    storage_key: Optional[str] = None
+    # ISO string, not a datetime — this is stored in a plain JSON column, and a
+    # datetime object doesn't serialize through that without extra handling
+    # nothing else here needs.
+    signed_at: Optional[str] = None
 
 
 class ProposalInputsCreate(BaseModel):
@@ -63,13 +87,26 @@ class ProposalInputsCreate(BaseModel):
     shading_condition: Optional[ShadingCondition] = None
     structural_notes: Optional[str] = None
 
+    # Roof detail
+    roof_ownership_confirmed: Optional[bool] = None
+    roofs_available_count: Optional[int] = None
+    roofs_considered_count: Optional[int] = None
+    future_roof_expansion_planned: Optional[bool] = None
+    roof_age_years: Optional[float] = None
+
     # Load & Output
     avg_monthly_bill_inr: Optional[float] = None
     avg_monthly_units_kwh: Optional[float] = None
+    consumption_history: Optional[list[ConsumptionMonth]] = None
     peak_load_kw: Optional[float] = None
+    sanctioned_load_kw: Optional[float] = None
     connection_phase: Optional[ConnectionPhase] = None
     desired_output_kw: Optional[float] = None
     load_notes: Optional[str] = None
+
+    # DISCOM consumer classification
+    discom_consumer_category: Optional[DiscomConsumerCategory] = None
+    consumer_priority_class: ConsumerPriorityClass = ConsumerPriorityClass.normal
 
     # System Configuration
     connection_type: ConnectionType
@@ -82,6 +119,22 @@ class ProposalInputsCreate(BaseModel):
 
     # Documents
     document_refs: Optional[list[DocumentRef]] = None
+    installation_photo_refs: Optional[dict[str, InstallationPhotoRef]] = None
+    staff_signature_ref: Optional[SignatureRef] = None
+    customer_signature_ref: Optional[SignatureRef] = None
+
+    @field_validator("installation_photo_refs")
+    @classmethod
+    def _known_photo_slots_only(cls, value):
+        if value is None:
+            return value
+        unknown = set(value) - set(INSTALLATION_PHOTO_SLOTS)
+        if unknown:
+            raise ValueError(
+                f"Unknown installation photo slot(s): {sorted(unknown)}. "
+                f"Expected one of {INSTALLATION_PHOTO_SLOTS}."
+            )
+        return value
 
 
 class ProposalInputsReview(BaseModel):
@@ -116,12 +169,21 @@ def _serialize(inputs) -> dict:
         "floors": inputs.floors,
         "shading_condition": inputs.shading_condition,
         "structural_notes": inputs.structural_notes,
+        "roof_ownership_confirmed": inputs.roof_ownership_confirmed,
+        "roofs_available_count": inputs.roofs_available_count,
+        "roofs_considered_count": inputs.roofs_considered_count,
+        "future_roof_expansion_planned": inputs.future_roof_expansion_planned,
+        "roof_age_years": inputs.roof_age_years,
         "avg_monthly_bill_inr": inputs.avg_monthly_bill_inr,
         "avg_monthly_units_kwh": inputs.avg_monthly_units_kwh,
+        "consumption_history": inputs.consumption_history,
         "peak_load_kw": inputs.peak_load_kw,
+        "sanctioned_load_kw": inputs.sanctioned_load_kw,
         "connection_phase": inputs.connection_phase,
         "desired_output_kw": inputs.desired_output_kw,
         "load_notes": inputs.load_notes,
+        "discom_consumer_category": inputs.discom_consumer_category,
+        "consumer_priority_class": inputs.consumer_priority_class,
         "connection_type": inputs.connection_type,
         "net_metering_required": inputs.net_metering_required,
         "dcr_panels_required": inputs.dcr_panels_required,
@@ -130,6 +192,9 @@ def _serialize(inputs) -> dict:
         "equipment_tier": inputs.equipment_tier,
         "additional_requirements": inputs.additional_requirements,
         "document_refs": inputs.document_refs,
+        "installation_photo_refs": inputs.installation_photo_refs,
+        "staff_signature_ref": inputs.staff_signature_ref,
+        "customer_signature_ref": inputs.customer_signature_ref,
         "internal_notes": inputs.internal_notes,
     }
 

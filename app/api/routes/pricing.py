@@ -186,7 +186,6 @@ class InstantEstimateRequest(BaseModel):
     monthly_bill_inr: Optional[float] = Field(default=None, gt=0)
     usable_roof_area_sqft: Optional[float] = Field(default=None, gt=0)
     connection_phase: Optional[str] = None
-    tier: str = "good"
     roof_type: Optional[str] = None
     floors: Optional[int] = Field(default=None, ge=1)
     shading: Optional[str] = None
@@ -215,10 +214,14 @@ def instant_estimate(
     db: Session = Depends(get_db),
 ):
     """Public, unauthenticated — the expanded /solar-calculator flow: real
-    sizing (consumption and/or roof-area based, phase-capped), tier and
-    access-difficulty pricing, and the real PM Surya Ghar subsidy. Returns a
-    complete, itemized breakdown, or an indicative range (never a false
-    confident number) when shading was reported as significant."""
+    sizing (consumption and/or roof-area based, phase-capped), fixed
+    best-tier and access-difficulty pricing, and the real PM Surya Ghar
+    subsidy. Always prices at the top tier — tier is not a customer-supplied
+    choice on this path (see instant_estimate.py's FIXED_PUBLIC_TIER). An
+    extra `tier` field in the request body, if a caller sends one, is simply
+    ignored. Returns a complete, itemized breakdown, or an indicative range
+    (never a false confident number) when shading was reported as
+    significant."""
     _check_instant_estimate_rate_limit(request)
 
     memory = MemoryManager(db)
@@ -233,7 +236,6 @@ def instant_estimate(
                 monthly_bill_inr=body.monthly_bill_inr,
                 usable_roof_area_sqft=body.usable_roof_area_sqft,
                 connection_phase=body.connection_phase,
-                tier=body.tier,
                 roof_type=body.roof_type,
                 floors=body.floors,
                 shading=body.shading,
@@ -252,9 +254,7 @@ def instant_estimate(
             "area_based_kw": result.area_based_kw,
             "phase_capped": result.phase_capped,
         },
-        "tier": result.tier,
         "base_cost": result.base_cost,
-        "tier_cost": result.tier_cost,
         "adders": result.adders,
         "component_breakdown": result.component_breakdown,
         "subtotal_before_tax": result.subtotal_before_tax,

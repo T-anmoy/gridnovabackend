@@ -1,14 +1,22 @@
 """
 Instant estimate — orchestrates sizing (app/pricing/sizing.py), the layered
-cost engine (app/pricing/engine.py), the tier/access-difficulty modifiers
-added to that engine, and the PM Surya Ghar subsidy (app/pricing/subsidy.py)
-into one breakdown for the public /solar-calculator flow.
+cost engine (app/pricing/engine.py), the access-difficulty modifier added to
+that engine, and the PM Surya Ghar subsidy (app/pricing/subsidy.py) into one
+breakdown for the public /solar-calculator flow.
 
 Kept separate from engine.py itself: engine.py is the general-purpose layered
 cost model shared by the public /estimate and staff /breakdown endpoints
 (untouched by this module). This orchestration — sizing first, tier and
 subsidy applied after, the shading-uncertainty branch — is specific to the
 instant-estimate use case and has no business inside the general engine.
+
+TIER: this public path always prices at the fixed best tier — see
+FIXED_PUBLIC_TIER below. Tier is no longer a customer-supplied input here;
+engine.py's tier concept itself (calculate_tier_multiplier, KNOWN_TIERS) is
+untouched, since a staff-facing path may legitimately need real tier
+flexibility later. This module just no longer exposes that choice publicly,
+and no longer reports which tier the price reflects — a customer gets one
+real number, not "the price at tier X."
 
 SHADING: "significant" shading is not part of engine.py's own shading
 vocabulary (none/partial_morning/partial_evening/heavy) — it is a distinct,
@@ -47,6 +55,11 @@ SIGNIFICANT_SHADING_NOTE = (
     "needed to size and price this accurately."
 )
 
+# The public instant-estimate path always prices at the top tier — no longer a
+# customer-supplied choice. engine.py's KNOWN_TIERS still has "good"/"better"
+# too, for any staff-facing path that legitimately needs that flexibility.
+FIXED_PUBLIC_TIER = "best"
+
 
 @dataclass
 class InstantEstimateInputs:
@@ -57,7 +70,6 @@ class InstantEstimateInputs:
     monthly_bill_inr: Optional[float] = None
     usable_roof_area_sqft: Optional[float] = None
     connection_phase: Optional[str] = None
-    tier: str = "good"
     roof_type: Optional[str] = None
     floors: Optional[int] = None
     shading: Optional[str] = None
@@ -72,9 +84,7 @@ class InstantEstimateResult:
     consumption_based_kw: Optional[float]
     area_based_kw: Optional[float]
     phase_capped: bool
-    tier: str
     base_cost: float
-    tier_cost: float
     adders: dict[str, float]
     component_breakdown: dict[str, float]
     subtotal_before_tax: float
@@ -123,20 +133,21 @@ def calculate_instant_estimate(
         ),
     )
 
-    tier_multiplier = pricing_engine.calculate_tier_multiplier(inputs.tier)
+    tier_multiplier = pricing_engine.calculate_tier_multiplier(FIXED_PUBLIC_TIER)
     access_modifier = pricing_engine.calculate_access_difficulty_modifier(inputs.access_difficulty)
 
-    # base_cost: the engine's own full multi-layer subtotal (equipment,
+    # engine_subtotal: the engine's own full multi-layer subtotal (equipment,
     # installation incl. roof/floor/shading/location, balance-of-system,
     # civil, regulatory, optional services — everything engine.py already
-    # computes) at this flow's two ADDITIONAL layers' neutral setting
-    # (tier="good" is 1.0x, so base_cost == tier_cost for the baseline tier).
-    # component_breakdown below shows what already makes up this number —
-    # informational only, NOT to be added again on top of base_cost.
-    base_cost = breakdown.subtotal_before_tax
-    tier_cost = base_cost * tier_multiplier
-    access_difficulty_adder = round(tier_cost * (access_modifier - 1.0), 2)
-    subtotal_before_tax = tier_cost + access_difficulty_adder
+    # computes), BEFORE the fixed best-tier multiplier. Never returned as its
+    # own field — this path reports one real number, not "the price before
+    # tier" alongside "the price at tier X". component_breakdown below shows
+    # what already makes up base_cost — informational only, NOT to be added
+    # again on top of it.
+    engine_subtotal = breakdown.subtotal_before_tax
+    base_cost = engine_subtotal * tier_multiplier
+    access_difficulty_adder = round(base_cost * (access_modifier - 1.0), 2)
+    subtotal_before_tax = base_cost + access_difficulty_adder
 
     gst_amount = pricing_engine.calculate_gst(subtotal_before_tax, inputs.state)
     subtotal_with_gst = subtotal_before_tax + gst_amount
@@ -164,9 +175,7 @@ def calculate_instant_estimate(
             consumption_based_kw=sizing_result.consumption_based_kw,
             area_based_kw=sizing_result.area_based_kw,
             phase_capped=sizing_result.phase_capped,
-            tier=inputs.tier,
             base_cost=round(base_cost, 2),
-            tier_cost=round(tier_cost, 2),
             adders=adders,
             component_breakdown=component_breakdown,
             subtotal_before_tax=round(subtotal_before_tax, 2),
@@ -184,9 +193,7 @@ def calculate_instant_estimate(
         consumption_based_kw=sizing_result.consumption_based_kw,
         area_based_kw=sizing_result.area_based_kw,
         phase_capped=sizing_result.phase_capped,
-        tier=inputs.tier,
         base_cost=round(base_cost, 2),
-        tier_cost=round(tier_cost, 2),
         adders=adders,
         component_breakdown=component_breakdown,
         subtotal_before_tax=round(subtotal_before_tax, 2),

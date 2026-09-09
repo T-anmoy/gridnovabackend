@@ -191,6 +191,39 @@ class EquipmentTier(str, enum.Enum):
     # TODO: Raju Paul to define Good/Better/Best tier names formally
 
 
+class DiscomConsumerCategory(str, enum.Enum):
+    """The DISCOM's own tariff-category classification — distinct from
+    CustomerType above (which is about who the customer entity is: an
+    individual or an organisation), not about how the electricity connection
+    itself is billed."""
+    domestic = "domestic"
+    industrial = "industrial"
+    # TODO: expand once Raju Paul confirms the full DISCOM tariff-category
+    # list (commercial, agricultural, etc.) — domestic/industrial are the two
+    # named in the current site-assessment gap analysis.
+
+
+class ConsumerPriorityClass(str, enum.Enum):
+    normal = "normal"
+    vip = "vip"
+
+
+# The fixed vocabulary of required installation-photo categories, sourced from
+# a real professional rooftop-solar site-survey checklist. Keys into
+# ProposalInputs.installation_photo_refs — a dict, not the open-ended list
+# document_refs already uses, because these are specific required categories,
+# not an arbitrary pile of uploads.
+INSTALLATION_PHOTO_SLOTS = (
+    "panel_installation_area",
+    "acdb_dcdb_placement",
+    "earthing_location",
+    "inverter_installation_area",
+    "wiring_path",
+    "panel_to_inverter_distance",
+    "inverter_to_lt_panel_distance",
+)
+
+
 class InputStatus(str, enum.Enum):
     submitted = "submitted"                        # just received from form
     under_review = "under_review"                  # sales team is looking at it
@@ -440,13 +473,39 @@ class ProposalInputs(Base):
     shading_condition: Mapped[Optional[ShadingCondition]] = mapped_column(SAEnum(ShadingCondition), nullable=True)
     structural_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── Roof detail (site-assessment gap analysis) ───────────────────────────
+    roof_ownership_confirmed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    roofs_available_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    roofs_considered_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    future_roof_expansion_planned: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    roof_age_years: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # ── Load & Output ─────────────────────────────────────────────────────────
     avg_monthly_bill_inr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     avg_monthly_units_kwh: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # 6 months of real consumption history — list of {month: "YYYY-MM",
+    # units_kwh, bill_inr}, the same list-of-dicts pattern document_refs
+    # already uses below, since this is small, bounded (6 entries), and never
+    # queried independently of the row it belongs to. avg_monthly_bill_inr/
+    # avg_monthly_units_kwh above are kept as-is for backward compatibility —
+    # a single average a caller may still submit directly, distinct from this
+    # richer per-month history.
+    consumption_history: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     peak_load_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # The DISCOM's own officially sanctioned load — distinct from peak_load_kw
+    # (the customer's own observed/estimated peak), which already existed.
+    sanctioned_load_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     connection_phase: Mapped[Optional[ConnectionPhase]] = mapped_column(SAEnum(ConnectionPhase), nullable=True)
     desired_output_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     load_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── DISCOM consumer classification ───────────────────────────────────────
+    discom_consumer_category: Mapped[Optional[DiscomConsumerCategory]] = mapped_column(
+        SAEnum(DiscomConsumerCategory), nullable=True
+    )
+    consumer_priority_class: Mapped[Optional[ConsumerPriorityClass]] = mapped_column(
+        SAEnum(ConsumerPriorityClass), nullable=True, default=ConsumerPriorityClass.normal
+    )
 
     # ── System Configuration ─────────────────────────────────────────────────
     connection_type: Mapped[ConnectionType] = mapped_column(SAEnum(ConnectionType), nullable=False)
@@ -462,6 +521,19 @@ class ProposalInputs(Base):
     # key, null until upload is wired.
     # TODO: wire actual file upload when R2 credentials are configured.
     document_refs: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+    # Structured installation photos, one of INSTALLATION_PHOTO_SLOTS above per
+    # key -> {filename, storage_key} (same per-item shape as document_refs,
+    # but keyed rather than a loose list, since a real site-survey checklist
+    # calls for these specific categories, not an open-ended pile). Same R2
+    # wiring TODO as document_refs above.
+    installation_photo_refs: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # ── Signatures ────────────────────────────────────────────────────────────
+    # {filename, storage_key, signed_at} — same shape/TODO as document_refs;
+    # a signature is stored the same way any other captured image is.
+    staff_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    customer_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # ── Internal notes ────────────────────────────────────────────────────────
     internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

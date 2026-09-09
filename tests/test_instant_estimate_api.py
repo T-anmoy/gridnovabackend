@@ -3,6 +3,8 @@
 /breakdown, which have their own pre-existing test coverage untouched here."""
 import pytest
 
+from app.pricing import engine as pricing_engine
+from app.pricing.instant_estimate import FIXED_PUBLIC_TIER
 from app.pricing.subsidy import MAX_SUBSIDY_INR
 
 
@@ -26,10 +28,13 @@ class TestBasicShape:
         body = r.json()
         assert body["recommended_size_kw"] == 4.5
         for key in (
-            "base_cost", "tier_cost", "adders", "component_breakdown",
+            "base_cost", "adders", "component_breakdown",
             "subtotal_before_tax", "gst_amount", "subsidy_inr", "net_cost",
         ):
             assert key in body
+        # No tier is exposed as a customer-facing distinction on this path.
+        assert "tier" not in body
+        assert "tier_cost" not in body
         assert body["is_indicative_range"] is False
         assert body["net_cost_range_min"] is None
         assert body["net_cost_range_max"] is None
@@ -46,36 +51,43 @@ class TestBasicShape:
         r = _post(client, segment="not-a-real-segment")
         assert r.status_code == 422
 
-    def test_unknown_tier_rejected(self, client, memory, db_session):
-        r = _post(client, tier="platinum")
-        assert r.status_code == 422
+    def test_a_tier_field_in_the_request_is_simply_ignored(self, client, memory, db_session):
+        """tier is no longer part of this endpoint's contract at all — sending
+        one (even a bogus value) must not be rejected and must not change the
+        price, since it's silently ignored rather than validated."""
+        without_tier = _post(client).json()
+        with_bogus_tier = _post(client, tier="platinum").json()
+        assert with_bogus_tier == without_tier
 
 
-class TestTiers:
-    def test_good_tier_is_the_baseline(self, client, memory, db_session):
-        r = _post(client, tier="good")
-        body = r.json()
-        assert body["base_cost"] == body["tier_cost"]
+class TestFixedBestTierPricing:
+    """The public path always prices at the fixed best tier now — verified
+    against engine.py's own real tier multiplier, not a re-derived guess."""
 
-    def test_better_tier_adds_ten_percent(self, client, memory, db_session):
-        r = _post(client, tier="better")
-        body = r.json()
-        assert body["tier_cost"] == pytest.approx(body["base_cost"] * 1.10, rel=1e-6)
+    def test_price_matches_the_engine_best_tier_multiplier_exactly(self, client, memory, db_session):
+        body = _post(client).json()
+        good_tier_estimate = pricing_engine.calculate_full_estimate(
+            memory,
+            pricing_engine.PricingInputs(
+                segment="residential", size_kw=body["recommended_size_kw"], state="West Bengal",
+            ),
+        )
+        best_multiplier = pricing_engine.calculate_tier_multiplier(FIXED_PUBLIC_TIER)
+        assert FIXED_PUBLIC_TIER == "best"
+        assert body["base_cost"] == pytest.approx(
+            good_tier_estimate.subtotal_before_tax * best_multiplier, rel=1e-6
+        )
 
-    def test_best_tier_adds_twentyfive_percent(self, client, memory, db_session):
-        r = _post(client, tier="best")
-        body = r.json()
-        assert body["tier_cost"] == pytest.approx(body["base_cost"] * 1.25, rel=1e-6)
-
-    def test_higher_tier_costs_strictly_more(self, client, memory, db_session):
-        good = _post(client, tier="good").json()
-        better = _post(client, tier="better").json()
-        best = _post(client, tier="best").json()
-        assert good["tier_cost"] < better["tier_cost"] < best["tier_cost"]
+    def test_sending_a_different_tier_value_never_changes_the_price(self, client, memory, db_session):
+        prices = {
+            _post(client, tier=t).json()["base_cost"]
+            for t in ("good", "better", "best", "anything-at-all")
+        }
+        assert len(prices) == 1
 
 
 class TestAdders:
-    def test_access_difficulty_adds_on_top_of_tier_cost(self, client, memory, db_session):
+    def test_access_difficulty_adds_on_top_of_base_cost(self, client, memory, db_session):
         easy = _post(client, access_difficulty="easy").json()
         difficult = _post(client, access_difficulty="difficult").json()
         assert easy["adders"]["access_difficulty"] == 0.0
