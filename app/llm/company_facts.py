@@ -19,6 +19,7 @@ specifically so the model never fills a gap on its own.
 """
 from __future__ import annotations
 
+from app.config import settings
 from app.pricing.subsidy import (
     MAX_SUBSIDY_INR,
     RATE_PER_KW_FIRST_2KW,
@@ -26,11 +27,34 @@ from app.pricing.subsidy import (
     SUBSIDY_ELIGIBLE_UP_TO_KW,
 )
 
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _business_days_phrase() -> str:
+    """Real, sourced from app.config.settings.business_days (the same list the
+    actual scheduling engine uses to generate slots) — never a separate,
+    independently-typed copy of which days Grid Nova operates."""
+    days = sorted(settings.business_days)
+    if days == list(range(days[0], days[0] + len(days))) and len(days) > 1:
+        return f"{_DAY_NAMES[days[0]]}–{_DAY_NAMES[days[-1]]}"
+    return ", ".join(_DAY_NAMES[d] for d in days)
+
+
+def _business_hours_phrase() -> str:
+    def _fmt(hour: int) -> str:
+        period = "AM" if hour < 12 else "PM"
+        display_hour = hour if 1 <= hour <= 12 else (hour - 12 if hour > 12 else 12)
+        return f"{display_hour}:00 {period}"
+
+    return f"{_fmt(settings.business_hours_start_ist)} – {_fmt(settings.business_hours_end_ist)} IST"
+
+
 COMPANY_FACTS = f"""GRID NOVA ENERGY — VERIFIED FACTS
 
-Company: Grid Nova Energy Pvt. Ltd.
+Company: Grid Nova Energy Pvt. Ltd. — "Eco-Energy Initiative"
 Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal
 Contact: +91 98747 74440, info@gridnova.in, www.gridnova.in
+Business hours: {_business_days_phrase()}, {_business_hours_phrase()}
 
 Track record (verified, exact figures — never round or approximate these):
 - 4,800+ street lamps delivered

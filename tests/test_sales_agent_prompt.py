@@ -252,6 +252,20 @@ class TestExpandedCompanyFacts:
     def test_head_office_now_includes_the_state(self):
         assert "Kolkata – 700107, West Bengal" in COMPANY_FACTS
 
+    def test_tagline_present(self):
+        assert "Eco-Energy Initiative" in COMPANY_FACTS
+
+    def test_business_hours_match_the_real_scheduling_settings_not_a_second_copy(self):
+        from app.config import settings
+
+        prompt = COMPANY_FACTS
+        assert "Monday" in prompt and "Saturday" in prompt
+        assert f"{settings.business_hours_start_ist}:00 AM" in prompt
+        # 18:00 IST renders as "6:00 PM" — confirms real conversion, not a
+        # hardcoded string disconnected from the actual setting.
+        display_hour = settings.business_hours_end_ist - 12
+        assert f"{display_hour}:00 PM" in prompt
+
 
 class TestFactBoundaryRuleStillEnforced:
     """The 'only state facts that appear in company_facts.py' rule is enforced
