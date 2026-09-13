@@ -168,38 +168,17 @@ def render_pdf(proposal_data: dict, content_config: dict) -> bytes:
     return HTML(string=html_str).write_pdf()
 
 
-class StorageNotConfiguredError(RuntimeError):
-    """R2 credentials aren't set. Distinct from a transient upload failure —
-    retrying can never fix a configuration gap, so the retry loop below treats
-    this as fatal on the first attempt instead of sleeping through a full
-    exponential back-off for a failure mode that will be identical every time.
-    """
+# Re-exported for backward compatibility (existing callers/tests import this
+# from here) — the real, single definition now lives in app.storage.r2, which
+# app.api.routes.proposal_inputs's upload endpoint also uses, so both R2
+# integrations share one exception type and one config-check, not two.
+from app.storage.r2 import StorageNotConfiguredError, upload_bytes  # noqa: E402
 
 
 def upload_to_r2(pdf_bytes: bytes, proposal_id: int) -> str:
     """Upload PDF to Cloudflare R2. Returns the public URL. Raises on failure."""
-    # Config checked BEFORE importing boto3 — a missing/broken boto3 install
-    # shouldn't masquerade as a slow "transient" failure the caller retries;
-    # an unconfigured deployment should fail the same fast way either way.
-    if not all([settings.storage_access_key, settings.storage_secret_key, settings.storage_endpoint_url, settings.storage_bucket]):
-        raise StorageNotConfiguredError("R2 storage is not configured — set STORAGE_* environment variables.")
-
-    import boto3
-
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=settings.storage_endpoint_url,
-        aws_access_key_id=settings.storage_access_key,
-        aws_secret_access_key=settings.storage_secret_key,
-    )
     key = f"proposals/{proposal_id}/{uuid.uuid4().hex}.pdf"
-    s3.put_object(
-        Bucket=settings.storage_bucket,
-        Key=key,
-        Body=pdf_bytes,
-        ContentType="application/pdf",
-    )
-    return f"{settings.storage_endpoint_url.rstrip('/')}/{settings.storage_bucket}/{key}"
+    return upload_bytes(key, pdf_bytes, "application/pdf")
 
 
 def generate_and_upload_pdf(

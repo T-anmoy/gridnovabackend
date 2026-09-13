@@ -870,6 +870,48 @@ class MemoryManager:
         )
         return inputs
 
+    def attach_proposal_input_upload(
+        self,
+        inputs_id: int,
+        target: str,
+        filename: str,
+        storage_key: str,
+        performed_by: str,
+        document_type: Optional[str] = None,
+        photo_slot: Optional[str] = None,
+    ) -> Optional[ProposalInputs]:
+        """Record a real, already-uploaded file against the right ProposalInputs
+        field. The route validates `target`/`document_type`/`photo_slot` before
+        calling this — this method trusts that and just performs the write,
+        matching review_proposal_inputs()'s own trust-the-caller shape.
+        """
+        inputs = self._db.get(ProposalInputs, inputs_id)
+        if inputs is None:
+            return None
+
+        signed_at = datetime.now(timezone.utc).isoformat()
+        if target == "document":
+            refs = list(inputs.document_refs or [])
+            refs.append({"type": document_type, "filename": filename, "storage_key": storage_key})
+            inputs.document_refs = refs
+        elif target == "installation_photo":
+            photo_refs = dict(inputs.installation_photo_refs or {})
+            photo_refs[photo_slot] = {"filename": filename, "storage_key": storage_key}
+            inputs.installation_photo_refs = photo_refs
+        elif target == "staff_signature":
+            inputs.staff_signature_ref = {"filename": filename, "storage_key": storage_key, "signed_at": signed_at}
+        elif target == "customer_signature":
+            inputs.customer_signature_ref = {"filename": filename, "storage_key": storage_key, "signed_at": signed_at}
+        else:
+            raise ValueError(f"Unknown upload target: {target!r}")
+
+        self._db.flush()
+        self._audit(
+            "proposal_inputs", str(inputs_id), "file_uploaded", performed_by,
+            after={"target": target, "filename": filename},
+        )
+        return inputs
+
     # ── Conversation ───────────────────────────────────────────────────────────
 
     def log_message(

@@ -6,9 +6,10 @@ ProposalInputs is the customer's raw input, Proposal is the AI-generated output.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, field_validator
 
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
@@ -367,3 +368,99 @@ def _trigger_auto_draft(
     )
     db.commit()
     return {"triggered": True, "proposal_id": proposal_id, "version": version}
+
+
+# ── File upload ──────────────────────────────────────────────────────────────
+# Real bytes in, stored via the same R2 client app/pdf/generator.py uses for
+# proposal PDFs (see app/storage/r2.py) — this is the backend half that was
+# missing: DocumentRef/InstallationPhotoRef/SignatureRef previously had no
+# real endpoint filling them in, so a file picked in the UI was validated,
+# previewed, and then silently discarded.
+
+UPLOAD_TARGETS = ("document", "installation_photo", "staff_signature", "customer_signature")
+
+# The real limits already enforced by the frontend's FileUploadSlot component
+# (see app/proposal/new/steps/Step5Documents.tsx): PDF/JPG/JPEG/PNG/WEBP across
+# every slot, sizes varying 5-10MB per slot. This endpoint doesn't know which
+# UI slot a given upload came from, so it uses the more permissive 10MB most
+# slots already use as one uniform server-side ceiling — a judgment call, not
+# a third, independently-invented number.
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+
+
+@router.post("/{inputs_id}/upload")
+async def upload_proposal_input_file(
+    inputs_id: int,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+    file: UploadFile = File(...),
+    target: str = Form(...),
+    document_type: Optional[str] = Form(default=None),
+    photo_slot: Optional[str] = Form(default=None),
+):
+    if not employee.can_manage_proposal_inputs():
+        raise HTTPException(status_code=403, detail="Your role cannot upload site-assessment files.")
+
+    memory = MemoryManager(db)
+    inputs = memory.get_proposal_inputs(inputs_id)
+    if not inputs:
+        raise HTTPException(status_code=404, detail="Proposal inputs not found")
+
+    if target not in UPLOAD_TARGETS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown upload target: {target!r}. Expected one of {UPLOAD_TARGETS}.",
+        )
+    if target == "document" and not document_type:
+        raise HTTPException(status_code=422, detail="document_type is required when target='document'.")
+    if target == "installation_photo":
+        if not photo_slot:
+            raise HTTPException(status_code=422, detail="photo_slot is required when target='installation_photo'.")
+        if photo_slot not in INSTALLATION_PHOTO_SLOTS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown installation photo slot: {photo_slot!r}. Expected one of {INSTALLATION_PHOTO_SLOTS}.",
+            )
+
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported file type: {file.content_type!r}. "
+                f"Expected one of {sorted(ALLOWED_CONTENT_TYPES)}."
+            ),
+        )
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB limit.",
+        )
+    if not content:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+
+    from app.storage import r2
+
+    key = f"proposal-inputs/{inputs_id}/{target}/{uuid.uuid4().hex}_{file.filename}"
+    try:
+        r2.upload_bytes(key, content, file.content_type)
+    except r2.StorageNotConfiguredError as exc:
+        # Never a fake success — this is the whole point of this endpoint.
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "storage_not_configured", "message": str(exc)},
+        )
+
+    updated = memory.attach_proposal_input_upload(
+        inputs_id=inputs_id,
+        target=target,
+        filename=file.filename,
+        storage_key=key,
+        performed_by=employee.employee_id,
+        document_type=document_type,
+        photo_slot=photo_slot,
+    )
+    db.commit()
+    return _serialize(updated)
