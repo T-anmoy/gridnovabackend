@@ -126,6 +126,7 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
         # public accept endpoint, which returns pricing to anyone holding it.
         "accept_token": p.accept_token,
         "accept_path": _accept_path(p.accept_token),
+        "accept_url": _customer_accept_url(p.accept_token),
         "lead": {
             "id": lead.id,
             "pipeline_stage": lead.pipeline_stage,
@@ -983,6 +984,7 @@ def send_proposal(
         "proposal_id": proposal_id,
         "accept_token": accept_token,
         "accept_path": accept_path,
+        "accept_url": _customer_accept_url(accept_token),
         "customer_email_sent": email_sent,
         "customer_email_skipped_reason": email_skipped_reason,
     }
@@ -1122,6 +1124,7 @@ def get_proposal_detail(
         # pricing to anyone holding it.
         "accept_token": proposal.accept_token,
         "accept_path": _accept_path(proposal.accept_token),
+        "accept_url": _customer_accept_url(proposal.accept_token),
         "customer": {
             "id": customer.id, "name": customer.name,
             "company": customer.company, "email": customer.email,
@@ -1292,6 +1295,27 @@ def list_employees(
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in memory_of(db).list_employees()
+    ]
+
+
+@router.get("/employees/assignable")
+def list_assignable_employees(
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Admin/Management: who a lead can be assigned to — active employees with the
+    role PATCH /leads/{id}/assign accepts (Admin or Sales), name-sorted. Deliberately
+    minimal (id/name/role only): unlike GET /employees this is not an employee-
+    management surface, so no email, calendar or activity data is exposed."""
+    if not employee.can_assign_lead():
+        raise HTTPException(status_code=403, detail="Only Admin or Management can view assignable employees.")
+    assignable = [
+        e for e in memory_of(db).list_employees()
+        if e.is_active and EmployeeRole(e.role) in (EmployeeRole.admin, EmployeeRole.sales)
+    ]
+    return [
+        {"id": e.id, "name": e.name, "role": e.role}
+        for e in sorted(assignable, key=lambda e: (e.name or "").lower())
     ]
 
 
