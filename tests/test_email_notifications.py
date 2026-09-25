@@ -233,15 +233,31 @@ class TestCustomerProposalEmail:
         assert "Dear Priya" in mail["text"] and "version 1" in mail["text"]
         assert "INR" not in mail["text"]  # no price is restated in the email
 
-    def test_pdf_link_included_only_when_real(self, client, memory, db_session, sent, email_on):
+    def test_pdf_link_is_the_public_endpoint_never_the_storage_url(self, client, memory, db_session,
+                                                                    sent, email_on, monkeypatch):
         email_on()
+        monkeypatch.setattr(settings, "public_api_base_url", "https://api.gridnova.in/")
         _, lid = _lead(memory, db_session, email="pdf@example.com")
         pid = _approved(memory, db_session, lid)
-        memory.get_proposal(pid).pdf_url = "https://files.gridnova.in/proposals/1.pdf"
+        storage_url = "https://acct.r2.cloudflarestorage.com/gridnova/proposals/1.pdf"
+        memory.get_proposal(pid).pdf_url = storage_url
+        db_session.commit()
+        token = client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers()).json()["accept_token"]
+        [mail] = [m for m in sent if m["to"] == ["pdf@example.com"]]
+        assert f"https://api.gridnova.in/api/v1/public/proposals/{token}/pdf" in mail["text"]
+        assert storage_url not in mail["text"] and storage_url not in mail["html"]
+        assert "r2.cloudflarestorage.com" not in mail["html"]
+
+    def test_no_pdf_link_without_a_public_api_url(self, client, memory, db_session, sent, email_on, monkeypatch):
+        email_on()
+        monkeypatch.setattr(settings, "public_api_base_url", "")
+        _, lid = _lead(memory, db_session, email="nopub@example.com")
+        pid = _approved(memory, db_session, lid)
+        memory.get_proposal(pid).pdf_url = "https://acct.r2.cloudflarestorage.com/gridnova/proposals/2.pdf"
         db_session.commit()
         client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers())
-        [mail] = [m for m in sent if m["to"] == ["pdf@example.com"]]
-        assert "https://files.gridnova.in/proposals/1.pdf" in mail["text"]
+        [mail] = [m for m in sent if m["to"] == ["nopub@example.com"]]
+        assert "PDF" not in mail["text"] and "cloudflarestorage" not in mail["text"]
 
     def test_placeholder_email_is_skipped(self, client, memory, db_session, sent, email_on):
         email_on()

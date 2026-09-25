@@ -52,9 +52,17 @@ def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name:
         email or f"{employee_id}@no-email.local",
         role.value,
     )
-    db.commit()
     if not emp.is_active:
+        # Refused before anything else is touched: signing in never edits a
+        # deactivated employee's row, and never reactivates it.
+        db.commit()
         raise DeactivatedEmployeeError(employee_id)
+    # The token's role is authoritative (Clerk metadata). Keep the local mirror in
+    # step so checks that read the stored role — e.g. lead assignment targets —
+    # never act on a role changed in Clerk since this employee's first sign-in.
+    if EmployeeRole(emp.role) != role:
+        memory.update_employee_role(employee_id=employee_id, role=role, performed_by="auth_sync")
+    db.commit()
 
 
 @lru_cache(maxsize=1)

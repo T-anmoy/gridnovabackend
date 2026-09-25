@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.memory.db import get_db
+from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import LeadSource
 from app.security.client_ip import client_ip
@@ -46,6 +47,11 @@ _request_log: defaultdict[str, list[datetime]] = defaultdict(list)
 _EMAIL_COOLDOWN_SECONDS = 60
 _recent_emails: dict[str, datetime] = {}
 
+# The contact form gets the same limits in its own buckets, so an estimate request
+# and a contact message from the same visitor don't block each other.
+_contact_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_recent_contact_emails: dict[str, datetime] = {}
+
 
 def _rate_limit_identity(request: Request) -> Optional[str]:
     """Who the per-IP limit counts against, or None to skip it.
@@ -61,28 +67,30 @@ def _rate_limit_identity(request: Request) -> Optional[str]:
     return client_ip(request)
 
 
-def _check_rate_limit(request: Request) -> None:
+def _check_rate_limit(request: Request, log: Optional[defaultdict] = None) -> None:
+    log = _request_log if log is None else log
     ip = _rate_limit_identity(request)
     if ip is None:
         return
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
-    _request_log[ip] = [t for t in _request_log[ip] if t > cutoff]
-    if len(_request_log[ip]) >= _RATE_LIMIT:
+    log[ip] = [t for t in log[ip] if t > cutoff]
+    if len(log[ip]) >= _RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before submitting again.")
-    _request_log[ip].append(now)
+    log[ip].append(now)
 
 
-def _check_email_cooldown(email: str) -> None:
+def _check_email_cooldown(email: str, recent: Optional[dict] = None, what: str = "An estimate request") -> None:
+    recent = _recent_emails if recent is None else recent
     now = datetime.now(timezone.utc)
     key = email.strip().lower()
-    last = _recent_emails.get(key)
+    last = recent.get(key)
     if last is not None and (now - last).total_seconds() < _EMAIL_COOLDOWN_SECONDS:
         raise HTTPException(
             status_code=429,
-            detail="An estimate request for this email was just submitted. Please wait before resubmitting.",
+            detail=f"{what} for this email was just submitted. Please wait before resubmitting.",
         )
-    _recent_emails[key] = now
+    recent[key] = now
 
 
 # Same lightweight pattern app/llm/client.py's mock field extractor uses — this
@@ -183,7 +191,67 @@ def submit_estimate_request(
         if v is not None
     }
     if extra_fields:
-        memory.update_lead_fields(lead_id=lead.id, new_fields=extra_fields, performed_by="website")
+        # Evaluated exactly as a manual field edit is (score, forward-only stage), so
+        # the lead's stage reflects what the form actually collected.
+        apply_lead_fields(memory, lead, extra_fields, performed_by="website", via="website estimate form")
 
+    db.commit()
+    return EstimateResponse(lead_id=lead.id, success=True)
+
+
+# ── Contact form ──────────────────────────────────────────────────────────────
+# The website's contact form, mirrored here server-to-server exactly like the
+# estimate form. No staff email: the website itself emails info@gridnova.in for
+# every contact message (see app/notifications/notifier.py).
+
+class ContactRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    message: str = Field(min_length=1, max_length=2000)
+    # The form's optional "what are you interested in" choice.
+    interest: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        if not _EMAIL_RE.match(value.strip()):
+            raise ValueError("must be a valid email address")
+        return value.strip()
+
+    @field_validator("name", "message")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value.strip()
+
+
+@router.post("/contact", response_model=EstimateResponse)
+def submit_contact(
+    body: ContactRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _check_rate_limit(request, _contact_request_log)
+    _check_email_cooldown(body.email, _recent_contact_emails, what="A message")
+
+    memory = MemoryManager(db)
+    customer = memory.get_or_create_customer(
+        email=body.email, name=body.name, performed_by="website", phone=body.phone,
+    )
+    lead = memory.create_lead(
+        customer_id=customer.id, performed_by="website", source=LeadSource.website_contact,
+    )
+    fields = {
+        k: v for k, v in {
+            "name": body.name,
+            "email": body.email,
+            "phone": body.phone,
+            "notes": body.message,
+            "interest": body.interest,
+        }.items() if v is not None
+    }
+    apply_lead_fields(memory, lead, fields, performed_by="website", via="website contact form")
     db.commit()
     return EstimateResponse(lead_id=lead.id, success=True)

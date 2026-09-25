@@ -12,7 +12,7 @@ import pytest
 from app.memory import recall, reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import Channel, MemoryKind, MessageRole, PipelineStage
-from tests.conftest import admin_headers, engineer_headers, sales_headers
+from tests.conftest import admin_headers, backdate_lead, engineer_headers, sales_headers
 
 # These tests write employee ids directly (no request provisions them first).
 pytestmark = pytest.mark.usefixtures("known_employees")
@@ -211,6 +211,8 @@ class TestMilestones:
             lead.id, when=datetime.now(timezone.utc) - timedelta(days=6)
         )
         db_session.commit()
+        # The whole conversation happened six days ago; nothing since.
+        backdate_lead(db_session, lead.id, datetime.now(timezone.utc) - timedelta(days=6))
 
         counts = check_stale_leads(db_session)
         assert counts["lead_stale_5d"] == 1

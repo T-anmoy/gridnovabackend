@@ -125,7 +125,10 @@ class ProposalAgent:
         if eval_result.requires_director_notify:
             from app.notifications.notifier import notifier
             capacity_kw = float(collected.get("capacity_kw", 0) or 0)
-            notifier.director_capacity_alert(lead_id=lead_id, capacity_kw=capacity_kw)
+            memory.notify_after_commit(
+                lambda: notifier.director_capacity_alert(lead_id=lead_id, capacity_kw=capacity_kw),
+                "director_capacity_alert",
+            )
 
         return {
             "proposal_id": proposal.id,

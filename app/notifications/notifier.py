@@ -69,6 +69,11 @@ class Notifier(ABC):
         self.notify("customer_accepted", {"proposal_id": proposal_id, "lead_id": lead_id,
                                           "version": version, "customer_name": customer_name})
 
+    def stale_lead_digest(self, leads: list[dict]) -> None:
+        """One summary per stale-lead run. Each item: lead_id, name, source, stage,
+        days_quiet, assigned_employee_id, threshold."""
+        self.notify("stale_lead_digest", {"count": len(leads), "leads": leads})
+
     def send_proposal_to_customer(
         self,
         proposal_id: int,
@@ -113,16 +118,19 @@ class SlackWebhookNotifier(Notifier):
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
-# Estimate-form leads are deliberately absent: the website already emails
-# info@gridnova.in for every estimate request, so a second staff email would be noise.
+# Estimate-form and contact-form leads are deliberately absent: the website itself
+# emails info@gridnova.in for both, so a second staff email would be noise. (The
+# contact form's own email arrives with the frontend change that also adds its
+# backend mirror.)
 STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
-                      "manager_signoff_required", "customer_accepted")
-_NO_STAFF_EMAIL_SOURCES = ("website_estimate_form",)
+                      "manager_signoff_required", "customer_accepted", "stale_lead_digest")
+_NO_STAFF_EMAIL_SOURCES = ("website_estimate_form", "website_contact")
 
 _SOURCE_LABELS = {
     "website_chat": "website chat",
     "website_estimate_form": "website estimate form",
     "website_booking": "website booking",
+    "website_contact": "website contact form",
     "whatsapp": "WhatsApp",
     "instagram": "Instagram",
     "cold_call": "phone call",
@@ -175,6 +183,29 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
     return None
 
 
+_THRESHOLD_LABELS = {"lead_stale_48h": "48 hours", "lead_stale_5d": "5 days"}
+
+
+def _render_stale_digest(leads: list[dict], base_url: str) -> tuple[str, str, str]:
+    """(subject, html, text) for the stale-lead digest. Every value is escaped."""
+    subject = f"{len(leads)} lead{'s' if len(leads) != 1 else ''} with no activity"
+    intro = "These open leads have had no activity past a follow-up threshold:"
+    rows_html, rows_text = [], []
+    for item in leads:
+        name = item.get("name") or "(name not yet known)"
+        source = _SOURCE_LABELS.get(str(item.get("source")), str(item.get("source")))
+        assignee = item.get("assigned_employee_id") or "unassigned"
+        threshold = _THRESHOLD_LABELS.get(str(item.get("threshold")), str(item.get("threshold")))
+        url = f"{base_url}/dashboard/leads/{item.get('lead_id')}"
+        detail = (f"{source} · stage {item.get('stage')} · quiet {item.get('days_quiet')} days "
+                  f"(past {threshold}) · {assignee}")
+        rows_html.append(f'<li><a href="{_esc(url)}">{_esc(name)}</a> — {_esc(detail)}</li>')
+        rows_text.append(f"- {name} — {detail}\n  {url}")
+    html_body = f"<div><p>{_esc(intro)}</p><ul>{''.join(rows_html)}</ul></div>"
+    text_body = intro + "\n\n" + "\n".join(rows_text)
+    return subject, html_body, text_body
+
+
 def _render(lines: list[str], link_label: Optional[str] = None, link_url: Optional[str] = None) -> tuple[str, str]:
     """(html, text) bodies. Every interpolated value is escaped — customer names and
     anything else a visitor typed end up here."""
@@ -219,11 +250,16 @@ class EmailNotifier(Notifier):
         if payload.get("source") in _NO_STAFF_EMAIL_SOURCES:
             return
         try:
-            message = _staff_message(event_type, payload, self._base_url)
-            if message is None:
-                return
-            subject, lines, link_label, link_url = message
-            html_body, text_body = _render(lines, link_label, link_url)
+            if event_type == "stale_lead_digest":
+                if not payload.get("leads"):
+                    return
+                subject, html_body, text_body = _render_stale_digest(payload["leads"], self._base_url)
+            else:
+                message = _staff_message(event_type, payload, self._base_url)
+                if message is None:
+                    return
+                subject, lines, link_label, link_url = message
+                html_body, text_body = _render(lines, link_label, link_url)
         except Exception as exc:
             _report_failure(event_type, f"could not build the email: {exc}", exc)
             return

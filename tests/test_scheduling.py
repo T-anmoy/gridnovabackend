@@ -162,6 +162,8 @@ class TestBooking:
             memory=memory, lead_id=lead_id, employee_id=emp,
             scheduled_at=slot, duration_minutes=30, performed_by="test",
         )
+        assert events == []  # sent only once the booking is committed
+        db_session.commit()
 
         assert events and events[0][0] == "meeting_booked"
         assert events[0][1]["scheduled_at"] == format_ist_datetime(slot)

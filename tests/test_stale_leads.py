@@ -8,7 +8,7 @@ import pytest
 from app.jobs.stale_leads import check_stale_leads
 from app.memory.models import PipelineStage
 from app.notifications.notifier import LogNotifier, SlackWebhookNotifier, get_notifier
-from tests.conftest import admin_headers, sales_headers
+from tests.conftest import admin_headers, backdate_lead, sales_headers
 
 
 def _seed_lead(memory, db_session, *, email, last_msg_age_hours=None, stage=PipelineStage.qualifying):
@@ -19,8 +19,16 @@ def _seed_lead(memory, db_session, *, email, last_msg_age_hours=None, stage=Pipe
     if last_msg_age_hours is not None:
         when = datetime.now(timezone.utc) - timedelta(hours=last_msg_age_hours)
         memory.record_customer_message(lead.id, when=when)
+        db_session.commit()
+        # Nothing has happened on the lead since that message.
+        backdate_lead(db_session, lead.id, when)
     db_session.commit()
     return lead.id
+
+
+def _per_lead(events):
+    """The per-lead alerts, without the run's digest (tested in test_stale_digest.py)."""
+    return [e[0] for e in events if e[0] != "stale_lead_digest"]
 
 
 class TestStaleDetection:
@@ -32,13 +40,13 @@ class TestStaleDetection:
 
         c1 = check_stale_leads(db_session)
         assert c1["lead_stale_48h"] == 1
-        assert [e[0] for e in events] == ["lead_stale_48h"]
+        assert _per_lead(events) == ["lead_stale_48h"]
         assert memory.get_lead(lead_id).stale_notified_at is not None
 
         # Second run — must NOT double-notify.
         c2 = check_stale_leads(db_session)
         assert c2["lead_stale_48h"] == 0
-        assert len(events) == 1
+        assert len(_per_lead(events)) == 1
 
     def test_recent_lead_triggers_nothing(self, memory, db_session, monkeypatch):
         events = []
@@ -54,7 +62,7 @@ class TestStaleDetection:
         _seed_lead(memory, db_session, email="q6d@example.com", last_msg_age_hours=6 * 24)
         c = check_stale_leads(db_session)
         assert c["lead_stale_5d"] == 1 and c["lead_stale_48h"] == 0
-        assert [e[0] for e in events] == ["lead_stale_5d"]
+        assert _per_lead(events) == ["lead_stale_5d"]
 
     def test_escalates_48h_then_5d_across_runs(self, memory, db_session, monkeypatch):
         events = []
@@ -68,10 +76,11 @@ class TestStaleDetection:
                                   stage=PipelineStage.qualifying)
         memory.record_customer_message(lead.id, when=base)
         db_session.commit()
+        backdate_lead(db_session, lead.id, base)
 
         check_stale_leads(db_session, now=base + timedelta(hours=49))   # fires 48h
         check_stale_leads(db_session, now=base + timedelta(days=6))     # escalates to 5d
-        kinds = [e[0] for e in events]
+        kinds = _per_lead(events)
         assert kinds == ["lead_stale_48h", "lead_stale_5d"]
 
     def test_notification_timestamp_is_ist_formatted_not_raw_iso(self, memory, db_session, monkeypatch):
@@ -93,11 +102,21 @@ class TestStaleDetection:
         assert payload["last_customer_message_at"] != actual_last_msg.isoformat()
         assert "IST" in payload["last_customer_message_at"]
 
-    def test_qualified_lead_excluded(self, memory, db_session, monkeypatch):
+    def test_qualified_lead_is_included(self, memory, db_session, monkeypatch):
+        # Every open stage counts now — a qualified lead nobody follows up is the
+        # expensive kind of stale.
         events = []
         monkeypatch.setattr("app.notifications.notifier.notifier", _CaptureNotifier(events))
         _seed_lead(memory, db_session, email="qual@example.com", last_msg_age_hours=100,
                    stage=PipelineStage.qualified)
+        c = check_stale_leads(db_session)
+        assert c["checked"] == 1 and c["lead_stale_48h"] == 1
+
+    @pytest.mark.parametrize("stage", [PipelineStage.won, PipelineStage.lost])
+    def test_won_and_lost_leads_are_excluded(self, memory, db_session, monkeypatch, stage):
+        events = []
+        monkeypatch.setattr("app.notifications.notifier.notifier", _CaptureNotifier(events))
+        _seed_lead(memory, db_session, email=f"{stage.value}@example.com", last_msg_age_hours=200, stage=stage)
         c = check_stale_leads(db_session)
         assert c["checked"] == 0 and events == []
 

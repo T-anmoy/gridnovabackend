@@ -112,6 +112,7 @@ class LeadSource(str, enum.Enum):
     website_chat = "website_chat"
     website_estimate_form = "website_estimate_form"
     website_booking = "website_booking"
+    website_contact = "website_contact"
     whatsapp = "whatsapp"
     instagram = "instagram"
     cold_call = "cold_call"
@@ -418,6 +419,10 @@ class Proposal(Base):
     )
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
     pdf_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # The PDF's object key in the private bucket — what a signed download link is
+    # made from. pdf_url is kept for compatibility; for rows written before this
+    # column existed the key is derived from it (app/storage/r2.py key_from_url).
+    pdf_storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     total_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     date_created: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
     date_sent: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)

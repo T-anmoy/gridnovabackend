@@ -53,11 +53,15 @@ INTERNAL_LEAK = "internal_prompt_leak"
 EMPTY_REPLY = "empty_reply"
 OVERLONG = "overlong_reply"
 MULTIPLE_QUESTIONS = "multiple_questions"
+UNAPPROVED_EQUIPMENT = "unapproved_equipment_claim"
+WARRANTY_TERM = "unverified_warranty_term"
+SUBSIDY_CLAIM = "subsidy_eligibility_claim"
 
 # Blocking codes replace the reply. The rest are recorded and let through: a reply
 # that stacks two questions is a quality problem, not a commercial risk, and
 # silently swapping it for a fallback would make the conversation worse.
 _BLOCKING = {NEW_MONEY, UNOFFERED_TIME, FALSE_CLAIM, INTERNAL_LEAK, EMPTY_REPLY,
+             UNAPPROVED_EQUIPMENT, WARRANTY_TERM, SUBSIDY_CLAIM,
              nemo_guard.INTERNAL_DISCLOSURE}
 
 
@@ -230,6 +234,169 @@ def check_claims(reply: str) -> Optional[dict]:
     return None
 
 
+# ── Equipment, warranty and subsidy claims ─────────────────────────────────────
+# Three things Nova must never state on its own authority: which make of equipment
+# Grid Nova installs (only active Equipment/SKU Master records say that), what a
+# warranty covers or for how long (only COMPANY_FACTS could, and today it states no
+# warranty terms at all), and that a particular customer will get a subsidy (only
+# the scheme's own verification decides that). Explaining the published PM Surya
+# Ghar slabs as general scheme information stays allowed.
+
+def _sentences(text: str) -> list[str]:
+    return [s for s in re.split(r"(?<=[.!?])\s+|\n+", text or "") if s.strip()]
+
+
+def _mentions(term: str, text: str) -> bool:
+    return bool(term) and re.search(r"(?<![\w-])" + re.escape(term) + r"(?![\w-])", text or "", re.I) is not None
+
+
+# Recognition list only — names that, when they appear in a reply, are a claim about
+# a specific make. It asserts nothing about any of them. Short or common-word names
+# are matched case-sensitively.
+_KNOWN_EQUIPMENT_MAKERS_CI = (
+    "Adani", "Waaree", "Tata Power Solar", "Tata Power", "Vikram Solar", "Premier Energies", "RenewSys",
+    "Goldi", "Rayzon", "Saatvik", "Emmvee", "Navitas", "Loom Solar", "Havells", "Microtek", "Exide",
+    "Amara Raja", "Amaron", "Su-Kam", "Livguard", "Longi", "LONGi", "Jinko", "JinkoSolar", "Trina",
+    "JA Solar", "Canadian Solar", "Risen", "Astronergy", "Huawei", "Sungrow", "Growatt", "Solis",
+    "GoodWe", "Fronius", "Enphase", "SolarEdge", "Schneider", "Polycab", "Tesla", "Panasonic",
+    "SunPower", "Q Cells", "Qcells", "Q-Cells", "Pylontech", "Luminous", "V-Guard", "UTL Solar",
+)
+_KNOWN_EQUIPMENT_MAKERS_CS = ("Tata", "LG", "REC", "SMA", "ABB", "BYD", "Delta", "UTL")
+
+_PRODUCT = r"(?:solar\s+)?(?:panels?|modules?|inverters?|batter(?:y|ies))"
+# "<Name> panels", "<Name> inverter" — a capitalised word right before a product.
+_RE_NAMED_PRODUCT = re.compile(r"\b([A-Z][A-Za-z0-9&-]+)\s+" + _PRODUCT + r"\b")
+# "panels from <Name>", "inverters made by <Name>".
+_RE_PRODUCT_FROM = re.compile(_PRODUCT + r"\s+(?:from|by|made by|manufactured by)\s+([A-Z][A-Za-z0-9&-]+)\b", re.I)
+# Words that commonly sit capitalised before "panels"/"inverter" without naming a make.
+_NOT_A_MAKE = {
+    "solar", "rooftop", "roof", "mono", "monocrystalline", "poly", "polycrystalline", "bifacial",
+    "perc", "topcon", "hjt", "dcr", "non-dcr", "lithium", "li-ion", "lead-acid", "string", "hybrid",
+    "grid", "on-grid", "off-grid", "grid-tied", "micro", "our", "the", "your", "these", "those", "their",
+    "good", "quality", "high", "premium", "standard", "tier", "branded", "indian", "domestic",
+    "imported", "new", "any", "all", "some", "which", "what", "most", "such", "both", "more", "extra",
+    "additional", "efficient", "reliable", "certified", "approved", "bis", "mnre", "alm", "almm",
+    "pm", "kusum", "surya", "ghar", "residential", "commercial", "industrial", "backup", "storage",
+    "one", "two", "three", "four", "five", "ten", "many", "several", "a", "an", "for", "with", "and",
+}
+# Nova claiming it supplies/uses/recommends something — what turns naming a make into
+# an assertion even when the customer raised the name first.
+_RE_ENDORSEMENT = re.compile(
+    r"\b(?:we|i)\s+(?:(?:can|will|would|do|usually|typically|mostly|generally|always)\s+)?"
+    r"(?:use|install|supply|offer|provide|stock|recommend|fit|source|carry|work with|go with|deal in)\b"
+    r"|\bwe'll\s+(?:use|install|supply|fit)\b|\bcomes?\s+with\b|^\s*yes\b"
+    # "our panels", "our preferred inverter brand" — not "our team will recommend".
+    r"|\bour\s+(?:\w+\s+){0,2}(?:panels?|modules?|inverters?|batter(?:y|ies)|brands?|suppliers?|equipment)\b",
+    re.I,
+)
+
+
+def _named_makes(sentence: str) -> list[str]:
+    names = [m for m in _KNOWN_EQUIPMENT_MAKERS_CI if _mentions(m, sentence)]
+    names += [m for m in _KNOWN_EQUIPMENT_MAKERS_CS
+              if re.search(r"(?<![\w-])" + re.escape(m) + r"(?![\w-])", sentence)]
+    for match in _RE_NAMED_PRODUCT.finditer(sentence):
+        word = match.group(1)
+        at_sentence_start = sentence[:match.start()].strip() == ""
+        if word.lower() not in _NOT_A_MAKE and not at_sentence_start:
+            names.append(word)
+    for match in _RE_PRODUCT_FROM.finditer(sentence):
+        if match.group(1).lower() not in _NOT_A_MAKE:
+            names.append(match.group(1))
+    return names
+
+
+def check_equipment(reply: str, approved_terms=(), customer_text: str = "",
+                    facts_text: str = "") -> Optional[dict]:
+    """Block naming a specific equipment make/model unless an active Equipment/SKU
+    Master record or company facts carry it. A make the customer raised may be named
+    back to them, but not endorsed ("we use…", "our…", "yes…")."""
+    approved = [t for t in approved_terms if t]
+    for sentence in _sentences(reply):
+        for name in _named_makes(sentence):
+            if any(_mentions(term, name) or _mentions(name, term) for term in approved):
+                continue
+            if _mentions(name, facts_text):
+                continue
+            if _mentions(name, customer_text) and not _RE_ENDORSEMENT.search(sentence):
+                continue
+            return {"code": UNAPPROVED_EQUIPMENT,
+                    "detail": f"reply named equipment make {name!r} that no active SKU record approves"}
+    return None
+
+
+_DURATION_WORDS = ("one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
+                   "twenty|twenty[- ]five|thirty")
+_RE_DURATION = re.compile(r"\b(?:\d+(?:\.\d+)?|" + _DURATION_WORDS + r")\s*[- ]?\s*(?:years?|yrs?|months?)\b", re.I)
+_RE_WARRANTY_WORD = re.compile(r"\bwarrant(?:y|ies|eed)\b|\bguarantee[sd]?\b", re.I)
+_RE_DURATION_ON_PART = re.compile(
+    _RE_DURATION.pattern + r"\s+(?:of\s+\w+\s+)?(?:on|for|covering)\s+(?:the\s+|your\s+|its\s+)?"
+    r"(?:panels?|modules?|inverters?|batter(?:y|ies)|system|structure|workmanship|installation)\b", re.I,
+)
+
+
+def check_warranty(reply: str, facts_text: str = "") -> Optional[dict]:
+    """Block a specific warranty duration or term ("25-year warranty", "10 years on
+    the inverter") unless company facts state that exact term. "Warranty terms are
+    in your proposal" names no term and is fine."""
+    for sentence in _sentences(reply):
+        durations = [m.group(0) for m in _RE_DURATION.finditer(sentence)]
+        if not durations:
+            continue
+        if not (_RE_WARRANTY_WORD.search(sentence) or _RE_DURATION_ON_PART.search(sentence)):
+            continue
+        for duration in durations:
+            stated = [s for s in _sentences(facts_text)
+                      if _mentions(duration, s) and _RE_WARRANTY_WORD.search(s)]
+            if not stated:
+                return {"code": WARRANTY_TERM,
+                        "detail": f"reply stated a warranty term company facts do not: {sentence.strip()!r}"}
+    return None
+
+
+_RE_MONEY_OR_SUBSIDY = r"(?:₹|\brs\.?|\binr\b|subsid|\bcfa\b|\blakh|\b\d{1,3}(?:,\d{2,3})+\b|\b\d{4,}\b)"
+_SUBSIDY_CLAIM_PATTERNS = [
+    re.compile(r"\byou(?:'re| are)\s+(?:definitely |certainly |fully |already |surely )?"
+               r"(?:eligible|entitled|qualified|approved)\b", re.I),
+    re.compile(r"\byou(?:'ll| will| would)\s+(?:definitely |certainly |surely )?"
+               r"(?:qualify|be eligible|be entitled|be approved)\b", re.I),
+    re.compile(r"\byou qualify\b", re.I),
+    re.compile(r"\byou(?:'ll| will| would)\s+(?:definitely |certainly |surely )?"
+               r"(?:get|receive|be paid|be given|be credited)\b[^.!?\n]{0,60}" + _RE_MONEY_OR_SUBSIDY, re.I),
+    re.compile(r"\byour\s+(?:subsidy|cfa)\s+(?:is|has been|will be)\s+"
+               r"(?:approved|sanctioned|confirmed|guaranteed|assured)\b", re.I),
+    re.compile(r"\b(?:guaranteed|assured|confirmed|sure[- ]shot)\s+subsid", re.I),
+    re.compile(r"\bsubsidy\s+(?:is|will be)\s+(?:guaranteed|assured|confirmed|certain)\b", re.I),
+    # Negative determinations are just as much a ruling on this customer's case.
+    re.compile(r"\byou(?:'re| are)\s+(?:not\s+|in)(?:eligible|entitled|qualified)\b", re.I),
+    re.compile(r"\byou\s+aren't\s+(?:eligible|entitled|qualified)\b", re.I),
+    re.compile(r"\byou\s+(?:do not|don't|will not|won't|would not|wouldn't|cannot|can't|can not)\s+"
+               r"(?:qualify|be eligible|be entitled|avail)\b", re.I),
+    re.compile(r"\byou\s+(?:do not|don't|will not|won't|would not|wouldn't|cannot|can't|can not)\s+"
+               r"(?:get|receive|claim)\s+(?:the\s+|any\s+|a\s+)?(?:subsidy|cfa)\b", re.I),
+    re.compile(r"\byour\s+(?:home|house|roof|rooftop|system|property|site|connection|application)\s+"
+               r"(?:is not|isn't|does not|doesn't|will not|won't)\s+(?:be\s+)?(?:eligible|qualify|covered)\b", re.I),
+]
+# "if you qualify", "whether you are eligible" — conditional, not a determination.
+_RE_CONDITIONAL_LEAD_IN = re.compile(r"\b(?:if|whether|once|when|unless|until)\s*$", re.I)
+
+
+def check_subsidy(reply: str) -> Optional[dict]:
+    """Block definite eligibility / approval / payout claims about THIS customer —
+    positive ("you are eligible") or negative ("you don't qualify"). General statements
+    of the published scheme ("residential systems get ₹30,000/kW for the first 2kW",
+    "commercial rooftops aren't covered"), conditional or hedged phrasing ("if you
+    qualify", "you may not be eligible") and "our team will confirm your eligibility"
+    stay allowed."""
+    for pattern in _SUBSIDY_CLAIM_PATTERNS:
+        for match in pattern.finditer(reply or ""):
+            if _RE_CONDITIONAL_LEAD_IN.search(reply[:match.start()]):
+                continue
+            return {"code": SUBSIDY_CLAIM,
+                    "detail": f"reply made a definite subsidy claim: {match.group(0)!r}"}
+    return None
+
+
 # ── Internal leakage ───────────────────────────────────────────────────────────
 
 # Markers straight out of the system prompt and the memory block. If any of these
@@ -346,19 +513,28 @@ def enforce(
     memory_context: Optional[str] = None,
     user_message: str = "",
     fallback: str = "",
+    approved_equipment=(),
+    customer_text: str = "",
 ) -> GuardrailResult:
     """Run every check over a generated reply and return what is safe to send.
 
     `allowed_text` is everything the conversation can justify — the customer's own
     words, the fields on file, and any meeting slots a real calendar query returned.
     `fallback` is the deterministic reply to send instead if something blocks.
+    `approved_equipment` is the brand/model names of active Equipment/SKU Master
+    records; `customer_text` is everything the customer has said (a make they named
+    may be named back, not endorsed).
     """
+    from app.llm.company_facts import COMPANY_FACTS
     violations = []
     for check in (
         lambda: check_money(reply, allowed_text),
         lambda: check_times(reply, allowed_text),
         lambda: check_claims(reply),
         lambda: check_leaks(reply, memory_context),
+        lambda: check_equipment(reply, approved_equipment, customer_text or user_message, COMPANY_FACTS),
+        lambda: check_warranty(reply, COMPANY_FACTS),
+        lambda: check_subsidy(reply),
     ):
         found = check()
         if found:

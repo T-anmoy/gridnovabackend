@@ -6,6 +6,7 @@ import pytest
 
 from app.memory.models import PipelineStage, ProposalStatus, TimelineEventType
 from tests.conftest import (
+    STORAGE_URL_PREFIX,
     admin_headers,
     sales_headers,
     management_headers,
@@ -184,7 +185,7 @@ class TestProposalPdfAccess:
         memory.transition_proposal_status(
             proposal_id=pid, new_status=ProposalStatus.approved,
             performed_by="test", approved_by_employee_id="emp-admin-1",
-            pdf_url="https://r2/proposals/x.pdf",
+            pdf_url=STORAGE_URL_PREFIX + "proposals/x.pdf",
         )
         db_session.commit()
         return pid
@@ -199,7 +200,7 @@ class TestProposalPdfAccess:
         r = client.get(f"/api/v1/dashboard/proposals/{pid}/pdf", headers=sales_headers("emp-sales-1"))
         assert r.status_code == 403
 
-    def test_admin_and_management_can_access_pdf(self, client, memory, db_session):
+    def test_admin_and_management_can_access_pdf(self, client, memory, db_session, fake_storage):
         pid = self._seed_with_pdf(memory, db_session)
         assert client.get(f"/api/v1/dashboard/proposals/{pid}/pdf", headers=admin_headers()).status_code == 200
         assert client.get(f"/api/v1/dashboard/proposals/{pid}/pdf", headers=management_headers()).status_code == 200

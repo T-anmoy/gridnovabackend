@@ -133,7 +133,7 @@ class TestRejections:
             data={"target": "document", "document_type": "other"},
             headers=sales_headers(),
         )
-        assert r.status_code == 422
+        assert r.status_code == 413
         assert "10" in r.json()["detail"] or "MB" in r.json()["detail"]
 
     def test_empty_file_rejected(self, client, memory, db_session):

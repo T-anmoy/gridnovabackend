@@ -30,6 +30,10 @@ os.environ.setdefault("LLM_API_KEY", "")  # forces mock mode
 os.environ.setdefault("CLERK_SECRET_KEY", "")
 os.environ.setdefault("CLERK_JWT_ISSUER", "")
 os.environ.setdefault("SLACK_WEBHOOK_URL", "")
+# Sentry is forced off, not defaulted: app.main calls sentry_sdk.init() at import time
+# whenever SENTRY_DSN is set, and a test run must never report to a real project —
+# whether the DSN comes from .env or from the shell.
+os.environ["SENTRY_DSN"] = ""
 
 from app.main import app as fastapi_app
 from app.memory.db import Base, get_db
@@ -128,22 +132,28 @@ def reset_chat_inmemory_state():
     chat._request_log.clear()
     chat._recent_messages.clear()
     public_proposals._accept_request_log.clear()
+    public_proposals._pdf_request_log.clear()
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
     pricing._instant_estimate_request_log.clear()
     public_intake._request_log.clear()
     public_intake._recent_emails.clear()
+    public_intake._contact_request_log.clear()
+    public_intake._recent_contact_emails.clear()
     yield
     chat._request_log.clear()
     chat._recent_messages.clear()
     public_proposals._accept_request_log.clear()
+    public_proposals._pdf_request_log.clear()
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
     pricing._instant_estimate_request_log.clear()
     public_intake._request_log.clear()
     public_intake._recent_emails.clear()
+    public_intake._contact_request_log.clear()
+    public_intake._recent_contact_emails.clear()
 
 
 @pytest.fixture
@@ -163,6 +173,52 @@ def memory(db_session):
 @pytest.fixture
 def client(_isolated_db):
     return TestClient(fastapi_app)
+
+
+# ── Private storage (R2) with boto3 mocked ────────────────────────────────────
+
+class FakeS3:
+    """Stands in for boto3's S3 client: records what was signed or uploaded."""
+
+    def __init__(self, **client_kwargs):
+        self.client_kwargs = client_kwargs
+        self.presigned: list[dict] = []
+        self.put: list[dict] = []
+
+    def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.presigned.append({"operation": operation, "params": Params, "expires_in": ExpiresIn})
+        return f"https://signed.example/{Params['Key']}?X-Amz-Expires={ExpiresIn}&X-Amz-Signature=test"
+
+    def put_object(self, **kwargs):
+        self.put.append(kwargs)
+
+
+@pytest.fixture
+def fake_storage(monkeypatch):
+    """Configured STORAGE_* settings and a recording fake S3 client. Returns the list
+    of clients created, newest last."""
+    import boto3
+    from app.config import settings
+
+    for field, value in (
+        ("storage_endpoint_url", "https://acct.r2.cloudflarestorage.com"),
+        ("storage_bucket", "gridnova-test"),
+        ("storage_access_key", "AKIA-TEST"),
+        ("storage_secret_key", "SECRET-TEST-DO-NOT-LEAK"),
+    ):
+        monkeypatch.setattr(settings, field, value)
+    clients: list[FakeS3] = []
+
+    def _client(service, **kwargs):
+        assert service == "s3"
+        clients.append(FakeS3(**kwargs))
+        return clients[-1]
+
+    monkeypatch.setattr(boto3, "client", _client)
+    return clients
+
+
+STORAGE_URL_PREFIX = "https://acct.r2.cloudflarestorage.com/gridnova-test/"
 
 
 # ── Proposal content that can actually be sent ───────────────────────────────
@@ -195,6 +251,24 @@ def sendable_proposal_content(monkeypatch):
     real = content_engine.load_content_config()
     monkeypatch.setattr(content_engine, "_CONTENT_CONFIG", _without_placeholders(real))
     return content_engine._CONTENT_CONFIG
+
+
+# ── Moving a lead's history into the past (stale-lead tests) ──────────────────
+
+def backdate_lead(session, lead_id: int, when) -> None:
+    """Make everything recorded about a lead so far — its creation, timeline, audit
+    trail and last customer message — look as if it happened at `when`."""
+    from app.memory.models import AuditLog, Lead, TimelineEvent
+
+    lead = session.get(Lead, lead_id)
+    lead.created_at = when
+    if lead.last_customer_message_at is not None:
+        lead.last_customer_message_at = when
+    for event in session.query(TimelineEvent).filter_by(lead_id=lead_id):
+        event.created_at = when
+    for entry in session.query(AuditLog).filter_by(entity_type="lead", entity_id=str(lead_id)):
+        entry.created_at = when
+    session.commit()
 
 
 # ── Employees referenced by id ────────────────────────────────────────────────

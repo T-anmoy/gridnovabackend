@@ -52,6 +52,20 @@ and exits with code 2. It never guesses which revision an unversioned database i
 New revision ids must be **32 characters or fewer**, because PostgreSQL's
 `alembic_version.version_num` is `VARCHAR(32)`. SQLite does not enforce the length.
 
+### Health checks
+
+- `GET /api/v1/health` is **liveness** only: the process is up. It never touches the database.
+- `GET /api/v1/health/ready` is **readiness**. It returns 200
+  `{"status":"ready","db":"ok","schema":"at_head"}` only when the database answers and
+  `alembic_version` equals this build's Alembic head. Otherwise it returns 503 with
+  `db` set to `ok`/`unreachable` and `schema` set to `not_initialized`, `behind`,
+  `unknown_revision` or `unknown`. Connection details are never included.
+
+Point Cloud Run's **startup probe** (and any post-deploy smoke test) at
+`/api/v1/health/ready`. That way a revision that boots before `scripts/bootstrap_db.py`
+has run, or against a database behind its migrations, never receives traffic. It would
+otherwise pass a plain health check while every database request fails.
+
 ## Environment variables required before deployment
 
 | Variable | Purpose |

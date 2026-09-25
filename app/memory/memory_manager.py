@@ -13,6 +13,8 @@ from typing import Any, Optional
 from sqlalchemy import select, func, distinct, or_
 from sqlalchemy.orm import Session, joinedload
 
+from app.notifications.deferred import notify_after_commit
+
 from app.memory.models import (
     AgentGovernanceOverride,
     AuditLog,
@@ -67,6 +69,11 @@ _STAGE_EVENT_TYPES = {
     PipelineStage.lost: TimelineEventType.lost,
     PipelineStage.negotiation: TimelineEventType.negotiation,
 }
+
+
+# Records the stale-lead job writes about itself; never counted as lead activity.
+STALE_JOB_ACTORS = ("stale_lead_job",)
+STALE_JOB_ACTIONS = ("stale_notified",)
 
 
 def _stage_value(stage: Any) -> str:
@@ -131,6 +138,11 @@ def _serialize(obj: Any) -> Any:
 class MemoryManager:
     def __init__(self, db: Session):
         self._db = db
+
+    def notify_after_commit(self, send, description: str) -> None:
+        """Queue a notification about a change made through this session; it is sent
+        only if that change commits (app/notifications/deferred.py)."""
+        notify_after_commit(self._db, send, description)
 
     def rollback(self) -> None:
         """Discard the current transaction — needed after a caught IntegrityError
@@ -642,8 +654,13 @@ class MemoryManager:
         self,
         assigned_employee_id: Optional[str] = None,
         source: Optional[LeadSource] = None,
+        scope=None,
     ) -> list[Lead]:
+        """`scope` is an app.auth.scoping.LeadScope — the caller's visibility rule,
+        applied in the query."""
         q = select(Lead).options(joinedload(Lead.project))
+        if scope is not None:
+            q = q.where(scope.condition())
         if assigned_employee_id:
             q = q.where(Lead.assigned_employee_id == assigned_employee_id)
         if source is not None:
@@ -664,14 +681,51 @@ class MemoryManager:
         return lead
 
     def list_stale_candidate_leads(self, stages: tuple[PipelineStage, ...]) -> list[Lead]:
-        """Leads still in early (not-yet-qualified/closed) stages that have at least one
-        inbound customer message — the population the stale-lead job scans."""
+        """Every lead in one of `stages` — the population the stale-lead job scans."""
         q = (
             select(Lead)
+            .options(joinedload(Lead.customer))
             .where(Lead.pipeline_stage.in_(stages))
-            .where(Lead.last_customer_message_at.isnot(None))
+            .order_by(Lead.id)
         )
         return list(self._db.execute(q).scalars().all())
+
+    def last_activity_by_lead(self, leads: list[Lead]) -> dict[int, datetime]:
+        """When each lead was last worked on: the latest of its creation, its last
+        customer message, its newest timeline event (stage changes, assignment,
+        meetings, every proposal action, site assessments) and its newest audit entry
+        (field edits and notes). The stale-lead job's own bookkeeping is not activity,
+        or a notification would reset the clock it is measuring."""
+        if not leads:
+            return {}
+        ids = [lead.id for lead in leads]
+        latest: dict[int, datetime] = {}
+
+        def _bump(lead_id: int, when: Optional[datetime]) -> None:
+            when = _as_utc(when)
+            if when is not None and (lead_id not in latest or when > latest[lead_id]):
+                latest[lead_id] = when
+
+        for lead in leads:
+            _bump(lead.id, lead.created_at)
+            _bump(lead.id, lead.last_customer_message_at)
+        for lead_id, when in self._db.execute(
+            select(TimelineEvent.lead_id, func.max(TimelineEvent.created_at))
+            .where(TimelineEvent.lead_id.in_(ids))
+            .where(TimelineEvent.created_by.notin_(STALE_JOB_ACTORS))
+            .group_by(TimelineEvent.lead_id)
+        ):
+            _bump(lead_id, when)
+        for entity_id, when in self._db.execute(
+            select(AuditLog.entity_id, func.max(AuditLog.created_at))
+            .where(AuditLog.entity_type == "lead")
+            .where(AuditLog.entity_id.in_([str(i) for i in ids]))
+            .where(AuditLog.action.notin_(STALE_JOB_ACTIONS))
+            .where(AuditLog.performed_by.notin_(STALE_JOB_ACTORS))
+            .group_by(AuditLog.entity_id)
+        ):
+            _bump(int(entity_id), when)
+        return latest
 
     def mark_stale_notified(self, lead_id: int, when: datetime, threshold: str, performed_by: str = "system") -> Optional[Lead]:
         """Record that a staleness notification fired for this lead (dedup marker)."""
@@ -749,7 +803,9 @@ class MemoryManager:
         if revision_reason is not None:
             proposal.revision_reason = revision_reason
         if pdf_url:
+            from app.storage.r2 import key_from_url
             proposal.pdf_url = pdf_url
+            proposal.pdf_storage_key = key_from_url(pdf_url)
         if date_sent:
             proposal.date_sent = date_sent
         self._db.flush()
@@ -758,6 +814,37 @@ class MemoryManager:
             performed_by, before=before, after={"status": new_status},
         )
         return proposal
+
+    def record_proposal_pdf(self, proposal_id: int, pdf_url: str, performed_by: str) -> Optional[Proposal]:
+        """Attach a generated PDF to a proposal — its URL and object key, nothing else.
+        Only those two columns are written, so a status change committed meanwhile
+        (e.g. the proposal was sent while its PDF rendered) is left exactly as it is."""
+        from app.storage.r2 import key_from_url
+
+        proposal = self._db.get(Proposal, proposal_id)
+        if proposal is None:
+            return None
+        proposal.pdf_url = pdf_url
+        proposal.pdf_storage_key = key_from_url(pdf_url)
+        self._db.flush()
+        self._audit("proposal", str(proposal_id), "pdf_generated", performed_by,
+                    after={"pdf_storage_key": proposal.pdf_storage_key})
+        return proposal
+
+    @staticmethod
+    def proposal_pdf_key(proposal: Proposal) -> Optional[str]:
+        """The PDF's object key: stored, or derived from pdf_url for rows written
+        before pdf_storage_key existed. None when there is no PDF or it can't be derived."""
+        if proposal.pdf_storage_key:
+            return proposal.pdf_storage_key
+        if proposal.pdf_url:
+            from app.storage.r2 import key_from_url
+            return key_from_url(proposal.pdf_url)
+        return None
+
+    @staticmethod
+    def proposal_pdf_filename(proposal: Proposal) -> str:
+        return f"Grid-Nova-Proposal-{proposal.id}-v{proposal.version}.pdf"
 
     def get_proposal(self, proposal_id: int) -> Optional[Proposal]:
         return self._db.get(Proposal, proposal_id)
@@ -843,6 +930,7 @@ class MemoryManager:
         assigned_employee_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 50,
+        scope=None,
     ) -> tuple[list[Proposal], int]:
         """
         Paginated proposals with lead + customer eagerly loaded for a summary join.
@@ -857,6 +945,8 @@ class MemoryManager:
             base = base.where(Proposal.lead_id == lead_id)
         if assigned_employee_id is not None:
             base = base.where(Lead.assigned_employee_id == assigned_employee_id)
+        if scope is not None:
+            base = base.where(scope.condition())
         if date_from is not None:
             base = base.where(Proposal.date_created >= date_from)
         if date_to is not None:
@@ -965,8 +1055,11 @@ class MemoryManager:
         lead_id: Optional[int] = None,
         page: int = 1,
         page_size: int = 50,
+        scope=None,
     ) -> tuple[list[ProposalInputs], int]:
         base = select(ProposalInputs)
+        if scope is not None:
+            base = base.join(Lead, ProposalInputs.lead_id == Lead.id).where(scope.condition())
         if status is not None:
             base = base.where(ProposalInputs.status == status)
         if lead_id is not None:
@@ -1837,6 +1930,14 @@ class MemoryManager:
     def get_equipment(self, equipment_id: int) -> Optional["Equipment"]:
         return self._db.get(Equipment, equipment_id)
 
+    def active_equipment_terms(self) -> list[str]:
+        """Brand and model names of every active Equipment/SKU Master record — the
+        only makes the Sales Agent may name as something Grid Nova supplies."""
+        terms: list[str] = []
+        for item in self.list_equipment(is_active=True):
+            terms += [t for t in (item.brand, item.model_name, f"{item.brand} {item.model_name}") if t]
+        return terms
+
     def list_equipment(
         self,
         category: Optional["EquipmentCategory"] = None,
@@ -2116,6 +2217,25 @@ class MemoryManager:
         ]
 
     # ── Dashboard companion aggregates ───────────────────────────────────────────
+
+    def lead_ids_for_audit_entry(self, entry: AuditLog) -> list[int]:
+        """The lead(s) an audit entry is about, for visibility checks. Empty when the
+        entity is not tied to any lead (employees, equipment, governance, ...)."""
+        try:
+            entity_id = int(entry.entity_id)
+        except (TypeError, ValueError):
+            return []
+        kind = entry.entity_type
+        if kind == "lead":
+            return [entity_id]
+        model = {"proposal": Proposal, "proposal_inputs": ProposalInputs, "meeting": Meeting}.get(kind)
+        if model is not None:
+            row = self._db.get(model, entity_id)
+            return [row.lead_id] if row is not None else []
+        column = {"customer": Lead.customer_id, "project": Lead.project_id}.get(kind)
+        if column is not None:
+            return list(self._db.execute(select(Lead.id).where(column == entity_id)).scalars())
+        return []
 
     def list_recent_activity(
         self, limit: int = 15, exclude_actions: Optional[tuple[str, ...]] = None

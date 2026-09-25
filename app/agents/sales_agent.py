@@ -225,9 +225,10 @@ class SalesAgent:
             # later turn (this block re-runs on each message of a qualified lead).
             if previous_stage in (PipelineStage.new, PipelineStage.qualifying):
                 from app.notifications.notifier import notifier
-                notifier.lead_qualified(
-                    lead_id=lead_id, source=LeadSource(lead.source).value,
-                    customer_name=merged.get("name"),
+                source, name = LeadSource(lead.source).value, merged.get("name")
+                memory.notify_after_commit(
+                    lambda: notifier.lead_qualified(lead_id=lead_id, source=source, customer_name=name),
+                    "lead_qualified",
                 )
 
         # Deterministic conversation stage — decides HOW Nova talks, never the LLM.
@@ -282,6 +283,10 @@ class SalesAgent:
                 memory_context=memory_context,
                 user_message=message,
                 fallback=llm_client._fallback_reply(conv_stage, missing, available_human),
+                approved_equipment=memory.active_equipment_terms(),
+                customer_text="\n".join(
+                    [message] + [t.get("content", "") for t in history if t.get("role") == "user"]
+                ),
             )
             reply = checked.reply
             if checked.violations:
@@ -369,10 +374,9 @@ class SalesAgent:
         )
         from app.notifications.notifier import notifier
 
-        notifier.notify("agent_stood_down", {
-            "lead_id": lead_id, "customer_id": customer_id,
-            "code": decision.code, "reason": decision.reason,
-        })
+        payload = {"lead_id": lead_id, "customer_id": customer_id,
+                   "code": decision.code, "reason": decision.reason}
+        memory.notify_after_commit(lambda: notifier.notify("agent_stood_down", payload), "agent_stood_down")
 
         lead = memory.get_lead(lead_id)
         collected = dict(lead.collected_fields or {}) if lead else {}

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.agents.sales_agent import QUALIFICATION_FIELDS
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
+from app.auth.scoping import can_access_lead, lead_scope, require_lead_access
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
@@ -66,6 +67,14 @@ def _customer_accept_url(accept_token: Optional[str]) -> Optional[str]:
     return f"{settings.frontend_base_url.rstrip('/')}/proposal/accept/{accept_token}"
 
 
+def _customer_pdf_url(accept_token: Optional[str]) -> Optional[str]:
+    """The customer's PDF download: this API's public, token-gated endpoint, which
+    redirects to a fresh signed link. None when PUBLIC_API_BASE_URL is not set."""
+    if not accept_token or not settings.public_api_base_url:
+        return None
+    return f"{settings.public_api_base_url.rstrip('/')}/api/v1/public/proposals/{accept_token}/pdf"
+
+
 # Technical fields an Engineer is allowed to see (no pricing / customer PII).
 _ENGINEER_TECHNICAL_FIELDS = ("project_type", "capacity_kw", "location", "roof_type")
 
@@ -107,6 +116,7 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
         "requires_manager_signoff": p.requires_manager_signoff,
         "used_fallback_template": p.used_fallback_template,
         "pdf_url": p.pdf_url,
+        "pdf_available": bool(p.pdf_url or p.pdf_storage_key),
         "date_created": p.date_created.isoformat() if p.date_created else None,
         "date_sent": p.date_sent.isoformat() if p.date_sent else None,
         "accepted_at": p.accepted_at.isoformat() if p.accepted_at else None,
@@ -135,6 +145,7 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
 @router.get("/leads")
 def list_leads(
     source: Optional[str] = Query(default=None),
+    assigned: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
@@ -146,9 +157,9 @@ def list_leads(
             raise HTTPException(status_code=422, detail=f"Unknown lead source: {source!r}")
 
     memory = MemoryManager(db)
-    # Sales sees only their own leads; others see all (with role-appropriate filtering below)
-    assigned_filter = employee.employee_id if employee.is_sales else None
-    leads = memory.list_leads(assigned_employee_id=assigned_filter, source=source_enum)
+    # One visibility rule (app/auth/scoping.py): Sales sees its own and unassigned
+    # leads; ?assigned=me|unassigned|any narrows it for every role.
+    leads = memory.list_leads(source=source_enum, scope=lead_scope(employee, assigned))
     return [
         {
             "id": l.id,
@@ -307,6 +318,7 @@ def get_lead(
 
     lead = ctx["lead"]
     customer = ctx["customer"]
+    require_lead_access(employee, lead)
 
     # Engineers see only technical fields
     if employee.is_engineer:
@@ -377,8 +389,7 @@ def update_lead_fields_manual(
 
     # Same scoping as the rest of the Sales-role surface: an unassigned lead is fair
     # game, but one already owned by a different Sales rep is not.
-    if employee.is_sales and lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id:
-        raise HTTPException(status_code=403, detail="This lead is not assigned to you.")
+    require_lead_access(employee, lead)
 
     updated, eval_result = apply_lead_fields(
         memory, lead, body.fields, performed_by=employee.employee_id, via="manual edit",
@@ -417,8 +428,7 @@ def update_lead_stage(
     lead = memory.get_lead(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if employee.is_sales and lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id:
-        raise HTTPException(status_code=403, detail="This lead is not assigned to you.")
+    require_lead_access(employee, lead)
 
     current = PipelineStage(lead.pipeline_stage)
     if body.stage == current:
@@ -544,10 +554,13 @@ def create_manual_lead(
         }.items() if v is not None
     }
     updated, eval_result = apply_lead_fields(memory, lead, fields, performed_by=performed_by, via="manual entry")
-    db.commit()
-    notifier.new_lead(
-        lead_id=updated.id, source=body.source.value, customer_name=body.name, created_by=performed_by,
+    new_lead_id, source = updated.id, body.source.value
+    memory.notify_after_commit(
+        lambda: notifier.new_lead(lead_id=new_lead_id, source=source, customer_name=body.name,
+                                  created_by=performed_by),
+        "new_lead",
     )
+    db.commit()
 
     return {
         "lead_id": updated.id,
@@ -614,6 +627,9 @@ def create_proposal_draft(
 ):
     if not employee.can_trigger_proposal_draft():
         raise HTTPException(status_code=403, detail="Your role cannot trigger proposal drafts.")
+    draft_lead = MemoryManager(db).get_lead(body.lead_id)
+    if draft_lead is not None:
+        require_lead_access(employee, draft_lead)
 
     result = orchestrator.request_proposal_draft(
         lead_id=body.lead_id,
@@ -650,6 +666,7 @@ def approve_proposal(
     proposal = memory.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
     if proposal.requires_manager_signoff:
         raise HTTPException(
@@ -673,6 +690,9 @@ def approve_proposal(
         description=f"Approved by {employee.employee_id}",
         created_by=employee.employee_id,
     )
+    memory.notify_after_commit(
+        lambda: notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id), "proposal_approved",
+    )
     db.commit()
 
     # Captured lead_id above, before commit expires the ORM object's attributes —
@@ -686,7 +706,6 @@ def approve_proposal(
     )
     db.commit()
 
-    notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id}
 
 
@@ -704,6 +723,7 @@ def manager_sign_off(
     proposal = memory.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
     if not proposal.requires_manager_signoff:
         raise HTTPException(
@@ -727,6 +747,9 @@ def manager_sign_off(
         description=f"Manager sign-off by {employee.employee_id}",
         created_by=employee.employee_id,
     )
+    memory.notify_after_commit(
+        lambda: notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id), "proposal_approved",
+    )
     db.commit()
 
     # See the matching comment in approve_proposal above — capture lead_id before
@@ -738,7 +761,6 @@ def manager_sign_off(
     )
     db.commit()
 
-    notifier.proposal_approved(proposal_id=proposal_id, lead_id=lead_id)
     return {"status": "approved", "proposal_id": proposal_id, "signoff_by": employee.employee_id}
 
 
@@ -760,6 +782,7 @@ def request_revision(
     proposal = memory.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
     memory.transition_proposal_status(
         proposal_id=proposal_id,
@@ -813,8 +836,7 @@ def adjust_pricing(
 
     # Sales may only adjust proposals on their own leads.
     lead = memory.get_lead(proposal.lead_id)
-    if employee.is_sales and lead and lead.assigned_employee_id != employee.employee_id:
-        raise HTTPException(status_code=403, detail="This proposal is not assigned to you.")
+    require_lead_access(employee, lead, "This proposal is not assigned to you.")
 
     if proposal.status not in (ProposalStatus.draft, ProposalStatus.pending_pricing_validation):
         raise HTTPException(
@@ -852,11 +874,15 @@ def adjust_pricing(
         memory, proposal_id, reflection.OUTCOME_PRICING_ADJUSTED,
         employee.employee_id, reason=body.reason, previous_value=previous_value,
     )
-    db.commit()
     if new_flag and not previously_required_signoff:
-        notifier.manager_signoff_required(
-            proposal_id=proposal_id, lead_id=proposal.lead_id, total_value=body.new_value,
+        signoff_lead_id = proposal.lead_id
+        memory.notify_after_commit(
+            lambda: notifier.manager_signoff_required(
+                proposal_id=proposal_id, lead_id=signoff_lead_id, total_value=body.new_value,
+            ),
+            "manager_signoff_required",
         )
+    db.commit()
 
     return {
         "status": "pricing_adjusted",
@@ -880,6 +906,7 @@ def send_proposal(
     proposal = memory.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
     if proposal.status != ProposalStatus.approved:
         raise HTTPException(status_code=400, detail="Only approved proposals can be sent.")
@@ -922,10 +949,17 @@ def send_proposal(
         proposal.lead_id, PipelineStage.proposal_sent, performed_by=employee.employee_id,
         description=f"Proposal v{proposal.version} sent to the customer",
     )
-    db.commit()
-
     ctx = memory.get_lead_context(proposal.lead_id)
     customer = ctx.get("customer")
+    if customer:
+        customer_email = customer.email
+        memory.notify_after_commit(
+            lambda: notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer_email,
+                                           accept_path=accept_path),
+            "proposal_sent",
+        )
+    db.commit()
+
     reflection.record_proposal_outcome(
         memory, proposal_id, reflection.OUTCOME_SENT, employee.employee_id
     )
@@ -933,14 +967,15 @@ def send_proposal(
 
     email_sent, email_skipped_reason = False, "no_customer"
     if customer:
-        notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer.email, accept_path=accept_path)
+        # Synchronous and after the commit above: the response reports whether the
+        # customer email went out, so it cannot wait in the post-commit queue.
         email_sent, email_skipped_reason = notifier.send_proposal_to_customer(
             proposal_id=proposal_id,
             version=proposal.version,
             customer_email=customer.email,
             customer_name=customer.name,
             accept_url=_customer_accept_url(accept_token),
-            pdf_url=proposal.pdf_url,
+            pdf_url=_customer_pdf_url(accept_token) if (proposal.pdf_url or proposal.pdf_storage_key) else None,
         )
 
     return {
@@ -968,15 +1003,26 @@ def get_proposal_pdf(
     # proposal detail endpoint: Engineers are blocked; Sales is scoped to own leads.
     if employee.is_engineer:
         raise HTTPException(status_code=403, detail="Engineers cannot access proposal PDFs.")
-    if employee.is_sales:
-        lead = memory.get_lead(proposal.lead_id)
-        if lead and lead.assigned_employee_id != employee.employee_id:
-            raise HTTPException(status_code=403, detail="This proposal is not assigned to you.")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
-    if not proposal.pdf_url:
+    if not proposal.pdf_url and not proposal.pdf_storage_key:
         return {"status": "pdf_pending", "proposal_id": proposal_id}
 
-    return {"pdf_url": proposal.pdf_url, "proposal_id": proposal_id}
+    # The bucket is private: hand out a short-lived signed link, never the stored
+    # object URL (which R2 rejects without a signature).
+    key = MemoryManager.proposal_pdf_key(proposal)
+    if key is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "pdf_location_unknown",
+                    "message": "The stored PDF location does not match this deployment's storage; regenerate it."},
+        )
+    from app.storage import r2
+    try:
+        url, expires_at = r2.signed_get_url(key, filename=MemoryManager.proposal_pdf_filename(proposal))
+    except r2.StorageNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    return {"pdf_url": url, "proposal_id": proposal_id, "expires_at": expires_at.isoformat()}
 
 
 # ── Proposals (read) ────────────────────────────────────────────────────────
@@ -1000,14 +1046,14 @@ def list_proposals(
             raise HTTPException(status_code=422, detail=f"Unknown proposal status: {filter_status!r}")
 
     # Sales is scoped to its own leads at the query level; others see all.
-    assigned_filter = employee.employee_id if employee.is_sales else None
+    scope = lead_scope(employee)
 
     proposals, total = memory_of(db).list_proposals(
         status=status_enum,
         date_from=_parse_date(date_from, "date_from"),
         date_to=_parse_date(date_to, "date_to"),
         lead_id=lead_id,
-        assigned_employee_id=assigned_filter,
+        scope=scope,
         page=page,
         page_size=page_size,
     )
@@ -1035,8 +1081,7 @@ def get_proposal_detail(
     customer = detail["customer"]
 
     # Sales may only open proposals on its own leads.
-    if employee.is_sales and lead and lead.assigned_employee_id != employee.employee_id:
-        raise HTTPException(status_code=403, detail="This proposal is not assigned to you.")
+    require_lead_access(employee, lead, "This proposal is not assigned to you.")
 
     if employee.is_engineer:
         return {
@@ -1069,6 +1114,7 @@ def get_proposal_detail(
         "used_fallback_template": proposal.used_fallback_template,
         "revision_reason": proposal.revision_reason,
         "pdf_url": proposal.pdf_url,
+        "pdf_available": bool(proposal.pdf_url or proposal.pdf_storage_key),
         "date_created": proposal.date_created.isoformat() if proposal.date_created else None,
         "date_sent": proposal.date_sent.isoformat() if proposal.date_sent else None,
         # Not shown to Engineers (see the Engineer branch above) — the accept link
@@ -1126,6 +1172,7 @@ def get_required_approval_tier(
     proposal = memory.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
+    require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
     tier = approval_engine.determine_required_approval_tier(
         proposal_value=proposal.total_value,
@@ -1449,16 +1496,32 @@ def _describe_activity(entry, actor_name: str) -> str:
     return f"{entity} {ref} {verb} by {actor_name}"
 
 
+# How far back a scoped (Sales) activity feed looks for its 15 visible entries.
+_ACTIVITY_SCAN_LIMIT = 500
+
+
 @router.get("/activity/recent")
 def recent_activity(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
     """Last 15 audit entries as a human-readable feed (all roles). Engineers do not
-    see pricing-related entries, matching the dashboard's pricing-visibility rule."""
+    see pricing-related entries, matching the dashboard's pricing-visibility rule.
+    Anyone who does not see every lead (Sales) only sees entries that trace back to
+    a lead they can access; entries about no lead at all (employees, equipment,
+    governance) are left out for them."""
     memory = memory_of(db)
     exclude = _PRICING_AUDIT_ACTIONS if employee.is_engineer else None
-    entries = memory.list_recent_activity(limit=15, exclude_actions=exclude)
+    if lead_scope(employee).everything:
+        entries = memory.list_recent_activity(limit=15, exclude_actions=exclude)
+    else:
+        entries = []
+        for entry in memory.list_recent_activity(limit=_ACTIVITY_SCAN_LIMIT, exclude_actions=exclude):
+            leads = [memory.get_lead(i) for i in memory.lead_ids_for_audit_entry(entry)]
+            if any(can_access_lead(employee, lead) for lead in leads):
+                entries.append(entry)
+                if len(entries) == 15:
+                    break
 
     actor_names: dict[str, str] = {}
 
@@ -1614,6 +1677,7 @@ def schedule_meeting(
     lead = memory.get_lead(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    require_lead_access(employee, lead)
 
     from app.config import settings as _settings
     duration = body.duration_minutes or _settings.scheduling_default_duration_minutes
@@ -1677,8 +1741,9 @@ def list_meetings(
     Sales sees only meetings on their own connected calendar (matching
     can_schedule_meeting()'s own admin/sales split); Admin/Management see every
     meeting. Engineers have no reason to see customer-identifying meeting data
-    (same "nothing to access yet" restriction already applied to their lead view)."""
-    if employee.is_engineer:
+    (same "nothing to access yet" restriction already applied to their lead view), and
+    Subcontractors see no customer data at all (app/auth/scoping.py)."""
+    if employee.role not in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales):
         raise HTTPException(status_code=403, detail="Your role cannot view meetings.")
 
     memory = memory_of(db)
@@ -2059,12 +2124,9 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
                 timeout_seconds=_PDF_GENERATION_TIMEOUT_SECONDS,
             )
             if pdf_url:
-                inner_memory.transition_proposal_status(
-                    proposal_id=proposal_id,
-                    new_status=ProposalStatus.approved,
-                    performed_by="system",
-                    pdf_url=pdf_url,
-                )
+                # Records the file only. The proposal may have been sent (or sent back
+                # for revision) while this ran; its status is never this job's to set.
+                inner_memory.record_proposal_pdf(proposal_id, pdf_url, performed_by="system")
                 inner_db.commit()
         except Exception:
             logger.exception("Background PDF generation failed for proposal %s", proposal_id)

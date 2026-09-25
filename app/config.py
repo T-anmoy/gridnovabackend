@@ -2,6 +2,7 @@ import json
 import logging
 from typing import List
 from urllib.parse import urlparse
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -109,6 +110,12 @@ class Settings(BaseSettings):
 
     # Where browser-facing redirects land (e.g. after Google Calendar consent).
     frontend_base_url: str = "http://localhost:3000"
+    # This API's own public origin, for links that must point at it from outside
+    # (the customer email's PDF download). Blank = such links are left out.
+    public_api_base_url: str = ""
+
+    # Lifetime of presigned storage GET links (app/storage/r2.py). R2 caps it at 7 days.
+    storage_signed_url_ttl_seconds: int = Field(default=600, ge=60, le=604_800)
 
     # Email notifications (app/notifications/notifier.py, via Resend's REST API).
     # Blank RESEND_API_KEY = no email; log/Slack notifications are unaffected.

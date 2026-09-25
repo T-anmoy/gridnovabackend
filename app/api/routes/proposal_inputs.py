@@ -6,6 +6,7 @@ ProposalInputs is the customer's raw input, Proposal is the AI-generated output.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Optional
 
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, field_validator
 
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
+from app.auth.scoping import lead_scope, require_lead_access
 from app.memory.db import get_db
 from app.memory.lead_fields import fill_lead_from_inputs
 from app.memory.memory_manager import MemoryManager
@@ -145,6 +147,54 @@ class ProposalInputsReview(BaseModel):
     rejection_reason: Optional[str] = None
 
 
+_FILE_REF_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def uploaded_files(inputs) -> list[dict]:
+    """Every file uploaded through POST /{id}/upload, each with the file_ref that
+    GET /{id}/files/{file_ref} downloads it by.
+
+    Only keys under this assessment's own proposal-inputs/{id}/ prefix count, in the
+    shape the upload endpoint writes ({prefix}{target}/{32-hex}_{filename}): a
+    storage_key a client typed into document_refs on create is never treated as a
+    downloadable file, so it can't be used to sign some other object in the bucket.
+    """
+    prefix = f"proposal-inputs/{inputs.id}/"
+    candidates = [("document", ref, {"document_type": ref.get("type")})
+                  for ref in (inputs.document_refs or []) if isinstance(ref, dict)]
+    candidates += [("installation_photo", ref, {"photo_slot": slot})
+                   for slot, ref in (inputs.installation_photo_refs or {}).items() if isinstance(ref, dict)]
+    for target, ref in (("staff_signature", inputs.staff_signature_ref),
+                        ("customer_signature", inputs.customer_signature_ref)):
+        if isinstance(ref, dict):
+            candidates.append((target, ref, {}))
+
+    files = []
+    for target, ref, extra in candidates:
+        key = ref.get("storage_key") or ""
+        if not key.startswith(f"{prefix}{target}/"):
+            continue
+        token = key[len(f"{prefix}{target}/"):].split("_", 1)[0]
+        if not _FILE_REF_RE.match(token):
+            continue
+        files.append({"file_ref": token, "target": target, "filename": ref.get("filename"),
+                      "storage_key": key, **extra})
+    return files
+
+
+# Commercial fields an Engineer does not see. Everything a site survey needs — the
+# address, the bills and consumption, the roof and load details — stays visible.
+_ENGINEER_HIDDEN_FIELDS = ("gst_number", "internal_notes")
+
+
+def _serialize_for(inputs, employee: AuthenticatedEmployee) -> dict:
+    data = _serialize(inputs)
+    if employee.is_engineer:
+        for field in _ENGINEER_HIDDEN_FIELDS:
+            data.pop(field, None)
+    return data
+
+
 def _serialize(inputs) -> dict:
     return {
         "id": inputs.id,
@@ -197,6 +247,7 @@ def _serialize(inputs) -> dict:
         "installation_photo_refs": inputs.installation_photo_refs,
         "staff_signature_ref": inputs.staff_signature_ref,
         "customer_signature_ref": inputs.customer_signature_ref,
+        "files": [{k: v for k, v in f.items() if k != "storage_key"} for f in uploaded_files(inputs)],
         "internal_notes": inputs.internal_notes,
     }
 
@@ -214,6 +265,7 @@ def submit_proposal_inputs(
     lead = memory.get_lead(body.lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    require_lead_access(employee, lead)
 
     fields = body.model_dump(exclude={"lead_id", "document_refs"})
     fields["document_refs"] = (
@@ -251,7 +303,8 @@ def get_proposal_inputs(
     inputs = memory.get_proposal_inputs(inputs_id)
     if not inputs:
         raise HTTPException(status_code=404, detail="Proposal inputs not found")
-    return _serialize(inputs)
+    require_lead_access(employee, memory.get_lead(inputs.lead_id))
+    return _serialize_for(inputs, employee)
 
 
 @router.get("/")
@@ -277,9 +330,10 @@ def list_proposal_inputs(
         lead_id=lead_id,
         page=page,
         page_size=page_size,
+        scope=lead_scope(employee),
     )
     return {
-        "items": [_serialize(i) for i in items],
+        "items": [_serialize_for(i, employee) for i in items],
         "page": page,
         "page_size": page_size,
         "total": total,
@@ -303,6 +357,7 @@ def review_proposal_inputs(
     inputs = memory.get_proposal_inputs(inputs_id)
     if not inputs:
         raise HTTPException(status_code=404, detail="Proposal inputs not found")
+    require_lead_access(employee, memory.get_lead(inputs.lead_id))
 
     updated = memory.review_proposal_inputs(
         inputs_id=inputs_id,
@@ -318,7 +373,7 @@ def review_proposal_inputs(
         filled = fill_lead_from_inputs(memory, updated, performed_by=employee.employee_id)
     db.commit()
 
-    result = _serialize(updated)
+    result = _serialize_for(updated, employee)
     result["lead_fields_filled"] = filled
 
     if body.status == InputStatus.approved_for_proposal:
@@ -397,6 +452,7 @@ UPLOAD_TARGETS = ("document", "installation_photo", "staff_signature", "customer
 # a third, independently-invented number.
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+_READ_CHUNK_BYTES = 1024 * 1024
 
 
 @router.post("/{inputs_id}/upload")
@@ -416,6 +472,7 @@ async def upload_proposal_input_file(
     inputs = memory.get_proposal_inputs(inputs_id)
     if not inputs:
         raise HTTPException(status_code=404, detail="Proposal inputs not found")
+    require_lead_access(employee, memory.get_lead(inputs.lead_id))
 
     if target not in UPLOAD_TARGETS:
         raise HTTPException(
@@ -442,12 +499,18 @@ async def upload_proposal_input_file(
             ),
         )
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB limit.",
-        )
+    # Read in chunks and stop the moment the limit is passed (the request body as a
+    # whole is already bounded by app/security/upload_limit.py).
+    chunks, size = [], 0
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        size += len(chunk)
+        if size > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB limit.",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
     if not content:
         raise HTTPException(status_code=422, detail="Uploaded file is empty.")
 
@@ -473,4 +536,31 @@ async def upload_proposal_input_file(
         photo_slot=photo_slot,
     )
     db.commit()
-    return _serialize(updated)
+    return _serialize_for(updated, employee)
+
+
+@router.get("/{inputs_id}/files/{file_ref}")
+def download_proposal_input_file(
+    inputs_id: int,
+    file_ref: str,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """A short-lived signed link to one uploaded site-assessment file. Same access
+    as reading the assessment itself."""
+    memory = MemoryManager(db)
+    inputs = memory.get_proposal_inputs(inputs_id)
+    if not inputs:
+        raise HTTPException(status_code=404, detail="Proposal inputs not found")
+    require_lead_access(employee, memory.get_lead(inputs.lead_id))
+    match = next((f for f in uploaded_files(inputs) if f["file_ref"] == file_ref), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    from app.storage import r2
+    try:
+        url, expires_at = r2.signed_get_url(match["storage_key"], filename=match["filename"])
+    except r2.StorageNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    return {"url": url, "expires_at": expires_at.isoformat(), "filename": match["filename"],
+            "file_ref": file_ref, "target": match["target"]}

@@ -264,6 +264,13 @@ def create_public_booking(
             duration_minutes=duration,
             performed_by="website",
         )
+        from app.notifications.notifier import notifier
+        new_lead_id = lead.id
+        memory.notify_after_commit(
+            lambda: notifier.new_lead(lead_id=new_lead_id, source=LeadSource.website_booking.value,
+                                      customer_name=body.name, created_by="website"),
+            "new_lead",
+        )
         db.commit()
     except booking.SlotUnavailableError:
         db.rollback()
@@ -274,10 +281,6 @@ def create_public_booking(
             status_code=503,
             detail={"code": "calendar_not_configured", "message": str(exc)},
         )
-
-    from app.notifications.notifier import notifier
-    notifier.new_lead(lead_id=lead.id, source=LeadSource.website_booking.value,
-                      customer_name=body.name, created_by="website")
 
     return BookingResponse(
         success=True,

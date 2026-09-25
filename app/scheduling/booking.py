@@ -111,11 +111,12 @@ def book_meeting(
         )
 
     from app.notifications.notifier import notifier
-    notifier.meeting_booked(
-        meeting_id=meeting.id,
-        lead_id=lead_id,
-        employee_id=employee_id,
-        scheduled_at=format_ist_datetime(scheduled_at),
+    meeting_id, when = meeting.id, format_ist_datetime(scheduled_at)
+    memory.notify_after_commit(
+        lambda: notifier.meeting_booked(
+            meeting_id=meeting_id, lead_id=lead_id, employee_id=employee_id, scheduled_at=when,
+        ),
+        "meeting_booked",
     )
 
     return meeting

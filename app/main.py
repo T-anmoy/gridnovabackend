@@ -17,6 +17,7 @@ from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
 from app.config import check_production_config, settings
 from app.memory.db import Base, engine
+from app.security.upload_limit import UploadSizeLimitMiddleware
 
 
 @asynccontextmanager
@@ -48,6 +49,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Oversized site-assessment uploads are refused while they arrive. Added before CORS
+# so CORS stays the outer layer and the 413 still carries CORS headers to the browser.
+app.add_middleware(UploadSizeLimitMiddleware)
 
 # CORS
 app.add_middleware(
