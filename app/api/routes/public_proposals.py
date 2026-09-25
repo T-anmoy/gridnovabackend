@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import TimelineEventType
+from app.memory.models import PipelineStage, TimelineEventType
 from app.security.client_ip import client_ip
 
 router = APIRouter()
@@ -110,6 +110,10 @@ def accept_proposal(token: str, request: Request, db: Session = Depends(get_db))
         description="Customer accepted the proposal online",
         created_by="customer",
     )
+    memory.advance_lead_stage(
+        proposal.lead_id, PipelineStage.won, performed_by="customer",
+        description=f"Customer accepted proposal v{proposal.version} online",
+    )
     # The strongest signal the Proposal Agent gets: a price a real customer said
     # yes to. Every later draft for them is read against this number.
     from app.memory import reflection
@@ -118,5 +122,12 @@ def accept_proposal(token: str, request: Request, db: Session = Depends(get_db))
         memory, proposal.id, reflection.OUTCOME_ACCEPTED, performed_by="customer"
     )
     db.commit()
+
+    from app.notifications.notifier import notifier
+    customer = proposal.lead.customer if proposal.lead else None
+    notifier.customer_accepted(
+        proposal_id=proposal.id, lead_id=proposal.lead_id, version=proposal.version,
+        customer_name=customer.name if customer else None,
+    )
     return {"status": "accepted", "proposal_id": proposal.id,
             "accepted_at": proposal.accepted_at.isoformat(), "already_accepted": False}

@@ -165,6 +165,38 @@ def client(_isolated_db):
     return TestClient(fastapi_app)
 
 
+# ── Proposal content that can actually be sent ───────────────────────────────
+# config/proposal_content.yaml is still all placeholder copy with 0 rates, so any
+# engine-drafted proposal is (correctly) blocked from being sent to a customer. Tests
+# that exercise a real send use this fixture: the real config's structure with every
+# placeholder string replaced and every rate made positive. The YAML itself is
+# never modified.
+
+TEST_RATE_PER_KW = 50_000
+
+
+def _without_placeholders(node, key="text"):
+    if isinstance(node, dict):
+        return {
+            k: (TEST_RATE_PER_KW if k == "rate_per_kw" else _without_placeholders(v, k))
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        return [_without_placeholders(v, key) for v in node]
+    if isinstance(node, str) and "[PLACEHOLDER" in node:
+        return f"Test copy for {key}."
+    return node
+
+
+@pytest.fixture
+def sendable_proposal_content(monkeypatch):
+    from app.proposals import content_engine
+
+    real = content_engine.load_content_config()
+    monkeypatch.setattr(content_engine, "_CONTENT_CONFIG", _without_placeholders(real))
+    return content_engine._CONTENT_CONFIG
+
+
 # ── Employees referenced by id ────────────────────────────────────────────────
 # In production an employee row always exists before anything points at it:
 # get_current_employee provisions it on authentication, before any write. Tests

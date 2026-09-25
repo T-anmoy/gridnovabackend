@@ -5,15 +5,22 @@ Pluggable notification layer.
 Concrete implementations:
   - LogNotifier: logs at WARNING (safe, zero-dependency default).
   - SlackWebhookNotifier: POSTs to SLACK_WEBHOOK_URL; never raises if the POST fails.
+  - EmailNotifier: sends email through Resend's REST API (RESEND_API_KEY), wrapping
+    whichever of the two above is active so they keep running unchanged.
 
-The active notifier is chosen by whether SLACK_WEBHOOK_URL is set. Named convenience
+The active notifier is chosen by whether SLACK_WEBHOOK_URL is set (and wrapped in
+EmailNotifier when RESEND_API_KEY and NOTIFY_FROM_EMAIL are). Named convenience
 methods (proposal_approved, meeting_booked, …) are kept on the base class for existing
 callers and route through notify(), so nothing that already calls the notifier breaks.
 """
 from __future__ import annotations
 
+import html
 import logging
 from abc import ABC, abstractmethod
+from typing import Any, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,31 @@ class Notifier(ABC):
                     {"meeting_id": meeting_id, "lead_id": lead_id,
                      "employee_id": employee_id, "scheduled_at": scheduled_at})
 
+    def new_lead(self, lead_id: int, source: str, customer_name: Optional[str], created_by: str) -> None:
+        self.notify("new_lead", {"lead_id": lead_id, "source": source,
+                                 "customer_name": customer_name, "created_by": created_by})
+
+    def lead_qualified(self, lead_id: int, source: str, customer_name: Optional[str]) -> None:
+        self.notify("lead_qualified", {"lead_id": lead_id, "source": source, "customer_name": customer_name})
+
+    def customer_accepted(self, proposal_id: int, lead_id: int, version: int,
+                          customer_name: Optional[str]) -> None:
+        self.notify("customer_accepted", {"proposal_id": proposal_id, "lead_id": lead_id,
+                                          "version": version, "customer_name": customer_name})
+
+    def send_proposal_to_customer(
+        self,
+        proposal_id: int,
+        version: int,
+        customer_email: Optional[str],
+        customer_name: Optional[str],
+        accept_url: Optional[str],
+        pdf_url: Optional[str],
+    ) -> tuple[bool, Optional[str]]:
+        """Email the customer their proposal. Returns (sent, skipped_reason). Only the
+        email notifier can; every other notifier reports why it did not."""
+        return False, "email_not_configured"
+
 
 class LogNotifier(Notifier):
     """Default notifier — structured WARNING-level log line. No external dependencies."""
@@ -79,12 +111,183 @@ class SlackWebhookNotifier(Notifier):
             logger.warning("Slack notification delivery failed for %s: %s", event_type, exc)
 
 
+RESEND_API_URL = "https://api.resend.com/emails"
+
+# Estimate-form leads are deliberately absent: the website already emails
+# info@gridnova.in for every estimate request, so a second staff email would be noise.
+STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
+                      "manager_signoff_required", "customer_accepted")
+_NO_STAFF_EMAIL_SOURCES = ("website_estimate_form",)
+
+_SOURCE_LABELS = {
+    "website_chat": "website chat",
+    "website_estimate_form": "website estimate form",
+    "website_booking": "website booking",
+    "whatsapp": "WhatsApp",
+    "instagram": "Instagram",
+    "cold_call": "phone call",
+    "referral": "referral",
+    "other": "other",
+}
+
+
+def _esc(value: Any) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _name(payload: dict) -> str:
+    return payload.get("customer_name") or "(name not yet known)"
+
+
+def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tuple[str, list[str], str, str]]:
+    """(subject, lines, link_label, link_url) for a staff email, or None. Lines are
+    plain text; the caller escapes them for HTML."""
+    lead_url = f"{base_url}/dashboard/leads/{payload.get('lead_id')}"
+    source = _SOURCE_LABELS.get(str(payload.get("source")), str(payload.get("source")))
+    if event_type == "new_lead":
+        return (f"New lead ({source}): {_name(payload)}",
+                [f"A new lead came in from {source}.", f"Customer: {_name(payload)}",
+                 f"Lead #{payload.get('lead_id')}, entered by {payload.get('created_by')}."],
+                "Open the lead", lead_url)
+    if event_type == "lead_qualified":
+        return (f"Lead qualified via {source}: {_name(payload)}",
+                [f"Lead #{payload.get('lead_id')} has every detail needed for a proposal draft.",
+                 f"Customer: {_name(payload)}"],
+                "Open the lead", lead_url)
+    if event_type == "meeting_booked":
+        return (f"Meeting booked: {payload.get('scheduled_at')}",
+                [f"A meeting was booked for {payload.get('scheduled_at')}.",
+                 f"Lead #{payload.get('lead_id')}, with {payload.get('employee_id')}."],
+                "Open meetings", f"{base_url}/dashboard/meetings")
+    proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
+    if event_type == "manager_signoff_required":
+        value = payload.get("total_value")
+        value_line = f"Proposal value: INR {value:,.0f}." if value else "Proposal value: not yet set."
+        return (f"Manager sign-off needed: proposal #{payload.get('proposal_id')}",
+                [f"Proposal #{payload.get('proposal_id')} (lead #{payload.get('lead_id')}) "
+                 "requires manager sign-off before it can be sent.", value_line],
+                "Open the proposal", proposal_url)
+    if event_type == "customer_accepted":
+        return (f"Proposal accepted: {_name(payload)}",
+                [f"{_name(payload)} accepted proposal v{payload.get('version')} online.",
+                 f"Proposal #{payload.get('proposal_id')}, lead #{payload.get('lead_id')}."],
+                "Open the proposal", proposal_url)
+    return None
+
+
+def _render(lines: list[str], link_label: Optional[str] = None, link_url: Optional[str] = None) -> tuple[str, str]:
+    """(html, text) bodies. Every interpolated value is escaped — customer names and
+    anything else a visitor typed end up here."""
+    body = "".join(f"<p>{_esc(line)}</p>" for line in lines)
+    text = "\n\n".join(lines)
+    if link_url:
+        body += f'<p><a href="{_esc(link_url)}">{_esc(link_label)}</a></p>'
+        text += f"\n\n{link_label}: {link_url}"
+    return f"<div>{body}</div>", text
+
+
+def _report_failure(event_type: str, detail: str, exc: Optional[BaseException] = None) -> None:
+    logger.warning("Email notification failed for %s: %s", event_type, detail)
+    try:
+        import sentry_sdk
+        if sentry_sdk.is_initialized():
+            if exc is not None:
+                sentry_sdk.capture_exception(exc)
+            else:
+                sentry_sdk.capture_message(f"Email notification failed for {event_type}: {detail}", level="warning")
+    except Exception:  # Sentry must never be the thing that breaks the caller
+        pass
+
+
+class EmailNotifier(Notifier):
+    """Emails via Resend's REST API, on top of the existing log/Slack notifier (which
+    still runs for every event). Staff emails need STAFF_NOTIFY_EMAILS; the customer
+    proposal email needs only the key and sender. Never raises into the caller."""
+
+    def __init__(self, api_key: str, from_email: str, staff_emails: list[str],
+                 frontend_base_url: str, inner: Notifier) -> None:
+        self._api_key = api_key
+        self._from = from_email
+        self._staff = staff_emails
+        self._base_url = frontend_base_url.rstrip("/")
+        self._inner = inner
+
+    def notify(self, event_type: str, payload: dict) -> None:
+        self._inner.notify(event_type, payload)
+        if not self._staff or event_type not in STAFF_EMAIL_EVENTS:
+            return
+        if payload.get("source") in _NO_STAFF_EMAIL_SOURCES:
+            return
+        try:
+            message = _staff_message(event_type, payload, self._base_url)
+            if message is None:
+                return
+            subject, lines, link_label, link_url = message
+            html_body, text_body = _render(lines, link_label, link_url)
+        except Exception as exc:
+            _report_failure(event_type, f"could not build the email: {exc}", exc)
+            return
+        self._send(self._staff, subject, html_body, text_body, event_type)
+
+    def send_proposal_to_customer(self, proposal_id, version, customer_email, customer_name,
+                                  accept_url, pdf_url) -> tuple[bool, Optional[str]]:
+        from app.memory.memory_manager import is_placeholder_email
+
+        if not customer_email:
+            return False, "no_customer_email"
+        if is_placeholder_email(customer_email):
+            return False, "placeholder_customer_email"
+        if not accept_url:
+            return False, "no_accept_link"
+        lines = [
+            f"Dear {customer_name or 'Customer'},",
+            f"Your proposal from Grid Nova Energy (version {version}) is ready to review.",
+            "You can read it and accept it online using the link below.",
+        ]
+        if pdf_url:
+            lines.append(f"A PDF copy is available here: {pdf_url}")
+        lines.append("If you have any questions, please contact your Grid Nova representative.")
+        html_body, text_body = _render(lines, "Review and accept your proposal", accept_url)
+        sent = self._send([customer_email], "Your proposal from Grid Nova Energy",
+                          html_body, text_body, "proposal_sent_customer_email")
+        return (True, None) if sent else (False, "send_failed")
+
+    def _send(self, to: list[str], subject: str, html_body: str, text_body: str, event_type: str) -> bool:
+        try:
+            response = httpx.post(
+                RESEND_API_URL,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json={"from": self._from, "to": to, "subject": subject, "html": html_body, "text": text_body},
+                timeout=10,
+            )
+        except Exception as exc:
+            _report_failure(event_type, f"request error: {exc}", exc)
+            return False
+        if response.status_code >= 300:
+            _report_failure(event_type, f"Resend returned HTTP {response.status_code}")
+            return False
+        logger.info("Email notification sent for %s", event_type)
+        return True
+
+
 def get_notifier() -> Notifier:
-    """Select the active notifier based on configuration."""
+    """Select the active notifier based on configuration. Email wraps whichever of
+    Slack/log would otherwise be active, so those keep behaving exactly as before."""
     from app.config import settings
+    inner: Notifier
     if settings.slack_webhook_url:
-        return SlackWebhookNotifier(settings.slack_webhook_url)
-    return LogNotifier()
+        inner = SlackWebhookNotifier(settings.slack_webhook_url)
+    else:
+        inner = LogNotifier()
+    if settings.resend_api_key and settings.notify_from_email:
+        return EmailNotifier(
+            api_key=settings.resend_api_key,
+            from_email=settings.notify_from_email,
+            staff_emails=settings.staff_notify_email_list,
+            frontend_base_url=settings.frontend_base_url,
+            inner=inner,
+        )
+    return inner
 
 
 notifier: Notifier = get_notifier()

@@ -14,6 +14,7 @@ from pydantic import BaseModel, field_validator
 
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
+from app.memory.lead_fields import fill_lead_from_inputs
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
     INSTALLATION_PHOTO_SLOTS,
@@ -229,12 +230,14 @@ def submit_proposal_inputs(
         performed_by=employee.employee_id,
         **fields,
     )
+    filled = fill_lead_from_inputs(memory, inputs, performed_by=employee.employee_id)
     db.commit()
 
     return {
         "id": inputs.id,
         "status": inputs.status,
         "submitted_at": inputs.submitted_at.isoformat() if inputs.submitted_at else None,
+        "lead_fields_filled": filled,
     }
 
 
@@ -308,9 +311,15 @@ def review_proposal_inputs(
         internal_notes=body.internal_notes,
         rejection_reason=body.rejection_reason,
     )
+    # An approved site assessment fills the lead's still-blank required fields
+    # before the auto-draft below checks readiness.
+    filled = {}
+    if body.status == InputStatus.approved_for_proposal:
+        filled = fill_lead_from_inputs(memory, updated, performed_by=employee.employee_id)
     db.commit()
 
     result = _serialize(updated)
+    result["lead_fields_filled"] = filled
 
     if body.status == InputStatus.approved_for_proposal:
         result["proposal_draft"] = _trigger_auto_draft(
@@ -332,10 +341,11 @@ def _trigger_auto_draft(
     proposal" button uses — now that a reviewer has approved this lead's site
     assessment for one.
 
-    This only succeeds when the Lead itself already satisfies the same
-    readiness gate every other draft trigger does (app.rules.business_rules.
-    REQUIRED_FIELDS on Lead.collected_fields — a separate schema from
-    ProposalInputs, which this endpoint does not touch or map onto). Approving
+    This only succeeds when the Lead itself satisfies the same readiness gate
+    every other draft trigger does (app.rules.business_rules.REQUIRED_FIELDS on
+    Lead.collected_fields). The review has already filled whatever blanks the
+    site assessment can honestly supply (app/memory/lead_fields.py); anything
+    still missing is reported back as missing_fields. Approving
     a site assessment for a lead nobody has qualified yet is a valid action in
     its own right, so a failure here never blocks or reverts the review that
     already committed above — it is reported back for the reviewer to see, not

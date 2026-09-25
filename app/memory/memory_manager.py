@@ -49,6 +49,40 @@ from app.memory.models import (
 PLACEHOLDER_EMAIL_DOMAIN = "pending.gridnova.internal"
 
 
+# Pipeline order for automatic transitions. won/lost are terminal: nothing automatic
+# ever moves a lead out of them (a person re-opens it via set_lead_stage).
+_STAGE_ORDER = {
+    PipelineStage.new: 0,
+    PipelineStage.qualifying: 1,
+    PipelineStage.qualified: 2,
+    PipelineStage.proposal_draft: 3,
+    PipelineStage.proposal_sent: 4,
+    PipelineStage.negotiation: 5,
+    PipelineStage.won: 6,
+    PipelineStage.lost: 6,
+}
+TERMINAL_STAGES = (PipelineStage.won, PipelineStage.lost)
+_STAGE_EVENT_TYPES = {
+    PipelineStage.won: TimelineEventType.won,
+    PipelineStage.lost: TimelineEventType.lost,
+    PipelineStage.negotiation: TimelineEventType.negotiation,
+}
+
+
+def _stage_value(stage: Any) -> str:
+    return stage.value if isinstance(stage, PipelineStage) else str(stage)
+
+
+def stage_advances(current: Optional[PipelineStage], target: PipelineStage) -> bool:
+    """True when an automatic update may move a lead from `current` to `target`."""
+    if current is None:
+        return True
+    current = PipelineStage(current)
+    if current in TERMINAL_STAGES:
+        return False
+    return _STAGE_ORDER[PipelineStage(target)] > _STAGE_ORDER[current]
+
+
 def is_placeholder_email(email: Optional[str]) -> bool:
     return bool(email) and email.endswith("@" + PLACEHOLDER_EMAIL_DOMAIN)
 
@@ -220,6 +254,27 @@ class MemoryManager:
             after={"email": placeholder_email, "placeholder": True},
         )
         return customer
+
+    def find_customer(self, email: Optional[str] = None, phone: Optional[str] = None) -> Optional[Customer]:
+        """The existing customer get_or_create_customer would resolve these details
+        to, or None if it would create a new one."""
+        return self._find_matching_customer(
+            email=email, phone=phone, email_is_weak=(not email or is_placeholder_email(email)),
+        )
+
+    def get_or_create_customer_by_phone(self, name: str, phone: str, performed_by: str) -> tuple[Customer, bool]:
+        """For an enquiry with a phone but no email (a call, a walk-in): reuse the
+        customer that phone already resolves to, otherwise a placeholder customer —
+        the same no-identity-yet mechanism the chat uses — filled with the name and
+        phone. Returns (customer, matched_existing)."""
+        match = self.find_customer(phone=phone)
+        if match:
+            return match, True
+        customer = self.create_placeholder_customer(performed_by=performed_by)
+        filled = self.update_customer_details(
+            customer_id=customer.id, name=name, email=None, phone=phone, performed_by=performed_by,
+        )
+        return filled or customer, False
 
     def update_customer(self, customer_id: int, performed_by: str, **fields: Any) -> Customer:
         customer = self._db.get(Customer, customer_id)
@@ -484,7 +539,10 @@ class MemoryManager:
         before = {"collected_fields": dict(lead.collected_fields or {}), "pipeline_stage": lead.pipeline_stage}
         merged = {**(lead.collected_fields or {}), **new_fields}
         lead.collected_fields = merged
-        if stage is not None:
+        # Automatic stage updates only ever move a lead forward: a field edit, chat
+        # turn or re-draft must not drag a sent/won/lost lead back to "qualified".
+        # Deliberate moves in any direction go through set_lead_stage().
+        if stage is not None and stage_advances(lead.pipeline_stage, stage):
             lead.pipeline_stage = stage
         if score is not None:
             lead.lead_score = score
@@ -496,6 +554,49 @@ class MemoryManager:
 
     def get_lead(self, lead_id: int) -> Optional[Lead]:
         return self._db.get(Lead, lead_id)
+
+    def set_lead_stage(
+        self,
+        lead_id: int,
+        new_stage: PipelineStage,
+        performed_by: str,
+        reason: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Lead:
+        """Move a lead to any stage — the caller has already decided the move is
+        allowed. Audited with before/after, plus a timeline event carrying the
+        reason verbatim."""
+        lead = self._db.get(Lead, lead_id)
+        previous = lead.pipeline_stage
+        lead.pipeline_stage = new_stage
+        lead.updated_at = datetime.now(timezone.utc)
+        self._db.flush()
+        self._audit(
+            "lead", str(lead_id), "stage_changed", performed_by,
+            before={"pipeline_stage": previous},
+            after={"pipeline_stage": new_stage, "reason": reason},
+        )
+        text = description or f"Stage changed from {_stage_value(previous)} to {new_stage.value}"
+        if reason:
+            text = f"{text}: {reason}"
+        self.add_timeline_event(
+            lead_id=lead_id,
+            event_type=_STAGE_EVENT_TYPES.get(new_stage, TimelineEventType.stage_changed),
+            description=text,
+            created_by=performed_by,
+        )
+        return lead
+
+    def advance_lead_stage(
+        self, lead_id: int, target: PipelineStage, performed_by: str, description: str,
+    ) -> bool:
+        """Automatic transition: applied only when it moves the lead forward (never
+        out of won/lost). Returns whether the stage changed."""
+        lead = self._db.get(Lead, lead_id)
+        if lead is None or not stage_advances(lead.pipeline_stage, target):
+            return False
+        self.set_lead_stage(lead_id, target, performed_by, description=description)
+        return True
 
     def assign_lead_if_unassigned(self, lead_id: int, employee_id: str, performed_by: str) -> Lead:
         """Give an unassigned lead an owner — the first Sales/Admin employee to work
@@ -514,12 +615,35 @@ class MemoryManager:
             )
         return lead
 
+    def reassign_lead(self, lead_id: int, employee_id: Optional[str], performed_by: str) -> Lead:
+        """Set (or change) a lead's owner. The caller has checked the target is an
+        eligible employee. Audited before/after, with a timeline event."""
+        lead = self._db.get(Lead, lead_id)
+        previous = lead.assigned_employee_id
+        lead.assigned_employee_id = employee_id
+        lead.updated_at = datetime.now(timezone.utc)
+        self._db.flush()
+        self._audit(
+            "lead", str(lead_id), "reassigned", performed_by,
+            before={"assigned_employee_id": previous}, after={"assigned_employee_id": employee_id},
+        )
+        self.add_timeline_event(
+            lead_id=lead_id,
+            event_type=TimelineEventType.lead_assigned,
+            description=(
+                f"Assigned to {employee_id}" if previous is None
+                else f"Reassigned from {previous} to {employee_id}"
+            ),
+            created_by=performed_by,
+        )
+        return lead
+
     def list_leads(
         self,
         assigned_employee_id: Optional[str] = None,
         source: Optional[LeadSource] = None,
     ) -> list[Lead]:
-        q = select(Lead)
+        q = select(Lead).options(joinedload(Lead.project))
         if assigned_employee_id:
             q = q.where(Lead.assigned_employee_id == assigned_employee_id)
         if source is not None:
@@ -694,6 +818,10 @@ class MemoryManager:
         }
         proposal.total_value = new_value
         proposal.requires_manager_signoff = requires_manager_signoff
+        # Keep the stored pricing section in step with the price, or the PDF would
+        # print "INR X" above a pricing section still saying "to be confirmed".
+        from app.proposals.content_engine import with_adjusted_price
+        proposal.content = with_adjusted_price(proposal.content, new_value)
         self._db.flush()
         self._audit(
             "proposal", str(proposal_id), "pricing_adjusted", performed_by,
@@ -810,6 +938,23 @@ class MemoryManager:
             after={"lead_id": lead_id, "status": InputStatus.submitted.value},
         )
         return inputs
+
+    def record_fields_filled_from_inputs(
+        self, lead_id: int, inputs_id: int, fields: dict, performed_by: str,
+    ) -> None:
+        """Provenance for lead fields filled from a site assessment: which fields, with
+        what values, from which proposal_inputs row."""
+        self._audit(
+            "lead", str(lead_id), "fields_filled_from_inputs", performed_by,
+            after={"proposal_inputs_id": inputs_id, "fields": fields},
+        )
+        listed = ", ".join(f"{k}={v}" for k, v in fields.items())
+        self.add_timeline_event(
+            lead_id=lead_id,
+            event_type=TimelineEventType.fields_filled_from_inputs,
+            description=f"Filled from site assessment (proposal_inputs #{inputs_id}): {listed}",
+            created_by=performed_by,
+        )
 
     def get_proposal_inputs(self, inputs_id: int) -> Optional[ProposalInputs]:
         return self._db.get(ProposalInputs, inputs_id)

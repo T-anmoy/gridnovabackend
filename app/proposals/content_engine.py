@@ -17,6 +17,7 @@ Design principles carried over from the rest of the platform:
 """
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 from typing import Optional
@@ -320,6 +321,41 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
         },
         "used_fallback_template": used_fallback,
     }
+
+
+PLACEHOLDER_MARKER = "[PLACEHOLDER"
+
+
+def placeholder_sections(content: Optional[dict]) -> list[str]:
+    """Ids of the stored sections whose body still carries placeholder copy."""
+    return [
+        str(section.get("id"))
+        for section in ((content or {}).get("sections") or [])
+        if isinstance(section, dict) and PLACEHOLDER_MARKER in str(section.get("body") or "")
+    ]
+
+
+def has_placeholder_content(content: Optional[dict], total_value: Optional[float]) -> bool:
+    """True while a proposal is not fit to send to a customer: some section is still
+    placeholder copy, or it has no real price."""
+    return bool(placeholder_sections(content)) or not total_value
+
+
+def with_adjusted_price(content: Optional[dict], total_value: float) -> Optional[dict]:
+    """A copy of stored proposal content whose pricing section states a price staff
+    set by hand (adjust-pricing), so the section, the PDF and total_value agree. The
+    sentence is the engine's own ("Proposed project value: INR …"), without a per-kW
+    rate, because a hand-set price has none."""
+    if not content or not isinstance(content.get("sections"), list):
+        return content
+    updated = copy.deepcopy(content)
+    for section in updated["sections"]:
+        if isinstance(section, dict) and section.get("id") == "pricing":
+            section["body"] = f"Proposed project value: INR {total_value:,.0f}."
+            section["total_value"] = total_value
+    if isinstance(updated.get("pricing"), dict):
+        updated["pricing"]["total_value"] = total_value
+    return updated
 
 
 def _format_pricing_body(rate_per_kw: Optional[float], capacity, total_value: Optional[float]) -> str:

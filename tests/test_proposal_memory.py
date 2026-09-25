@@ -151,6 +151,15 @@ class TestOutcomesThroughTheApi:
         assert response.status_code == 200
         return customer_id, lead_id, response.json()["proposal_id"]
 
+    def _price(self, client, proposal_id):
+        """Staff set the price the engine could not (this lead matches no pricing tier)
+        — the step a real proposal needs before it can be sent."""
+        assert client.patch(
+            f"/api/v1/dashboard/proposals/{proposal_id}/adjust-pricing",
+            json={"new_value": 250_000.0, "reason": "site survey pricing"},
+            headers=sales_headers("emp-sales-1"),
+        ).status_code == 200
+
     def _outcomes(self, _isolated_db, customer_id):
         session = _isolated_db()
         try:
@@ -188,8 +197,9 @@ class TestOutcomesThroughTheApi:
         summaries = " ".join(s for _, s in self._outcomes(_isolated_db, customer_id))
         assert "repriced" in summaries
 
-    def test_approve_and_send_record_outcomes(self, client, _isolated_db):
+    def test_approve_and_send_record_outcomes(self, client, _isolated_db, sendable_proposal_content):
         customer_id, _, proposal_id = self._drafted(client, _isolated_db)
+        self._price(client, proposal_id)
         assert client.post(
             f"/api/v1/dashboard/proposals/{proposal_id}/approve",
             headers=sales_headers("emp-sales-1"),
@@ -203,8 +213,9 @@ class TestOutcomesThroughTheApi:
         assert "was approved" in summaries
         assert "was sent to the customer" in summaries
 
-    def test_customer_acceptance_is_recorded(self, client, _isolated_db):
+    def test_customer_acceptance_is_recorded(self, client, _isolated_db, sendable_proposal_content):
         customer_id, _, proposal_id = self._drafted(client, _isolated_db)
+        self._price(client, proposal_id)
         client.post(
             f"/api/v1/dashboard/proposals/{proposal_id}/approve",
             headers=sales_headers("emp-sales-1"),

@@ -14,7 +14,7 @@ from app.governance import policy, registry
 from app.llm.client import llm_client
 from app.llm.company_facts import COMPANY_FACTS, RESPONSE_TIME_COMMITMENT
 from app.memory.models import (
-    Channel, LeadScore, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
+    Channel, LeadScore, LeadSource, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
 )
 from app.rules.business_rules import REQUIRED_FIELDS, check_missing_fields, evaluate_lead
 from app.timezones import format_ist_datetime
@@ -221,6 +221,14 @@ class SalesAgent:
                 description="All required fields collected via Sales Agent",
                 created_by="sales_agent",
             )
+            # Staff hear about a chat lead once, when it first qualifies — not on every
+            # later turn (this block re-runs on each message of a qualified lead).
+            if previous_stage in (PipelineStage.new, PipelineStage.qualifying):
+                from app.notifications.notifier import notifier
+                notifier.lead_qualified(
+                    lead_id=lead_id, source=LeadSource(lead.source).value,
+                    customer_name=merged.get("name"),
+                )
 
         # Deterministic conversation stage — decides HOW Nova talks, never the LLM.
         conv_stage = determine_conversation_stage(merged)

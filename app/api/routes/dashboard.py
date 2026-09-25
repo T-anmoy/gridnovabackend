@@ -7,33 +7,37 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from app.agents.sales_agent import QUALIFICATION_FIELDS, _score_from_fields
+from app.agents.sales_agent import QUALIFICATION_FIELDS
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
 from app.memory.db import get_db
-from app.memory.memory_manager import MemoryManager
+from app.memory.lead_fields import apply_lead_fields
+from app.memory.memory_manager import TERMINAL_STAGES, MemoryManager
 from app.memory.models import (
     EmployeeRole, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
 )
 from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
+from app.rules.project_types import family_for_project_type
 from app.scheduling import availability, booking, google_calendar
 from app.security.internal_key import has_valid_internal_key
 from app.notifications.notifier import notifier
 from app.orchestrator.orchestrator import orchestrator
 from app.pdf.generator import generate_and_upload_pdf
+from app.proposals import content_engine
 
 router = APIRouter(prefix="/api/v1/dashboard")
 logger = logging.getLogger(__name__)
@@ -52,6 +56,14 @@ def _accept_path(accept_token: Optional[str]) -> Optional[str]:
     if not accept_token:
         return None
     return f"/api/v1/proposals/accept/{accept_token}"
+
+
+def _customer_accept_url(accept_token: Optional[str]) -> Optional[str]:
+    """The link a customer opens: the website's accept page, which itself calls the
+    API path _accept_path() returns."""
+    if not accept_token:
+        return None
+    return f"{settings.frontend_base_url.rstrip('/')}/proposal/accept/{accept_token}"
 
 
 # Technical fields an Engineer is allowed to see (no pricing / customer PII).
@@ -97,6 +109,9 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
         "pdf_url": p.pdf_url,
         "date_created": p.date_created.isoformat() if p.date_created else None,
         "date_sent": p.date_sent.isoformat() if p.date_sent else None,
+        "accepted_at": p.accepted_at.isoformat() if p.accepted_at else None,
+        "has_placeholder_content": content_engine.has_placeholder_content(p.content, p.total_value),
+        "placeholder_sections": content_engine.placeholder_sections(p.content),
         # Not shown to Engineers — the accept link is a bearer credential onto the
         # public accept endpoint, which returns pricing to anyone holding it.
         "accept_token": p.accept_token,
@@ -142,6 +157,8 @@ def list_leads(
             "lead_score": l.lead_score,
             "source": l.source,
             "created_at": l.created_at.isoformat(),
+            "assigned_employee_id": l.assigned_employee_id,
+            "project_reference_id": l.project.reference_id if l.project else None,
         }
         for l in leads
     ]
@@ -256,6 +273,27 @@ def export_proposals(
     return _csv_response(rows, header, filename)
 
 
+def _project_summary(project) -> Optional[dict]:
+    """The lead's customer/project record — every real Project column except the
+    customer link, which the lead detail already carries."""
+    if project is None:
+        return None
+    return {
+        "id": project.id,
+        "reference_id": project.reference_id,
+        "project_type": project.project_type,
+        "project_family": project.project_family.value if project.project_family else None,
+        "state": project.state,
+        "location": project.location,
+        "capacity_kw": project.capacity_kw,
+        "roof_type": project.roof_type,
+        "monthly_electricity_bill": project.monthly_electricity_bill,
+        "budget": project.budget,
+        "timeline": project.timeline,
+        "created_at": project.created_at.isoformat() if project.created_at else None,
+    }
+
+
 @router.get("/leads/{lead_id}")
 def get_lead(
     lead_id: int,
@@ -287,6 +325,8 @@ def get_lead(
         "pipeline_stage": lead.pipeline_stage,
         "lead_score": lead.lead_score,
         "source": lead.source,
+        "assigned_employee_id": lead.assigned_employee_id,
+        "project": _project_summary(lead.project),
         "collected_fields": lead.collected_fields,
         "proposals": [
             {"id": p.id, "version": p.version, "status": p.status, "total_value": p.total_value}
@@ -340,30 +380,9 @@ def update_lead_fields_manual(
     if employee.is_sales and lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id:
         raise HTTPException(status_code=403, detail="This lead is not assigned to you.")
 
-    merged = {**dict(lead.collected_fields or {}), **body.fields}
-    score = _score_from_fields(merged)
-    eval_result = evaluate_lead(merged)
-
-    stage = None
-    if eval_result.is_ready_for_proposal:
-        stage = PipelineStage.qualified
-    elif merged:
-        stage = PipelineStage.qualifying
-
-    updated = memory.update_lead_fields(
-        lead_id=lead_id,
-        new_fields=body.fields,
-        performed_by=employee.employee_id,
-        stage=stage,
-        score=score,
+    updated, eval_result = apply_lead_fields(
+        memory, lead, body.fields, performed_by=employee.employee_id, via="manual edit",
     )
-    if eval_result.is_ready_for_proposal:
-        memory.add_timeline_event(
-            lead_id=lead_id,
-            event_type=TimelineEventType.qualification_completed,
-            description=f"All required fields collected via manual edit by {employee.employee_id}",
-            created_by=employee.employee_id,
-        )
     db.commit()
 
     return {
@@ -374,6 +393,210 @@ def update_lead_fields_manual(
         "is_qualified": eval_result.is_ready_for_proposal,
         "missing_fields": eval_result.missing_fields,
     }
+
+
+class LeadStageUpdateRequest(BaseModel):
+    stage: PipelineStage
+    reason: Optional[str] = Field(default=None, max_length=1000)
+
+
+@router.patch("/leads/{lead_id}/stage")
+def update_lead_stage(
+    lead_id: int,
+    body: LeadStageUpdateRequest,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Opportunity tracker: move a lead to any pipeline stage by hand. Marking it
+    lost, or re-opening a won/lost lead, requires a reason; it is recorded verbatim
+    in the audit log and on the lead's timeline."""
+    if not employee.can_change_lead_stage():
+        raise HTTPException(status_code=403, detail="Your role cannot change a lead's stage.")
+
+    memory = MemoryManager(db)
+    lead = memory.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if employee.is_sales and lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id:
+        raise HTTPException(status_code=403, detail="This lead is not assigned to you.")
+
+    current = PipelineStage(lead.pipeline_stage)
+    if body.stage == current:
+        raise HTTPException(status_code=409, detail=f"Lead is already in stage '{current.value}'.")
+
+    reason = (body.reason or "").strip() or None
+    if body.stage == PipelineStage.lost and not reason:
+        raise HTTPException(status_code=422, detail="A reason is required to mark a lead as lost.")
+    if current in TERMINAL_STAGES and not reason:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A reason is required to re-open a lead that is '{current.value}'.",
+        )
+
+    updated = memory.set_lead_stage(lead_id, body.stage, performed_by=employee.employee_id, reason=reason)
+    db.commit()
+    return {
+        "lead_id": lead_id,
+        "previous_stage": current.value,
+        "pipeline_stage": updated.pipeline_stage.value,
+        "reason": reason,
+    }
+
+
+# Channels a person can log an enquiry from. The website sources are created by
+# their own public endpoints and are never entered by hand.
+MANUAL_LEAD_SOURCES = (LeadSource.whatsapp, LeadSource.cold_call, LeadSource.referral, LeadSource.other)
+_EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$")
+
+
+class ManualLeadCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=254)
+    source: LeadSource
+    location: Optional[str] = Field(default=None, max_length=200)
+    project_type: Optional[Literal["rooftop", "ground_mounted", "solar_pump"]] = None
+    capacity_kw: Optional[float] = Field(default=None, gt=0)
+    monthly_electricity_bill: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("name", "phone", "email", "location", "notes", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, value):
+        if value is not None and not _EMAIL_RE.match(value):
+            raise ValueError("must be a valid email address")
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def _manual_source(cls, value):
+        if value not in MANUAL_LEAD_SOURCES:
+            allowed = ", ".join(s.value for s in MANUAL_LEAD_SOURCES)
+            raise ValueError(f"must be one of: {allowed}")
+        return value
+
+    @model_validator(mode="after")
+    def _some_contact(self):
+        if not self.email and not self.phone:
+            raise ValueError("Provide a phone number or an email address.")
+        return self
+
+
+@router.post("/leads", status_code=status.HTTP_201_CREATED)
+def create_manual_lead(
+    body: ManualLeadCreate,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """A staff-entered enquiry (phone call, WhatsApp, walk-in, referral). Creates a
+    real Customer (deduplicated email-first, then phone), Project (with a reference
+    ID) and Lead, then evaluates qualification exactly as a manual field edit does.
+    Sales owns what it enters; Admin/Management leave the lead unassigned."""
+    if not employee.can_create_lead():
+        raise HTTPException(status_code=403, detail="Your role cannot create leads.")
+
+    memory = MemoryManager(db)
+    performed_by = employee.employee_id
+    if body.email:
+        existing = memory.find_customer(email=body.email, phone=body.phone)
+        customer = existing or memory.get_or_create_customer(
+            email=body.email, name=body.name, performed_by=performed_by, phone=body.phone,
+        )
+        matched_existing = existing is not None
+    else:
+        customer, matched_existing = memory.get_or_create_customer_by_phone(
+            name=body.name, phone=body.phone, performed_by=performed_by,
+        )
+
+    project = memory.create_project(
+        customer_id=customer.id,
+        performed_by=performed_by,
+        project_type=body.project_type,
+        project_family=family_for_project_type(body.project_type),
+        location=body.location,
+        capacity_kw=body.capacity_kw,
+        monthly_electricity_bill=body.monthly_electricity_bill,
+    )
+    lead = memory.create_lead(
+        customer_id=customer.id, performed_by=performed_by, project_id=project.id, source=body.source,
+    )
+    if employee.is_sales:
+        memory.reassign_lead(lead.id, performed_by, performed_by=performed_by)
+
+    fields = {
+        k: v for k, v in {
+            "name": body.name,
+            "email": body.email,
+            "phone": body.phone,
+            "location": body.location,
+            "project_type": body.project_type,
+            "capacity_kw": body.capacity_kw,
+            "monthly_electricity_bill": body.monthly_electricity_bill,
+            "notes": body.notes,
+        }.items() if v is not None
+    }
+    updated, eval_result = apply_lead_fields(memory, lead, fields, performed_by=performed_by, via="manual entry")
+    db.commit()
+    notifier.new_lead(
+        lead_id=updated.id, source=body.source.value, customer_name=body.name, created_by=performed_by,
+    )
+
+    return {
+        "lead_id": updated.id,
+        "customer_id": customer.id,
+        "customer_matched_existing": matched_existing,
+        "project_id": project.id,
+        "project_reference_id": project.reference_id,
+        "source": updated.source.value,
+        "pipeline_stage": updated.pipeline_stage.value,
+        "lead_score": updated.lead_score.value if updated.lead_score else None,
+        "assigned_employee_id": updated.assigned_employee_id,
+        "is_qualified": eval_result.is_ready_for_proposal,
+        "missing_fields": eval_result.missing_fields,
+    }
+
+
+class LeadAssignRequest(BaseModel):
+    employee_id: str = Field(min_length=1)
+
+
+@router.patch("/leads/{lead_id}/assign")
+def assign_lead(
+    lead_id: int,
+    body: LeadAssignRequest,
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Admin/Management: give a lead to (or move it to) an active Admin or Sales employee."""
+    if not employee.can_assign_lead():
+        raise HTTPException(status_code=403, detail="Only Admin or Management can assign leads.")
+
+    memory = MemoryManager(db)
+    lead = memory.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    target = memory.get_employee(body.employee_id)
+    if target is None:
+        raise HTTPException(status_code=422, detail=f"Unknown employee: {body.employee_id!r}")
+    if not target.is_active:
+        raise HTTPException(status_code=422, detail="That employee is deactivated.")
+    if EmployeeRole(target.role) not in (EmployeeRole.admin, EmployeeRole.sales):
+        raise HTTPException(status_code=422, detail="Leads can only be assigned to Admin or Sales employees.")
+    if lead.assigned_employee_id == target.id:
+        raise HTTPException(status_code=409, detail="The lead is already assigned to that employee.")
+
+    previous = lead.assigned_employee_id
+    memory.reassign_lead(lead_id, target.id, performed_by=employee.employee_id)
+    db.commit()
+    return {"lead_id": lead_id, "previous_assigned_employee_id": previous, "assigned_employee_id": target.id}
 
 
 # ── Proposals ─────────────────────────────────────────────────────────────────
@@ -610,6 +833,7 @@ def adjust_pricing(
     # Captured before the write — the size and direction of the correction is the
     # lesson, and it is unrecoverable once the row is overwritten.
     previous_value = proposal.total_value
+    previously_required_signoff = proposal.requires_manager_signoff
 
     updated = memory.adjust_proposal_pricing(
         proposal_id=proposal_id,
@@ -629,6 +853,10 @@ def adjust_pricing(
         employee.employee_id, reason=body.reason, previous_value=previous_value,
     )
     db.commit()
+    if new_flag and not previously_required_signoff:
+        notifier.manager_signoff_required(
+            proposal_id=proposal_id, lead_id=proposal.lead_id, total_value=body.new_value,
+        )
 
     return {
         "status": "pricing_adjusted",
@@ -656,6 +884,25 @@ def send_proposal(
     if proposal.status != ProposalStatus.approved:
         raise HTTPException(status_code=400, detail="Only approved proposals can be sent.")
 
+    # Approval is internal and may happen on draft copy; what reaches the customer
+    # may not. Blocked until every section is real and there is a real price.
+    if content_engine.has_placeholder_content(proposal.content, proposal.total_value):
+        sections = content_engine.placeholder_sections(proposal.content)
+        problems = []
+        if sections:
+            problems.append(f"placeholder text in section(s): {', '.join(sections)}")
+        if not proposal.total_value:
+            problems.append("no price set (use adjust-pricing)")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "placeholder_content",
+                "message": "This proposal cannot be sent to a customer yet: " + "; ".join(problems) + ".",
+                "placeholder_sections": sections,
+                "missing_total_value": not proposal.total_value,
+            },
+        )
+
     memory.transition_proposal_status(
         proposal_id=proposal_id,
         new_status=ProposalStatus.sent,
@@ -671,6 +918,10 @@ def send_proposal(
         description=f"Sent by {employee.employee_id}",
         created_by=employee.employee_id,
     )
+    memory.advance_lead_stage(
+        proposal.lead_id, PipelineStage.proposal_sent, performed_by=employee.employee_id,
+        description=f"Proposal v{proposal.version} sent to the customer",
+    )
     db.commit()
 
     ctx = memory.get_lead_context(proposal.lead_id)
@@ -680,14 +931,25 @@ def send_proposal(
     )
     db.commit()
 
+    email_sent, email_skipped_reason = False, "no_customer"
     if customer:
         notifier.proposal_sent(proposal_id=proposal_id, customer_email=customer.email, accept_path=accept_path)
+        email_sent, email_skipped_reason = notifier.send_proposal_to_customer(
+            proposal_id=proposal_id,
+            version=proposal.version,
+            customer_email=customer.email,
+            customer_name=customer.name,
+            accept_url=_customer_accept_url(accept_token),
+            pdf_url=proposal.pdf_url,
+        )
 
     return {
         "status": "sent",
         "proposal_id": proposal_id,
         "accept_token": accept_token,
         "accept_path": accept_path,
+        "customer_email_sent": email_sent,
+        "customer_email_skipped_reason": email_skipped_reason,
     }
 
 
@@ -801,6 +1063,8 @@ def get_proposal_detail(
         "status": proposal.status,
         "content": proposal.content,
         "total_value": proposal.total_value,
+        "has_placeholder_content": content_engine.has_placeholder_content(proposal.content, proposal.total_value),
+        "placeholder_sections": content_engine.placeholder_sections(proposal.content),
         "requires_manager_signoff": proposal.requires_manager_signoff,
         "used_fallback_template": proposal.used_fallback_template,
         "revision_reason": proposal.revision_reason,

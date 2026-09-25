@@ -97,6 +97,9 @@ class TimelineEventType(str, enum.Enum):
     proposal_inputs_submitted = "proposal_inputs_submitted"
     proposal_inputs_reviewed = "proposal_inputs_reviewed"
     proposal_auto_drafted_from_inputs = "proposal_auto_drafted_from_inputs"
+    stage_changed = "stage_changed"
+    lead_assigned = "lead_assigned"
+    fields_filled_from_inputs = "fields_filled_from_inputs"
 
 
 class MeetingStatus(str, enum.Enum):

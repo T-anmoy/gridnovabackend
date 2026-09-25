@@ -181,6 +181,12 @@ def _proposal_node(state: OrchestratorState) -> OrchestratorState:
 
         result = run.result
         db.commit()
+        if result.get("proposal_id") and result.get("requires_manager_signoff"):
+            from app.notifications.notifier import notifier
+            notifier.manager_signoff_required(
+                proposal_id=result["proposal_id"], lead_id=state["lead_id"],
+                total_value=result.get("total_value"),
+            )
         return {
             **state,
             "agent_run_id": run.run_id,

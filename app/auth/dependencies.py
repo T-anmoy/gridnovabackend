@@ -127,6 +127,17 @@ class AuthenticatedEmployee:
     def can_edit_lead(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
+    def can_change_lead_stage(self) -> bool:
+        """Opportunity-tracker moves. Sales is further limited to its own or
+        unassigned leads by the route, as everywhere else on the Sales surface."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+
+    def can_create_lead(self) -> bool:
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+
+    def can_assign_lead(self) -> bool:
+        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+
     def can_trigger_proposal_draft(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 

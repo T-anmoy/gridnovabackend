@@ -275,6 +275,10 @@ def create_public_booking(
             detail={"code": "calendar_not_configured", "message": str(exc)},
         )
 
+    from app.notifications.notifier import notifier
+    notifier.new_lead(lead_id=lead.id, source=LeadSource.website_booking.value,
+                      customer_name=body.name, created_by="website")
+
     return BookingResponse(
         success=True,
         lead_id=lead.id,

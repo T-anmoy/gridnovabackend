@@ -110,9 +110,21 @@ class Settings(BaseSettings):
     # Where browser-facing redirects land (e.g. after Google Calendar consent).
     frontend_base_url: str = "http://localhost:3000"
 
+    # Email notifications (app/notifications/notifier.py, via Resend's REST API).
+    # Blank RESEND_API_KEY = no email; log/Slack notifications are unaffected.
+    resend_api_key: str = ""
+    # Sender, e.g. "Grid Nova <notifications@gridnova.in>" — the domain must be verified in Resend.
+    notify_from_email: str = ""
+    # Comma-separated staff recipients for internal alerts. Blank = no staff emails.
+    staff_notify_emails: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def staff_notify_email_list(self) -> List[str]:
+        return [e.strip() for e in self.staff_notify_emails.split(",") if e.strip()]
 
     @property
     def llm_mock_mode(self) -> bool:

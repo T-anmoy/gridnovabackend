@@ -109,7 +109,7 @@ class TestDashboardLeads:
 
 
 class TestProposalFlow:
-    def test_full_proposal_flow_standard_approval(self, client, memory, db_session):
+    def test_full_proposal_flow_standard_approval(self, client, memory, db_session, sendable_proposal_content):
         """End-to-end: draft → approve (standard) → send."""
         cid, lid = _seed_qualified_lead(client, memory, db_session)
 
@@ -120,6 +120,13 @@ class TestProposalFlow:
         assert r.status_code == 200, r.text
         proposal_id = r.json()["proposal_id"]
         assert r.json()["requires_manager_signoff"] is False
+
+        # This lead matches no pricing tier, so staff set the price before approval —
+        # a proposal with no real price cannot be sent to the customer.
+        r = client.patch(f"/api/v1/dashboard/proposals/{proposal_id}/adjust-pricing",
+                         json={"new_value": 250_000.0, "reason": "site survey pricing"},
+                         headers=sales_headers())
+        assert r.status_code == 200
 
         # Standard approval (Sales can do this)
         r = client.post(f"/api/v1/dashboard/proposals/{proposal_id}/approve", headers=sales_headers())
