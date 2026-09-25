@@ -17,6 +17,7 @@ from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager, is_placeholder_email
 from app.memory.models import Channel, LeadSource
 from app.orchestrator.orchestrator import orchestrator
+from app.security.client_ip import client_ip
 
 router = APIRouter()
 
@@ -30,14 +31,8 @@ _recent_messages: dict[str, datetime] = {}
 _DEDUP_WINDOW_SECONDS = 10
 
 
-def _get_client_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
-
-
 def _check_rate_limit(request: Request) -> None:
-    ip = _get_client_ip(request)
+    ip = client_ip(request)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=RATE_WINDOW_SECONDS)
     _request_log[ip] = [t for t in _request_log[ip] if t > cutoff]

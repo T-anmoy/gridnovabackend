@@ -5,11 +5,16 @@ Unlike the Sales Agent's reflection, none of this needs a model — every judgem
 a draft is a structured human action, so the whole loop is deterministic and these
 tests assert real values rather than "something was written".
 """
+import pytest
+
 from app.memory import reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import MemoryKind, MemorySource, PipelineStage
 from app.proposals import drafting_notes
 from tests.conftest import admin_headers, sales_headers
+
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
 
 
 QUALIFIED_FIELDS = {

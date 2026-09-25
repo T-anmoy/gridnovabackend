@@ -10,14 +10,15 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agents.sales_agent import QUALIFICATION_FIELDS, _score_from_fields
 from app.auth.clerk_client import ClerkSyncError, update_user_role
-from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
+from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
@@ -29,6 +30,7 @@ from app.memory.models import (
 from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
 from app.scheduling import availability, booking, google_calendar
+from app.security.internal_key import has_valid_internal_key
 from app.notifications.notifier import notifier
 from app.orchestrator.orchestrator import orchestrator
 from app.pdf.generator import generate_and_upload_pdf
@@ -974,10 +976,30 @@ def list_employees(
             "email": e.email,
             "role": e.role,
             "is_active": e.is_active,
+            # Connection state only — the refresh token itself never leaves the database.
+            "google_calendar_connected": bool(e.google_calendar_connected),
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in memory_of(db).list_employees()
     ]
+
+
+@router.get("/employees/me")
+def get_my_employee(
+    db: Session = Depends(get_db),
+    employee: AuthenticatedEmployee = Depends(get_current_employee),
+):
+    """Any authenticated employee's own record. `role` is the role this request was
+    authorised with (from the Clerk token), which is what every permission check uses."""
+    me = memory_of(db).get_employee(employee.employee_id)
+    if me is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return {
+        "id": me.id,
+        "role": employee.role.value,
+        "is_active": me.is_active,
+        "google_calendar_connected": bool(me.google_calendar_connected),
+    }
 
 
 class RoleUpdateRequest(BaseModel):
@@ -1255,24 +1277,43 @@ def calendar_connect(
     return {"authorization_url": auth_url}
 
 
+def _calendar_redirect(error_reason: Optional[str] = None) -> RedirectResponse:
+    """Send the employee's browser back to the dashboard. The query string carries only
+    `calendar=connected` or `calendar=error&reason=<fixed short code>`, never a token,
+    an authorization code, or text echoed from the request."""
+    from urllib.parse import urlencode
+
+    query = {"calendar": "connected"} if error_reason is None else {"calendar": "error", "reason": error_reason}
+    base = settings.frontend_base_url.rstrip("/")
+    return RedirectResponse(f"{base}/dashboard/meetings?{urlencode(query)}", status_code=303)
+
+
 @router.get("/employees/me/calendar/callback")
 def calendar_callback(
-    code: str = Query(...),
-    state: str = Query(...),
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """OAuth callback — identifies the employee from the signed `state` (no bearer on
-    a browser redirect), exchanges the code, and stores the refresh token encrypted."""
-    employee_id = _verify_state(state)
+    a browser redirect), exchanges the code, and stores the refresh token encrypted.
+    Always ends in a 303 back to the dashboard (see _calendar_redirect)."""
+    employee_id = _verify_state(state) if state else None
     if not employee_id:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+        return _calendar_redirect("invalid_state")
+    if error:
+        # Google redirects here with ?error=... when consent is declined or fails.
+        return _calendar_redirect("access_denied" if error == "access_denied" else "consent_failed")
+    if not code:
+        return _calendar_redirect("missing_code")
 
     try:
         refresh_token = google_calendar.exchange_code(code)
-    except google_calendar.GoogleCalendarNotConfiguredError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+    except google_calendar.GoogleCalendarNotConfiguredError:
+        return _calendar_redirect("not_configured")
     except Exception:
-        raise HTTPException(status_code=400, detail="Failed to exchange authorization code.")
+        logger.warning("Google authorization-code exchange failed for employee %s", employee_id)
+        return _calendar_redirect("exchange_failed")
 
     from app.security.encryption import encrypt
 
@@ -1284,8 +1325,8 @@ def calendar_callback(
     )
     db.commit()
     if updated is None:
-        raise HTTPException(status_code=404, detail="Employee not found for this connection.")
-    return {"status": "connected", "employee_id": employee_id, "calendar_id": "primary"}
+        return _calendar_redirect("employee_not_found")
+    return _calendar_redirect()
 
 
 class ScheduleMeetingRequest(BaseModel):
@@ -1411,15 +1452,28 @@ def list_meetings(
 
 # ── Internal jobs ─────────────────────────────────────────────────────────────
 
+async def _require_admin_or_internal_key(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> None:
+    """A valid X-Internal-Key (Cloud Scheduler — it has no Clerk session), otherwise
+    exactly the ordinary path: authenticate, then require Admin. A wrong key is the
+    same as no key, so it falls through to that path (401 without a token)."""
+    if has_valid_internal_key(request):
+        return
+    employee = await get_current_employee(request, credentials, db)
+    if not employee.is_admin:
+        raise HTTPException(status_code=403, detail="Only Admin can run the stale-lead check.")
+
+
 @router.post("/internal/check-stale-leads")
 def run_check_stale_leads(
     db: Session = Depends(get_db),
-    employee: AuthenticatedEmployee = Depends(get_current_employee),
+    _: None = Depends(_require_admin_or_internal_key),
 ):
-    """Admin-only. Scans for quiet leads and fires internal follow-up notifications.
-    Idempotent — safe to call repeatedly (e.g. from a cron job once deployed)."""
-    if not employee.is_admin:
-        raise HTTPException(status_code=403, detail="Only Admin can run the stale-lead check.")
+    """Admin or INTERNAL_API_KEY. Scans for quiet leads and fires internal follow-up
+    notifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it)."""
     from app.jobs.stale_leads import check_stale_leads
     return check_stale_leads(db)
 

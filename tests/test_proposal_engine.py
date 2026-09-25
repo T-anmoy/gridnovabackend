@@ -10,6 +10,9 @@ from app.proposals import content_engine as ce
 from app.proposals.content_engine import ProposalConfigError
 from app.memory.models import PipelineStage
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 @pytest.fixture(scope="module")
 def cfg():

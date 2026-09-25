@@ -12,6 +12,9 @@ from tests.conftest import (
     engineer_headers,
 )
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 def _seed_lead_with_proposal(
     memory,

@@ -24,6 +24,34 @@ python -m pytest tests/ -v
 No external services required — tests use an in-memory SQLite database and
 LLM mock mode activates automatically when `LLM_API_KEY` is unset.
 
+## Database schema: first deploy and subsequent deploys
+
+The schema is owned by `scripts/bootstrap_db.py` + Alembic. With `ENVIRONMENT=production`
+the app does **not** create tables on startup, so run the bootstrap (e.g. as a Cloud Run
+job, with the same `DATABASE_URL`) **before** the service's first boot.
+
+### First deploy / fresh database
+
+```bash
+DATABASE_URL=postgresql://... python scripts/bootstrap_db.py
+```
+
+On a database with no application tables it runs `Base.metadata.create_all()` and then
+`alembic stamp head`. The historical chain (0001–0022) has no baseline and cannot be
+replayed on PostgreSQL, so a fresh database is always built from the models.
+
+### Subsequent deploys
+
+Run the same command. When the application tables and `alembic_version` both exist, it
+runs `alembic upgrade head`, which is equivalent to running
+`alembic -c alembic/alembic.ini upgrade head` yourself.
+
+If application tables exist but `alembic_version` does not, the script changes nothing
+and exits with code 2. It never guesses which revision an unversioned database is at.
+
+New revision ids must be **32 characters or fewer**, because PostgreSQL's
+`alembic_version.version_num` is `VARCHAR(32)`. SQLite does not enforce the length.
+
 ## Environment variables required before deployment
 
 | Variable | Purpose |

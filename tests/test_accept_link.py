@@ -9,6 +9,9 @@ import pytest
 from app.memory.models import PipelineStage, ProposalStatus
 from tests.conftest import admin_headers, sales_headers
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 def _sent_proposal(memory, db_session, *, email="ac@example.com"):
     """Draft → approve → send a proposal, returning (proposal_id, accept_token)."""

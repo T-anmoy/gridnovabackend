@@ -29,6 +29,7 @@ from app.memory.memory_manager import MemoryManager
 from app.pricing import engine as pricing_engine
 from app.pricing import instant_estimate as instant_estimate_module
 from app.pricing.engine import PricingInputs
+from app.security.client_ip import client_ip
 
 router = APIRouter(prefix="/api/v1/pricing")
 
@@ -162,14 +163,8 @@ _INSTANT_ESTIMATE_RATE_WINDOW_SECONDS = 60
 _instant_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
 
 
-def _client_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
-
-
 def _check_instant_estimate_rate_limit(request: Request) -> None:
-    ip = _client_ip(request)
+    ip = client_ip(request)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
     _instant_estimate_request_log[ip] = [t for t in _instant_estimate_request_log[ip] if t > cutoff]

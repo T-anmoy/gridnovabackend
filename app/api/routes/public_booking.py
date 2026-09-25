@@ -27,6 +27,7 @@ from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import LeadSource
 from app.scheduling import availability, booking, google_calendar
+from app.security.client_ip import client_ip
 from app.timezones import format_ist_datetime
 
 router = APIRouter(prefix="/api/v1/public/booking")
@@ -59,14 +60,8 @@ NEARBY_ALTERNATIVES_COUNT = 3
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$")
 
 
-def _client_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
-
-
 def _check_rate_limit(request: Request, log: defaultdict, limit: int) -> None:
-    ip = _client_ip(request)
+    ip = client_ip(request)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
     log[ip] = [t for t in log[ip] if t > cutoff]

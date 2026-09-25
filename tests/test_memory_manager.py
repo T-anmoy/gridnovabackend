@@ -3,6 +3,9 @@ import pytest
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import ProposalStatus, PipelineStage
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 def test_get_or_create_customer_idempotent(memory, db_session):
     c1 = memory.get_or_create_customer(email="test@example.com", name="Test User")

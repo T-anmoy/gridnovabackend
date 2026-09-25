@@ -9,6 +9,9 @@ import pytest
 from app.memory.models import LeadSource, PipelineStage, ProposalStatus
 from tests.conftest import admin_headers, management_headers, sales_headers, engineer_headers
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 def _lead(memory, db_session, *, email, source=LeadSource.website_chat, created_at=None,
           follow_up_date=None, stage=PipelineStage.new):

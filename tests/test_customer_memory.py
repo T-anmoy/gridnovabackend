@@ -7,10 +7,15 @@ from them — without needing an API key.
 """
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.memory import recall, reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import Channel, MemoryKind, MessageRole, PipelineStage
 from tests.conftest import admin_headers, engineer_headers, sales_headers
+
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

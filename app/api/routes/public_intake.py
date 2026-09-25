@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import LeadSource
+from app.security.client_ip import client_ip
+from app.security.internal_key import forwarded_customer_ip, has_valid_internal_key
 
 router = APIRouter(prefix="/api/v1/public")
 
@@ -45,14 +47,24 @@ _EMAIL_COOLDOWN_SECONDS = 60
 _recent_emails: dict[str, datetime] = {}
 
 
-def _client_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
+def _rate_limit_identity(request: Request) -> Optional[str]:
+    """Who the per-IP limit counts against, or None to skip it.
+
+    The website mirrors every estimate-form lead here server-to-server, so without
+    this every website visitor would share the hosting provider's one IP bucket, and
+    a 429 would silently drop the lead. A caller holding INTERNAL_API_KEY is exempt
+    from the per-IP limit; if it vouches for the visitor's address via X-Customer-IP,
+    that address is limited instead. The per-email cooldown applies either way.
+    """
+    if has_valid_internal_key(request):
+        return forwarded_customer_ip(request)
+    return client_ip(request)
 
 
 def _check_rate_limit(request: Request) -> None:
-    ip = _client_ip(request)
+    ip = _rate_limit_identity(request)
+    if ip is None:
+        return
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
     _request_log[ip] = [t for t in _request_log[ip] if t > cutoff]

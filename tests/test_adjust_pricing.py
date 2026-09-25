@@ -7,6 +7,9 @@ import pytest
 from app.memory.models import PipelineStage, ProposalStatus, TimelineEventType
 from tests.conftest import admin_headers, sales_headers, management_headers, engineer_headers
 
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
+
 
 def _seed_proposal(memory, db_session, *, email, capacity_kw=20, total_value=100_000,
                    requires_signoff=False, assigned_to="emp-sales-1", status=ProposalStatus.draft):

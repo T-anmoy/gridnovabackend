@@ -5,9 +5,14 @@ Mock-mode chat qualification fix:
 - PATCH /api/v1/dashboard/leads/{lead_id}/fields — the manual employee-side
   escape hatch, gated by can_edit_lead()
 """
+import pytest
+
 from app.llm.client import _mock_extract_fields
 from app.memory.models import LeadSource, PipelineStage
 from tests.conftest import admin_headers, engineer_headers, management_headers, sales_headers
+
+# These tests write employee ids directly (no request provisions them first).
+pytestmark = pytest.mark.usefixtures("known_employees")
 
 
 # ── Heuristic extraction (unit-level, no HTTP) ──────────────────────────────────

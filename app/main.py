@@ -15,14 +15,22 @@ from app.api.routes.proposal_inputs import router as proposal_inputs_router
 from app.api.routes.public_booking import router as public_booking_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
-from app.config import settings
+from app.config import check_production_config, settings
 from app.memory.db import Base, engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all tables on startup (Alembic handles production migrations)
-    Base.metadata.create_all(bind=engine)
+    # A production boot missing a required setting stops here, naming the variable,
+    # instead of serving with SQLite, no auth issuer, or no token encryption.
+    check_production_config(settings)
+    # Create all tables on startup for local development and tests. In production the
+    # schema belongs to scripts/bootstrap_db.py + Alembic alone: a create_all here would
+    # (a) build an unversioned schema if the service booted before the bootstrap ran,
+    # which the bootstrap then has to refuse, and (b) pre-create a new model's table
+    # before its migration runs, so that migration's create_table would fail.
+    if not settings.is_production:
+        Base.metadata.create_all(bind=engine)
     # Fail loudly at startup if the proposal content config is structurally invalid
     # (overlapping pricing tiers, a rule referencing a missing section, etc.) rather
     # than discovering it mid-request while drafting a proposal.

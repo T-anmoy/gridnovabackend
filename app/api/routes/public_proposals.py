@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import TimelineEventType
+from app.security.client_ip import client_ip
 
 router = APIRouter()
 
@@ -33,14 +34,8 @@ _ACCEPT_RATE_WINDOW_SECONDS = 60
 _accept_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
 
 
-def _client_ip(request: Request) -> str:
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
-
-
 def _check_rate_limit(request: Request) -> None:
-    ip = _client_ip(request)
+    ip = client_ip(request)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_ACCEPT_RATE_WINDOW_SECONDS)
     _accept_request_log[ip] = [t for t in _accept_request_log[ip] if t > cutoff]

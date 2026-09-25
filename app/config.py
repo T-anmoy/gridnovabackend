@@ -1,5 +1,7 @@
 import json
+import logging
 from typing import List
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -95,6 +97,19 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: List[str] = ["http://localhost:3000", "https://www.gridnova.in"]
 
+    # Client IP for rate limiting (app/security/client_ip.py). How many proxies in front
+    # of the app append to X-Forwarded-For. 0 = trust no header and use the socket peer.
+    # Cloud Run's own front end appends one entry: 1. An external HTTPS load balancer in
+    # front of Cloud Run adds another: 2.
+    trusted_proxy_hops: int = 0
+
+    # Server-to-server key (app/security/internal_key.py), sent as X-Internal-Key by the
+    # website's lead mirror and by Cloud Scheduler. Blank = feature off, header ignored.
+    internal_api_key: str = ""
+
+    # Where browser-facing redirects land (e.g. after Google Calendar consent).
+    frontend_base_url: str = "http://localhost:3000"
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
@@ -110,6 +125,69 @@ class Settings(BaseSettings):
             self.google_oauth_client_secret,
             self.google_oauth_redirect_uri,
         ])
+
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def _is_local_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in _LOCAL_HOSTS or host.endswith(".localhost")
+
+
+def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
+    """(errors, warnings) for a production boot. Empty unless ENVIRONMENT=production.
+
+    Errors are settings the app cannot run safely without; warnings are features
+    that will silently degrade (mock LLM, no PDFs uploaded, no calendar)."""
+    if not s.is_production:
+        return [], []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if s.database_url.strip().lower().startswith("sqlite"):
+        errors.append("DATABASE_URL is SQLite — production needs PostgreSQL")
+    if not s.clerk_jwt_issuer.strip():
+        errors.append("CLERK_JWT_ISSUER is empty — no employee could authenticate")
+    if not s.fernet_encryption_key.strip():
+        errors.append("FERNET_ENCRYPTION_KEY is empty — Google refresh tokens cannot be stored encrypted")
+    local_origins = [o for o in s.allowed_origins if _is_local_url(o)]
+    if local_origins:
+        errors.append(f"ALLOWED_ORIGINS contains a localhost origin: {', '.join(local_origins)}")
+
+    empty_storage = [
+        name for name, value in (
+            ("STORAGE_BUCKET", s.storage_bucket),
+            ("STORAGE_ENDPOINT_URL", s.storage_endpoint_url),
+            ("STORAGE_ACCESS_KEY", s.storage_access_key),
+            ("STORAGE_SECRET_KEY", s.storage_secret_key),
+        ) if not value.strip()
+    ]
+    if empty_storage:
+        warnings.append(f"{', '.join(empty_storage)} empty — proposal PDFs and document uploads will not be stored")
+    if s.llm_mock_mode:
+        warnings.append("LLM_API_KEY is empty — agents run in MOCK mode")
+    if not s.google_calendar_enabled:
+        warnings.append(
+            "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REDIRECT_URI "
+            "not all set — meeting scheduling is off"
+        )
+    if _is_local_url(s.frontend_base_url):
+        warnings.append(f"FRONTEND_BASE_URL is {s.frontend_base_url} — browser redirects will point at localhost")
+    return errors, warnings
+
+
+def check_production_config(s: Settings) -> None:
+    """Raise if a production boot is missing something it cannot run without; log a
+    WARNING for each feature that will be degraded. No-op outside production."""
+    errors, warnings = production_config_problems(s)
+    log = logging.getLogger("app.config")
+    for message in warnings:
+        log.warning("PRODUCTION CONFIG WARNING: %s", message)
+    if errors:
+        raise RuntimeError(
+            "Refusing to start with ENVIRONMENT=production: " + "; ".join(errors)
+        )
 
 
 settings = Settings()
