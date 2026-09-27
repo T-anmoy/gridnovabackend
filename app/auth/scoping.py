@@ -13,8 +13,9 @@ Single records go through require_lead_access(); list queries through LeadScope,
 which becomes a WHERE clause so filtering never happens after the fact.
 
 Associates see customers they onboarded through the parallel OnboardingScope below
-(own customers; a Preferred Associate also their territory's). Staff scoping above is
-unchanged.
+(own customers; a Preferred Associate also their territory's), and a Preferred
+Associate sees the associates below them through RosterScope — both built on the one
+territory rule, territory_for_level(). Staff scoping above is unchanged.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import false, or_, true
+from sqlalchemy import and_, false, func, or_, true
 
 from app.memory.models import EmployeeRole, Lead
 
@@ -99,6 +100,19 @@ def lead_scope(employee, assigned: Optional[str] = None) -> LeadScope:
 ONBOARDING_NOT_YOURS = "This customer is not in your portfolio."
 
 
+def territory_for_level(level: Optional[str], state, district, block):
+    """The one territory rule: a State Head's territory is a state, a District Head's
+    a district, a block-level Preferred Associate's a block. Picks whichever of the
+    three (ids or columns) the level keys on; None for a plain Associate."""
+    return {"state_head": state, "district_head": district, "block": block}.get(level or "")
+
+
+def _own_territory(associate) -> tuple[Optional[str], Optional[int]]:
+    level = associate.level.value if associate.level is not None else None
+    return level, territory_for_level(level, associate.territory_state_id, associate.territory_district_id,
+                                      associate.territory_block_id)
+
+
 @dataclass(frozen=True)
 class OnboardingScope:
     associate_pk: int
@@ -109,9 +123,8 @@ class OnboardingScope:
         from app.memory.models import CustomerOnboarding
 
         parts = [CustomerOnboarding.owner_associate_id == self.associate_pk]
-        column = {"state_head": CustomerOnboarding.state_id,
-                  "district_head": CustomerOnboarding.district_id,
-                  "block": CustomerOnboarding.block_id}.get(self.level or "")
+        column = territory_for_level(self.level, CustomerOnboarding.state_id, CustomerOnboarding.district_id,
+                                     CustomerOnboarding.block_id)
         if column is not None and self.territory_id is not None:
             parts.append(column == self.territory_id)
         return or_(*parts)
@@ -119,10 +132,7 @@ class OnboardingScope:
 
 def onboarding_scope(associate) -> OnboardingScope:
     """`associate` is the Associate row of the signed-in associate."""
-    level = associate.level.value if associate.level is not None else None
-    territory_id = {"state_head": associate.territory_state_id,
-                    "district_head": associate.territory_district_id,
-                    "block": associate.territory_block_id}.get(level or "")
+    level, territory_id = _own_territory(associate)
     return OnboardingScope(associate_pk=associate.id, level=level, territory_id=territory_id)
 
 
@@ -132,8 +142,7 @@ def can_view_onboarding(associate, onboarding) -> bool:
     scope = onboarding_scope(associate)
     if onboarding.owner_associate_id == scope.associate_pk:
         return True
-    site = {"state_head": onboarding.state_id, "district_head": onboarding.district_id,
-            "block": onboarding.block_id}.get(scope.level or "")
+    site = territory_for_level(scope.level, onboarding.state_id, onboarding.district_id, onboarding.block_id)
     return scope.territory_id is not None and site == scope.territory_id
 
 
@@ -151,3 +160,54 @@ def require_onboarding_edit(associate, onboarding) -> None:
         raise HTTPException(status_code=403, detail=ONBOARDING_NOT_YOURS)
     if not can_edit_onboarding(associate, onboarding):
         raise HTTPException(status_code=403, detail="Only the associate who onboarded this customer can change it.")
+
+
+# ── Preferred Associate visibility over other associates (territory roster) ─────
+#
+# The same territory rule applied to associates instead of customer sites: every
+# associate located in the caller's territory whose rank is below the caller's
+# (State Head > District Head > block-level Preferred > plain Associate). A
+# Preferred Associate is located by the territory they hold; a plain Associate —
+# who holds none — by the state/district/block of the address they registered with.
+# Never a sibling territory, never a peer or superior, never the caller.
+#
+# Known limitation (README "Known limitations"): home address may not be where a
+# plain Associate works. A deliberate business-rule choice, to revisit with real data.
+
+ROSTER_PREFERRED_ONLY = "Only Preferred Associates have a territory roster."
+
+_LEVELS_BELOW = {"state_head": ("district_head", "block"), "district_head": ("block",), "block": ()}
+
+
+@dataclass(frozen=True)
+class RosterScope:
+    level: str
+    territory_id: int
+
+    def condition(self):
+        """A WHERE clause over Associate outer-joined to AssociateApplication (on
+        associate_application_id — which only a plain Associate has)."""
+        from app.memory.models import Associate, AssociateApplication, AssociateType, TerritoryLevel
+
+        # The join matches only plain Associates, so each coalesce reads territory_*
+        # for a Preferred Associate and the registered address for a plain one.
+        located = territory_for_level(
+            self.level,
+            func.coalesce(Associate.territory_state_id, AssociateApplication.state_id),
+            func.coalesce(Associate.territory_district_id, AssociateApplication.district_id),
+            func.coalesce(Associate.territory_block_id, AssociateApplication.block_id),
+        )
+        below = [Associate.associate_type == AssociateType.associate]
+        if _LEVELS_BELOW[self.level]:
+            below.append(and_(Associate.associate_type == AssociateType.preferred_associate,
+                              Associate.level.in_([TerritoryLevel(v) for v in _LEVELS_BELOW[self.level]])))
+        return and_(located == self.territory_id, or_(*below))
+
+
+def roster_scope(associate) -> RosterScope:
+    """403 for a plain Associate (or a Preferred Associate with no territory, which
+    approval never creates)."""
+    level, territory_id = _own_territory(associate)
+    if level is None or territory_id is None:
+        raise HTTPException(status_code=403, detail=ROSTER_PREFERRED_ONLY)
+    return RosterScope(level=level, territory_id=territory_id)

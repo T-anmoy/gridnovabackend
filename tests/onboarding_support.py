@@ -39,15 +39,20 @@ def _row(db, model, code):
     return db.execute(select(model).where(model.lgd_code == code)).scalar_one()
 
 
-def make_associate(db, *, level: str | None = None, territory: int | None = None) -> str:
-    """Insert an active associate; `level` + `territory` (an LGD code) make it a
-    Preferred Associate. Returns its GNA id."""
+def make_associate(db, *, level: str | None = None, territory: int | None = None,
+                   home_district: int = KOLKATA, home_block: int | None = None,
+                   status: AssociateStatus = AssociateStatus.active) -> str:
+    """Insert an associate; `level` + `territory` (an LGD code) make it a Preferred
+    Associate. `home_district`/`home_block` (LGD codes) are the registered address —
+    which is what locates a plain Associate. Returns its GNA id."""
     seed_employees(db, "emp-admin-1")
     n = next(_seq)
     now = datetime.now(timezone.utc)
-    state = _row(db, TerritoryState, WB)
+    home = _row(db, TerritoryDistrict, home_district)
+    state = db.get(TerritoryState, home.state_id)
     common = dict(full_name=f"Assoc {n}", date_of_birth=date(1990, 1, 1), address_line="x", state_id=state.id,
-                  district_id=_row(db, TerritoryDistrict, KOLKATA).id, pin_code="700001",
+                  district_id=home.id, block_id=_row(db, TerritoryBlock, home_block).id if home_block else None,
+                  pin_code=PIN[home_district],
                   mobile=f"70000{n:05d}", email=f"assoc{n}@example.test", aadhaar_last4="1234",
                   pan=f"ABCPE{n:04d}F", bank_account_encrypted="enc", bank_account_last4="0000",
                   bank_ifsc="SBIN0001234", kyc_consent_version="v", kyc_consent_accepted_at=now, documents={},
@@ -80,7 +85,7 @@ def make_associate(db, *, level: str | None = None, territory: int | None = None
         row = Associate(associate_id=associate_id, associate_type=AssociateType.preferred_associate,
                         preferred_application_id=app.id, level=lvl, territory_state_id=st.id,
                         territory_district_id=dist.id if dist else None, territory_block_id=blk.id if blk else None)
-    row.status = AssociateStatus.active
+    row.status = status
     row.full_name, row.email, row.mobile = common["full_name"], common["email"], common["mobile"]
     row.state_id, row.approved_by_employee_id = state.id, "emp-admin-1"
     db.add(row)

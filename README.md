@@ -522,6 +522,19 @@ Three rules this feature does not bend:
   own conclusions, and recall marks them as such so nobody reads them as something
   the customer said.
 
+## Known limitations
+
+- **Territory roster places plain Associates by home address.**
+  `GET /api/v1/associate/territory/members` lets a Preferred Associate see the
+  associates below them in their territory (`RosterScope` in `app/auth/scoping.py`).
+  A Preferred Associate is placed by the territory they hold. A plain Associate holds
+  no territory, so they are placed by the state/district/block of the address on
+  their registration application. Someone who lives in one district but works in
+  another therefore appears on the home district's roster. This is a deliberate
+  business-rule choice, not a bug: revisit it once real associates are on the
+  platform and it is clear whether home district matches working district in
+  practice.
+
 ## Non-negotiable principles
 
 1. One public AI face — only Sales Agent ever speaks to customers.
