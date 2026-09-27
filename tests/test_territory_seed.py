@@ -18,7 +18,13 @@ class TestShippedDataFiles:
         assert by_state == {"10": 38, "19": 23}
         bihar_districts = {d["district_lgd_code"] for d in districts if d["state_lgd_code"] == "10"}
         assert sum(1 for b in blocks if b["district_lgd_code"] in bihar_districts) == 534
-        assert len(blocks) == 880
+        assert len(blocks) == 879  # West Bengal 345 (IGOD's count), Bihar 534
+
+    def test_kalimpong_matches_lgd(self):
+        """Code 2862 is Lava and 7354 does not exist (live LGD portal, 2026-09-27);
+        Kalimpong has exactly IGOD's four blocks."""
+        blocks = {int(b["block_lgd_code"]): b["block_name"] for b in load_files()[2] if b["district_lgd_code"] == "702"}
+        assert blocks == {2859: "GORUBATHAN", 2861: "KALIMPONG-I", 2862: "Lava", 7355: "Pedong"}
 
     def test_state_codes_agree_with_the_reference_id_table(self):
         from app.memory.reference_id import state_code
@@ -30,12 +36,12 @@ class TestLoader:
     def test_loads_everything_and_is_idempotent(self, db_session):
         first = seed_territories(db_session)
         db_session.commit()
-        assert first.inserted == {"states": 2, "districts": 61, "blocks": 880}
+        assert first.inserted == {"states": 2, "districts": 61, "blocks": 879}
         second = seed_territories(db_session)
         db_session.commit()
         assert second.inserted == {"states": 0, "districts": 0, "blocks": 0}
         assert second.updated == {"states": 0, "districts": 0, "blocks": 0}
-        assert db_session.execute(select(func.count(TerritoryBlock.id))).scalar_one() == 880
+        assert db_session.execute(select(func.count(TerritoryBlock.id))).scalar_one() == 879
 
     def test_a_changed_name_is_updated_and_audited_never_deleted(self, db_session, tmp_path):
         data = tmp_path / "d"
