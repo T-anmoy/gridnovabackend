@@ -1,0 +1,115 @@
+# Grid Nova Energy — associate-led customer onboarding
+#
+# Read by app/onboarding/config.py and validated at startup (a malformed file stops
+# the app from booting rather than failing mid-request). Grid Nova staff edit the
+# wording and thresholds here without touching code. Anything marked [PLACEHOLDER]
+# or [UNCONFIRMED] has not been supplied or confirmed by Grid Nova yet.
+
+# The Customer Information Notice the associate reads out / shows to the customer and
+# records as acknowledged on their behalf. Each onboarding stores the version and the
+# time. New wording = a NEW version + point current_notice_version at it; never edit a
+# version customers have already acknowledged.
+current_notice_version: "placeholder-v0"
+notice_versions:
+  placeholder-v0:
+    text: >-
+      [PLACEHOLDER — the Customer Information Notice text is to be supplied by Grid Nova.]
+
+# How long the first complete, staff-verified onboarding owns a customer (attribution
+# lock). A later conflicting onboarding raises an admin flag either way.
+attribution_lock_days: 90
+
+# Required documents. `required_when` is one of:
+#   always                 — every onboarding
+#   scheme_linked          — the site assessment is linked to a government scheme
+#   not_in_customer_name   — the electricity connection or the property is not in the
+#                            customer's own name
+required_documents:
+  - key: electricity_bill
+    label: "Latest electricity bill"
+    required_when: always
+  - key: id_proof
+    label: "Customer ID proof"
+    required_when: always
+  - key: ownership_proof
+    label: "Property ownership proof"
+    required_when: always
+  - key: subsidy_bank_details
+    label: "Bank details for subsidy credit"
+    required_when: scheme_linked
+  - key: photo
+    label: "Customer / site photo"
+    required_when: always
+  - key: noc
+    label: "No-objection certificate (connection or property not in the customer's name)"
+    required_when: not_in_customer_name
+
+# Sanity checks on what the associate entered. They produce WARNINGS only — never a
+# rejection. [PLACEHOLDER] values are the code author's working assumptions for Grid
+# Nova to confirm or replace.
+sanity:
+  # Warn when the requested capacity exceeds the DISCOM sanctioned load by this ratio.
+  max_kw_to_sanctioned_load_ratio: 1.0          # [PLACEHOLDER]
+  # Expected monthly generation per kW, used to compare capacity against consumption.
+  kwh_per_kw_per_month: 120                     # [PLACEHOLDER]
+  # Warn when expected generation exceeds monthly consumption by this ratio.
+  max_generation_to_consumption_ratio: 1.5      # [PLACEHOLDER]
+  # Tariff used to turn a monthly bill (INR) into units when no units were entered.
+  # null = the bill-only comparison is skipped (no tariff has been confirmed).
+  inr_per_kwh_for_bill_check: null              # [PLACEHOLDER]
+
+# Customer-facing equipment package names → the stored equipment_tier value.
+# [UNCONFIRMED] — "Nova Assured" and "Nova Signature" do not appear anywhere else in
+# this codebase; this mapping is an assumption until Grid Nova confirms it.
+equipment_packages:
+  nova_assured:
+    label: "Nova Assured"
+    equipment_tier: standard
+  nova_signature:
+    label: "Nova Signature"
+    equipment_tier: premium
+  as_recommended:
+    label: "As recommended by Grid Nova"
+    equipment_tier: as_recommended
+
+# Lead scoring v2 (app/onboarding/scoring.py) — associate-sourced customers only.
+# score = Σ weight × fraction; weights must sum to 100. Every value here is the code
+# author's working default for Grid Nova to tune — [PLACEHOLDER].
+scoring:
+  weights:
+    verification_call: 20
+    documents_complete: 15
+    subsidy_eligibility: 20
+    system_fit: 15
+    customer_timeline: 10
+    site_readiness: 10
+    associate_track_record: 10
+  bands:
+    hot_min: 70        # score ≥ 70 → Hot
+    warm_min: 40       # score ≥ 40 → Warm, else Cold
+  # Staff verification call due this long after the associate submits the customer.
+  # Overdue customers escalate one step per further period: block-level Preferred,
+  # then District Head, then State Head(s) of the site's territory, then Admin.
+  response_hours:
+    hot: 4
+    warm: 24
+    cold: 72
+  timeline_fractions:
+    within_1_month: 1.0
+    within_3_months: 0.7
+    within_6_months: 0.4
+    later: 0.1
+    unsure: 0.0
+  system_fit_penalty: 0.5        # per capacity warning
+  unknown_fraction: 0.5          # system fit when there is nothing to compare
+  track_record_min_history: 3    # earlier submitted customers before track record counts
+  new_associate_fraction: 0.5    # track record until then
+
+# The customer agreement, printed on ₹10 non-judicial stamp paper (app/onboarding/agreement.py).
+# The generated PDF carries the parties and project details; the agreement's own
+# wording is Grid Nova's to supply.
+agreement:
+  body: >-
+    [PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]
+  # Blank space left at the top of page 1 for the stamp paper's own printed header.
+  stamp_paper_top_margin_mm: 100   # [PLACEHOLDER] — confirm against the paper Grid Nova uses

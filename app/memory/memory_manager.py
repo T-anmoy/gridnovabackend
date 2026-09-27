@@ -761,6 +761,7 @@ class MemoryManager:
             total_value=total_value,
             requires_manager_signoff=requires_manager_signoff,
             used_fallback_template=used_fallback_template,
+            drafted_by=performed_by,
         )
         self._db.add(proposal)
         self._db.flush()
@@ -781,6 +782,11 @@ class MemoryManager:
                 "used_fallback_template": used_fallback_template,
             },
         )
+        # Associate-sourced projects: proposal_requested (if nobody asked) and
+        # proposal_prepared progress stages. No-op for every other lead.
+        from app.onboarding.progress import record_formal_draft
+        record_formal_draft(self._db, lead_id=lead_id, proposal_id=proposal.id, version=version,
+                            performed_by=performed_by)
         return proposal
 
     def transition_proposal_status(
@@ -792,6 +798,8 @@ class MemoryManager:
         revision_reason: Optional[str] = None,
         pdf_url: Optional[str] = None,
         date_sent: Optional[datetime] = None,
+        issued_via: str = "emailed with the online accept link",
+        issue_details: Optional[dict] = None,
     ) -> Proposal:
         proposal = self._db.get(Proposal, proposal_id)
         before = {"status": proposal.status}
@@ -813,6 +821,14 @@ class MemoryManager:
             "proposal", str(proposal_id), f"status_changed_to_{new_status}",
             performed_by, before=before, after={"status": new_status},
         )
+        if new_status == ProposalStatus.sent:
+            # Associate-sourced projects: the proposal-issued progress stage (no-op otherwise).
+            from app.memory.models import ProjectStage
+            from app.onboarding.progress import record_automatically
+            record_automatically(self._db, lead_id=proposal.lead_id, stage=ProjectStage.proposal_issued,
+                                 recorded_by=performed_by,
+                                 evidence={"proposal_id": proposal.id, "version": proposal.version,
+                                           "via": issued_via, **(issue_details or {})})
         return proposal
 
     def record_proposal_pdf(self, proposal_id: int, pdf_url: str, performed_by: str) -> Optional[Proposal]:
@@ -869,9 +885,14 @@ class MemoryManager:
             select(Proposal).where(Proposal.accept_token == token)
         ).scalar_one_or_none()
 
-    def mark_customer_accepted(self, proposal_id: int, when: Optional[datetime] = None) -> Proposal:
-        """Record a CUSTOMER online acceptance — a distinct concept from internal staff
-        approval (which is the two-stage approval gate). Audited as 'customer_accepted'."""
+    def mark_customer_accepted(
+        self, proposal_id: int, when: Optional[datetime] = None, via: str = "online accept link",
+        recorded_by: str = "customer", details: Optional[dict] = None,
+    ) -> Proposal:
+        """Record a CUSTOMER acceptance — a distinct concept from internal staff approval
+        (the two-stage approval gate). Online (the accept link, recorded as "customer")
+        or in person (recorded by the associate / employee who took it — `via` and
+        `details` say so). Audited as 'customer_accepted'."""
         proposal = self._db.get(Proposal, proposal_id)
         when = when or datetime.now(timezone.utc)
         before = {"status": proposal.status, "accepted_at": proposal.accepted_at.isoformat() if proposal.accepted_at else None}
@@ -879,9 +900,15 @@ class MemoryManager:
         proposal.status = ProposalStatus.accepted
         self._db.flush()
         self._audit(
-            "proposal", str(proposal_id), "customer_accepted", "customer",
-            before=before, after={"status": ProposalStatus.accepted.value, "accepted_at": when.isoformat()},
+            "proposal", str(proposal_id), "customer_accepted", recorded_by,
+            before=before, after={"status": ProposalStatus.accepted.value, "accepted_at": when.isoformat(),
+                                  "via": via, **(details or {})},
         )
+        from app.memory.models import ProjectStage
+        from app.onboarding.progress import record_automatically
+        record_automatically(self._db, lead_id=proposal.lead_id, stage=ProjectStage.accepted, recorded_by=recorded_by,
+                             evidence={"proposal_id": proposal.id, "version": proposal.version,
+                                       "via": via, "accepted_at": when.isoformat(), **(details or {})})
         return proposal
 
     def adjust_proposal_pricing(
@@ -1117,11 +1144,15 @@ class MemoryManager:
         performed_by: str,
         document_type: Optional[str] = None,
         photo_slot: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ) -> Optional[ProposalInputs]:
         """Record a real, already-uploaded file against the right ProposalInputs
         field. The route validates `target`/`document_type`/`photo_slot` before
         calling this — this method trusts that and just performs the write,
         matching review_proposal_inputs()'s own trust-the-caller shape.
+
+        `metadata` (e.g. the server's received_at and client-supplied GPS on an
+        associate's upload) is stored alongside filename/storage_key in the ref.
         """
         inputs = self._db.get(ProposalInputs, inputs_id)
         if inputs is None:
@@ -1130,11 +1161,11 @@ class MemoryManager:
         signed_at = datetime.now(timezone.utc).isoformat()
         if target == "document":
             refs = list(inputs.document_refs or [])
-            refs.append({"type": document_type, "filename": filename, "storage_key": storage_key})
+            refs.append({"type": document_type, "filename": filename, "storage_key": storage_key, **(metadata or {})})
             inputs.document_refs = refs
         elif target == "installation_photo":
             photo_refs = dict(inputs.installation_photo_refs or {})
-            photo_refs[photo_slot] = {"filename": filename, "storage_key": storage_key}
+            photo_refs[photo_slot] = {"filename": filename, "storage_key": storage_key, **(metadata or {})}
             inputs.installation_photo_refs = photo_refs
         elif target == "staff_signature":
             inputs.staff_signature_ref = {"filename": filename, "storage_key": storage_key, "signed_at": signed_at}

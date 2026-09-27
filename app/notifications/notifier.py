@@ -123,7 +123,8 @@ RESEND_API_URL = "https://api.resend.com/emails"
 # contact form's own email arrives with the frontend change that also adds its
 # backend mirror.)
 STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
-                      "manager_signoff_required", "customer_accepted", "stale_lead_digest")
+                      "manager_signoff_required", "customer_accepted", "stale_lead_digest",
+                      "formal_proposal_requested")
 _NO_STAFF_EMAIL_SOURCES = ("website_estimate_form", "website_contact")
 
 _SOURCE_LABELS = {
@@ -167,6 +168,20 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"A meeting was booked for {payload.get('scheduled_at')}.",
                  f"Lead #{payload.get('lead_id')}, with {payload.get('employee_id')}."],
                 "Open meetings", f"{base_url}/dashboard/meetings")
+    if event_type == "formal_proposal_requested":
+        who = _name(payload)
+        intro = (f"{payload.get('requested_by')} asked Grid Nova to prepare the formal proposal for {who} "
+                 f"(associate-sourced customer #{payload.get('onboarding_id')}, project "
+                 f"{payload.get('project_reference_id')}).")
+        if payload.get("missing"):
+            missing = "; ".join(payload["missing"])
+            return (f"Formal proposal blocked: {who} — {missing}",
+                    [intro, f"It cannot be drafted yet: {missing}.",
+                     "Add the missing details, then prepare the proposal."],
+                    "Open the lead", lead_url)
+        return (f"Formal proposal requested: {who}",
+                [intro, "The customer record has everything a formal proposal needs."],
+                "Open the lead", lead_url)
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
     if event_type == "manager_signoff_required":
         value = payload.get("total_value")
@@ -245,6 +260,9 @@ class EmailNotifier(Notifier):
 
     def notify(self, event_type: str, payload: dict) -> None:
         self._inner.notify(event_type, payload)
+        if event_type == "onboarding_overdue":
+            self._send_onboarding_overdue(payload)
+            return
         if not self._staff or event_type not in STAFF_EMAIL_EVENTS:
             return
         if payload.get("source") in _NO_STAFF_EMAIL_SOURCES:
@@ -264,6 +282,28 @@ class EmailNotifier(Notifier):
             _report_failure(event_type, f"could not build the email: {exc}", exc)
             return
         self._send(self._staff, subject, html_body, text_body, event_type)
+
+    def _send_onboarding_overdue(self, payload: dict) -> None:
+        """An associate-sourced customer's verification call is overdue: email the
+        Preferred Associates the job escalated to, or staff at the Admin step."""
+        if payload.get("escalated_to") == "admin":
+            to = self._staff
+        else:
+            to = [r["email"] for r in payload.get("recipients", []) if r.get("email")]
+        if not to:
+            return
+        try:
+            lines = [f"The verification call for associate-sourced customer #{payload.get('onboarding_id')} "
+                     f"is overdue by {payload.get('overdue_hours')} hours.",
+                     f"Score band: {payload.get('band')} (score {payload.get('score')}). "
+                     f"It was due at {payload.get('response_due_at')}.",
+                     "Please make sure Grid Nova staff contact the customer."]
+            html_body, text_body = _render(lines)
+        except Exception as exc:
+            _report_failure("onboarding_overdue", f"could not build the email: {exc}", exc)
+            return
+        self._send(to, f"Overdue: verification call for customer #{payload.get('onboarding_id')}",
+                   html_body, text_body, "onboarding_overdue")
 
     def send_proposal_to_customer(self, proposal_id, version, customer_email, customer_name,
                                   accept_url, pdf_url) -> tuple[bool, Optional[str]]:

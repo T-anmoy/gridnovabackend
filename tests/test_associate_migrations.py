@@ -43,6 +43,17 @@ def db_at_0025(tmp_path):
         INSERT INTO employees (id, name, email, role) VALUES
             ('emp-sub', 'Sub', 'sub@x.test', 'subcontractor'),
             ('emp-adm', 'Adm', 'adm@x.test', 'admin');
+        -- Stand-ins for tables later revisions reference by foreign key (a real
+        -- database has the full tables; SQLite's batch mode reflects the targets).
+        CREATE TABLE customers (id INTEGER PRIMARY KEY);
+        CREATE TABLE projects (id INTEGER PRIMARY KEY);
+        CREATE TABLE leads (id INTEGER PRIMARY KEY);
+        CREATE TABLE proposal_inputs (id INTEGER PRIMARY KEY);
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY);
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type VARCHAR NOT NULL, entity_id VARCHAR NOT NULL,
+            action VARCHAR NOT NULL, performed_by VARCHAR NOT NULL, before_value JSON, after_value JSON,
+            created_at DATETIME);
         CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL);
         INSERT INTO alembic_version VALUES ('0025_lead_source_contact');
         """
@@ -73,7 +84,7 @@ class TestOperationsAccountsRoles:
         assert _roles(db_at_0025) == {"emp-sub": "subcontractor", "emp-adm": "admin"}
 
     def test_revision_ids_fit_alembic_version_column(self):
-        for path in (REPO_ROOT / "alembic" / "versions").glob("002[6-9]_*.py"):
+        for path in (REPO_ROOT / "alembic" / "versions").glob("00[23][0-9]_*.py"):
             revision = path.stem
             assert len(revision) <= 32, revision
 
@@ -110,7 +121,7 @@ class TestKalimpongLava:
     """0029_kalimpong_lava: in-place rename of 2862 to Lava and retirement of 7354."""
 
     AUDIT_TABLE = """
-        CREATE TABLE audit_logs (
+        CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type VARCHAR NOT NULL, entity_id VARCHAR NOT NULL,
             action VARCHAR NOT NULL, performed_by VARCHAR NOT NULL, before_value JSON, after_value JSON,
             created_at DATETIME);
@@ -185,3 +196,109 @@ class TestKalimpongLava:
         blocks, audits = self._state(db_at_0025)
         assert blocks == {2861: ("KALIMPONG-I", 1), 2862: ("KALIMPONG-II", 1), 7354: ("Lava", 1)}
         assert [a[1] for a in audits] == ["renamed", "deactivated", "renamed", "reactivated"]
+
+
+class TestOnboardingTables:
+    """0030_associate_onboarding on SQLite: tables in, and cleanly out again."""
+
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0030_associate_onboarding", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {"customer_onboardings", "onboarding_attribution_flags"} <= tables
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0029_kalimpong_lava", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert not tables & {"customer_onboardings", "onboarding_attribution_flags"}
+        finally:
+            conn.close()
+
+
+class TestScoringColumns:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0031_onboarding_scoring", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(customer_onboardings)")}
+            assert {"score", "score_band", "score_factors", "response_due_at", "escalation_level"} <= cols
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0030_associate_onboarding", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "score" not in {r[1] for r in conn.execute("PRAGMA table_info(customer_onboardings)")}
+        finally:
+            conn.close()
+
+
+class TestProjectStagesTable:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0032_project_stages", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "project_stage_events" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0031_onboarding_scoring", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "project_stage_events" not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+
+
+
+class TestDrafterAndAgreements:
+    def test_drafted_by_backfilled_from_the_audit_log(self, db_at_0025):
+        assert _run_alembic("upgrade", "0032_project_stages", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        conn.executescript("""
+            INSERT INTO proposals (id) VALUES (1), (2);
+            INSERT INTO audit_logs (entity_type, entity_id, action, performed_by)
+                VALUES ('proposal', '1', 'draft_created', 'emp-sales-1'),
+                       ('proposal', '1', 'status_changed_to_approved', 'emp-admin-1');
+        """)
+        conn.commit()
+        conn.close()
+        result = _run_alembic("upgrade", "0033_drafter_and_agreements", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert dict(conn.execute("SELECT id, drafted_by FROM proposals")) == {1: "emp-sales-1", 2: None}
+            assert "customer_agreements" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0032_project_stages", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+
+
+class TestEstimatesAndPreparedStage:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0034_estimates_and_prepared", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "indicative_estimates" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0033_drafter_and_agreements", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+
+
+class TestDraftFailureColumns:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0035_formal_draft_failure", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(customer_onboardings)")}
+            assert {"formal_draft_failed_at", "formal_draft_failure"} <= cols
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0034_estimates_and_prepared", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr

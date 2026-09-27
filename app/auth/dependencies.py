@@ -181,9 +181,30 @@ class AuthenticatedEmployee:
     def can_manage_proposal_inputs(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
+    def can_review_proposal_inputs(self) -> bool:
+        """Reviewing a site assessment: Admin and Sales, and Engineer (technical
+        review). Creating, uploading to and drafting from it stay Admin/Sales."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.engineer)
+
+    def can_record_project_stage(self) -> bool:
+        """Hand-recorded progress stages (offline acceptance, PM Surya Ghar portal approval)."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+
     def can_review_associate_applications(self) -> bool:
         """Review, approve and reject Associate / Preferred Associate applications,
         and suspend, reinstate or deactivate associates."""
+        return self.role == EmployeeRole.admin
+
+    def can_view_onboardings(self) -> bool:
+        """Associate-sourced customers. Sales is further limited to its own or
+        unassigned leads, as everywhere else on the Sales surface."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+
+    def can_verify_onboarding(self) -> bool:
+        """The staff verification call on an associate-sourced customer."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+
+    def can_resolve_attribution(self) -> bool:
         return self.role == EmployeeRole.admin
 
     def can_manage_territories(self) -> bool:

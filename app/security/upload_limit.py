@@ -15,6 +15,8 @@ import re
 
 _UPLOAD_PATH = re.compile(r"^/api/v1/proposal-inputs/\d+/upload/?$")
 _REGISTRATION_PATH = re.compile(r"^/api/v1/public/(associates|preferred)/apply/?$")
+_ONBOARDING_FILE_PATH = re.compile(
+    r"^/api/v1/(associate/onboardings/\d+/(files|agreement/signed)|dashboard/onboardings/\d+/agreement/signed)/?$")
 # Multipart framing (boundaries, part headers, the small form fields) on top of the
 # file itself. Generous: this bound exists to stop a flood, not to measure the file.
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -64,6 +66,10 @@ class UploadSizeLimitMiddleware:
             allowed, detail = _limit() + MULTIPART_OVERHEAD_BYTES, too_large_detail()
         elif _REGISTRATION_PATH.match(path):
             allowed, detail = _registration_limit() + MULTIPART_OVERHEAD_BYTES, _registration_too_large_detail()
+        elif _ONBOARDING_FILE_PATH.match(path):
+            from app.api.routes import associate_onboarding  # read at call time: tests shrink it
+            limit = associate_onboarding.MAX_FILE_BYTES
+            allowed, detail = limit + MULTIPART_OVERHEAD_BYTES, f"File exceeds the {limit // (1024 * 1024)}MB limit."
         else:
             return await self.app(scope, receive, send)
 

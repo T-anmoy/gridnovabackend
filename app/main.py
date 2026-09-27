@@ -6,12 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.agent_governance import router as agent_governance_router
+from app.api.routes.associate_onboarding import router as associate_onboarding_router
 from app.api.routes.associate_portal import router as associate_portal_router
 from app.api.routes.associates_admin import router as associates_admin_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.equipment import router as equipment_router
 from app.api.routes.health import router as health_router
+from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
 from app.api.routes.public_associates import router as public_associates_router
@@ -40,6 +42,9 @@ async def lifespan(app: FastAPI):
     # than discovering it mid-request while drafting a proposal.
     from app.proposals.content_engine import load_content_config
     load_content_config(force_reload=True)
+    # Same for the associate onboarding config (checklist, thresholds, notice text).
+    from app.onboarding.config import load as load_onboarding_config
+    load_onboarding_config()
     yield
 
 
@@ -83,6 +88,8 @@ app.include_router(pricing_router)
 app.include_router(public_associates_router)
 app.include_router(associates_admin_router)
 app.include_router(associate_portal_router)
+app.include_router(associate_onboarding_router)
+app.include_router(onboarding_admin_router)
 
 
 @app.exception_handler(Exception)

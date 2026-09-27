@@ -207,6 +207,13 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
     if texts.welcome_letter_is_placeholder():
         warnings.append("config/associate_documents.yaml: welcome_letter_body is a [PLACEHOLDER] "
                         "— welcome letters are issued with placeholder text")
+    from app.onboarding import config as onboarding_config
+    if onboarding_config.notice_is_placeholder():
+        warnings.append("config/associate_onboarding.yaml: the Customer Information Notice is a [PLACEHOLDER] "
+                        "— associates record customers' acknowledgement of placeholder text")
+    if onboarding_config.agreement_is_placeholder():
+        warnings.append("config/associate_onboarding.yaml: agreement.body is a [PLACEHOLDER] "
+                        "— customer agreements are generated with placeholder text")
     return errors, warnings
 
 

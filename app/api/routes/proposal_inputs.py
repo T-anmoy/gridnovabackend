@@ -19,6 +19,7 @@ from app.memory.db import get_db
 from app.memory.lead_fields import fill_lead_from_inputs
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
+    LeadSource,
     INSTALLATION_PHOTO_SLOTS,
     ConnectionPhase,
     ConnectionType,
@@ -347,7 +348,7 @@ def review_proposal_inputs(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    if not employee.can_manage_proposal_inputs():
+    if not employee.can_review_proposal_inputs():
         raise HTTPException(status_code=403, detail="Your role cannot review proposal inputs.")
 
     if body.status == InputStatus.submitted:
@@ -371,12 +372,33 @@ def review_proposal_inputs(
     filled = {}
     if body.status == InputStatus.approved_for_proposal:
         filled = fill_lead_from_inputs(memory, updated, performed_by=employee.employee_id)
+        # Associate-sourced projects: the site-assessed progress stage (no-op otherwise).
+        from app.memory.models import ProjectStage
+        from app.onboarding.progress import record_automatically
+        record_automatically(db, lead_id=updated.lead_id, stage=ProjectStage.site_assessed,
+                             recorded_by=employee.employee_id,
+                             evidence={"proposal_inputs_id": updated.id, "reviewed_by": employee.employee_id})
     db.commit()
 
     result = _serialize_for(updated, employee)
     result["lead_fields_filled"] = filled
 
-    if body.status == InputStatus.approved_for_proposal:
+    associate_sourced = memory.get_lead(updated.lead_id).source in (LeadSource.associate,
+                                                                    LeadSource.preferred_associate)
+    if body.status == InputStatus.approved_for_proposal and associate_sourced:
+        # Associate-sourced customers: the formal proposal is a separate, deliberate
+        # step (POST /api/v1/dashboard/onboardings/{id}/formal-proposal), never an
+        # automatic consequence of approving the site assessment.
+        result["proposal_draft"] = {"triggered": False,
+                                    "reason": "Associate-sourced customer — the formal proposal is prepared "
+                                              "separately, when requested."}
+    elif body.status == InputStatus.approved_for_proposal and not employee.can_trigger_proposal_draft():
+        # An Engineer may review a site assessment, but drafting a proposal is still
+        # Admin/Sales only — the draft is left for them rather than made on the
+        # Engineer's behalf.
+        result["proposal_draft"] = {"triggered": False,
+                                    "reason": "Reviewed by an Engineer — Sales or Admin drafts the proposal."}
+    elif body.status == InputStatus.approved_for_proposal:
         result["proposal_draft"] = _trigger_auto_draft(
             memory=memory,
             db=db,

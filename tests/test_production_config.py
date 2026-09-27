@@ -31,6 +31,9 @@ def real_associate_texts(monkeypatch):
     from app.associates import texts
     monkeypatch.setattr(texts, "consent_is_placeholder", lambda: False)
     monkeypatch.setattr(texts, "welcome_letter_is_placeholder", lambda: False)
+    from app.onboarding import config as onboarding_config
+    monkeypatch.setattr(onboarding_config, "notice_is_placeholder", lambda: False)
+    monkeypatch.setattr(onboarding_config, "agreement_is_placeholder", lambda: False)
 
 
 def _settings(**overrides) -> Settings:
@@ -79,6 +82,8 @@ class TestWarnings:
         _, warnings = production_config_problems(_settings())
         assert any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
         assert any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
+        assert any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
+        assert any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
 
 
 class TestNonProduction:

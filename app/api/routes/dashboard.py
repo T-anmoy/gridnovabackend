@@ -675,6 +675,18 @@ def approve_proposal(
             detail="This proposal exceeds the standard threshold and requires manager sign-off. Use /manager-sign-off instead.",
         )
 
+    # Associate-sourced customers only: standard approval must come from a different
+    # employee than the one who drafted this version (four eyes on commission-bearing
+    # work). Every other proposal keeps the existing 2-tier rules unchanged.
+    approving_lead = memory.get_lead(proposal.lead_id)
+    if (approving_lead is not None
+            and approving_lead.source in (LeadSource.associate, LeadSource.preferred_associate)
+            and proposal.drafted_by == employee.employee_id):
+        raise HTTPException(
+            status_code=403,
+            detail="You drafted this proposal. For an associate-sourced customer a different employee must approve it.",
+        )
+
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot approve.")
 
@@ -914,22 +926,10 @@ def send_proposal(
 
     # Approval is internal and may happen on draft copy; what reaches the customer
     # may not. Blocked until every section is real and there is a real price.
-    if content_engine.has_placeholder_content(proposal.content, proposal.total_value):
-        sections = content_engine.placeholder_sections(proposal.content)
-        problems = []
-        if sections:
-            problems.append(f"placeholder text in section(s): {', '.join(sections)}")
-        if not proposal.total_value:
-            problems.append("no price set (use adjust-pricing)")
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "placeholder_content",
-                "message": "This proposal cannot be sent to a customer yet: " + "; ".join(problems) + ".",
-                "placeholder_sections": sections,
-                "missing_total_value": not proposal.total_value,
-            },
-        )
+    from app.proposals.send_guard import placeholder_problem
+    problem = placeholder_problem(proposal)
+    if problem:
+        raise HTTPException(status_code=409, detail=problem)
 
     memory.transition_proposal_status(
         proposal_id=proposal_id,

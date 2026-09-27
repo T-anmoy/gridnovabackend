@@ -220,7 +220,9 @@ class TestReviewProposalInputs:
         assert body["status"] == "rejected"
         assert body["rejection_reason"] == "Site not structurally viable"
 
-    def test_review_forbidden_for_engineer(self, client, memory, db_session):
+    def test_engineer_can_review_but_does_not_draft(self, client, memory, db_session):
+        """Phase 3A: Engineers review site assessments too. Drafting a proposal stays
+        Admin/Sales-only, so an Engineer's approval leaves the draft to them."""
         lead_id = _new_lead(memory, db_session, "review-block@example.com")
         create = client.post(
             "/api/v1/proposal-inputs/", json=_valid_payload(lead_id), headers=sales_headers()
@@ -230,6 +232,14 @@ class TestReviewProposalInputs:
             json={"status": "approved_for_proposal"},
             headers=engineer_headers(),
         )
+        assert r.status_code == 200 and r.json()["status"] == "approved_for_proposal"
+        assert r.json()["proposal_draft"]["triggered"] is False
+        assert "Engineer" in r.json()["proposal_draft"]["reason"]
+        assert "gst_number" not in r.json()  # the Engineer projection still applies
+
+    def test_engineer_still_cannot_create_or_upload(self, client, memory, db_session):
+        lead_id = _new_lead(memory, db_session, "review-eng2@example.com")
+        r = client.post("/api/v1/proposal-inputs/", json=_valid_payload(lead_id), headers=engineer_headers())
         assert r.status_code == 403
 
     def test_review_nonexistent_returns_404(self, client):

@@ -76,6 +76,10 @@ class InstantEstimateInputs:
     access_difficulty: Optional[str] = None
     is_remote: bool = False
     is_housing_society: bool = False
+    # A specific size to price instead of sizing from consumption/roof area — used by
+    # associate onboarding when the customer has asked for a particular kW. The public
+    # /instant-estimate route never sets it, so its behaviour is unchanged.
+    requested_size_kw: Optional[float] = None
 
 
 @dataclass
@@ -108,16 +112,24 @@ def calculate_instant_estimate(
     # module then widens into a range. Never passed back out as-is.
     engine_shading = "heavy" if significant_shading else inputs.shading
 
-    sizing_result = sizing_module.calculate_recommended_size(
-        sizing_module.SizingInputs(
-            sizing_method=inputs.sizing_method,
-            state=inputs.state,
-            monthly_units_kwh=inputs.monthly_units_kwh,
-            monthly_bill_inr=inputs.monthly_bill_inr,
-            usable_roof_area_sqft=inputs.usable_roof_area_sqft,
-            connection_phase=inputs.connection_phase,
+    if inputs.requested_size_kw is not None:
+        if inputs.requested_size_kw <= 0:
+            raise ValueError("requested_size_kw must be greater than zero.")
+        sizing_result = sizing_module.SizingResult(
+            recommended_size_kw=inputs.requested_size_kw, consumption_based_kw=None,
+            area_based_kw=None, phase_capped=False,
         )
-    )
+    else:
+        sizing_result = sizing_module.calculate_recommended_size(
+            sizing_module.SizingInputs(
+                sizing_method=inputs.sizing_method,
+                state=inputs.state,
+                monthly_units_kwh=inputs.monthly_units_kwh,
+                monthly_bill_inr=inputs.monthly_bill_inr,
+                usable_roof_area_sqft=inputs.usable_roof_area_sqft,
+                connection_phase=inputs.connection_phase,
+            )
+        )
     size_kw = sizing_result.recommended_size_kw
 
     breakdown = pricing_engine.calculate_full_estimate(

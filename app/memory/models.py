@@ -103,6 +103,11 @@ class TimelineEventType(str, enum.Enum):
     stage_changed = "stage_changed"
     lead_assigned = "lead_assigned"
     fields_filled_from_inputs = "fields_filled_from_inputs"
+    onboarding_submitted = "onboarding_submitted"
+    onboarding_verified = "onboarding_verified"
+    attribution_flagged = "attribution_flagged"
+    project_stage_recorded = "project_stage_recorded"
+    indicative_estimate_created = "indicative_estimate_created"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -116,6 +121,10 @@ class LeadSource(str, enum.Enum):
     website_estimate_form = "website_estimate_form"
     website_booking = "website_booking"
     website_contact = "website_contact"
+    # Entered by a Grid Nova associate / Preferred Associate on the customer's behalf
+    # (app/api/routes/associate_onboarding.py).
+    associate = "associate"
+    preferred_associate = "preferred_associate"
     whatsapp = "whatsapp"
     instagram = "instagram"
     cold_call = "cold_call"
@@ -437,6 +446,10 @@ class Proposal(Base):
     requires_manager_signoff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     used_fallback_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     revision_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Who drafted this version: the employee id that triggered it, or
+    # "associate:GNA-…" when an associate requested it. For associate-sourced leads the
+    # standard approver must be someone else (dashboard.approve_proposal).
+    drafted_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     lead: Mapped["Lead"] = relationship(back_populates="proposals")
     approved_by: Mapped[Optional["Employee"]] = relationship(back_populates="approved_proposals")
@@ -1090,3 +1103,222 @@ class TerritorySeat(Base):
     released_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     released_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     release_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# ── Associate-led customer onboarding ────────────────────────────────────────────
+# One row per customer an associate onboards. It ties together what the rest of the
+# system already has — Customer, Lead (source associate/preferred_associate), Project
+# and the site assessment (ProposalInputs) — and adds what is specific to associate
+# sourcing: the owning associate, the site's block and GPS, the Customer Information
+# Notice acknowledgement, the staff verification call and the attribution lock.
+
+class OnboardingStatus(str, enum.Enum):
+    draft = "draft"            # being filled in by the associate
+    submitted = "submitted"    # declared complete by the associate; awaiting the staff verification call
+    verified = "verified"      # staff verification call done — attribution lock running
+    closed = "closed"          # an Admin resolved an attribution conflict against it (kept as history)
+
+
+class CustomerTimeline(str, enum.Enum):
+    """When the customer says they want the system — as the associate recorded it."""
+    within_1_month = "within_1_month"
+    within_3_months = "within_3_months"
+    within_6_months = "within_6_months"
+    later = "later"
+    unsure = "unsure"
+
+
+class ScoreBand(str, enum.Enum):
+    """Lead scoring v2 band (app/onboarding/scoring.py)."""
+    hot = "hot"
+    warm = "warm"
+    cold = "cold"
+
+
+class AttributionFlagStatus(str, enum.Enum):
+    open = "open"
+    resolved = "resolved"
+
+
+class AttributionResolution(str, enum.Enum):
+    keep_existing = "keep_existing"   # the earlier onboarding keeps the customer; the later one is closed
+    award_new = "award_new"           # the later onboarding takes the customer; the earlier one is closed
+
+
+class CustomerOnboarding(Base):
+    __tablename__ = "customer_onboardings"
+    __table_args__ = (
+        Index("ix_customer_onboardings_owner", "owner_associate_id"),
+        Index("ix_customer_onboardings_mobile", "customer_mobile"),
+        Index("ix_customer_onboardings_consumer", "consumer_number_key"),
+        Index("ix_customer_onboardings_territory", "state_id", "district_id", "block_id"),
+        CheckConstraint(
+            "status != 'verified' OR (verification_call_completed = true AND verification_call_note IS NOT NULL "
+            "AND verified_by_employee_id IS NOT NULL AND attribution_locked_until IS NOT NULL)",
+            name="ck_customer_onboardings_verified_after_call",
+        ),
+        CheckConstraint(
+            "(site_latitude IS NULL AND site_longitude IS NULL) OR "
+            "(site_latitude BETWEEN -90 AND 90 AND site_longitude BETWEEN -180 AND 180)",
+            name="ck_customer_onboardings_gps",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True, nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    proposal_inputs_id: Mapped[int] = mapped_column(ForeignKey("proposal_inputs.id"), unique=True, nullable=False)
+    owner_associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    status: Mapped[OnboardingStatus] = mapped_column(
+        SAEnum(OnboardingStatus), nullable=False, default=OnboardingStatus.draft,
+    )
+
+    # Where the site is — from the territory master (the free-text state/district on
+    # the site assessment is kept in step with these names).
+    state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False)
+    district_id: Mapped[int] = mapped_column(ForeignKey("territory_districts.id"), nullable=False)
+    block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    site_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    site_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Duplicate detection across associates (normalised copies of what is on the
+    # Customer / site assessment).
+    customer_mobile: Mapped[str] = mapped_column(String(10), nullable=False)
+    consumer_number_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    connection_in_customer_name: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    property_in_customer_name: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    customer_timeline: Mapped[Optional[CustomerTimeline]] = mapped_column(SAEnum(CustomerTimeline), nullable=True)
+
+    # Customer Information Notice — acknowledged by the customer, recorded by the associate.
+    notice_version: Mapped[str] = mapped_column(String, nullable=False)
+    notice_acknowledged_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    notice_recorded_by: Mapped[str] = mapped_column(String, nullable=False)
+
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # Staff verification call — required before verification, and before any future
+    # commission eligibility (Phase 5).
+    verification_call_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verification_call_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verified_by_employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    attribution_locked_until: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    closed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Lead scoring v2 — the score, its band, and every factor that produced it
+    # (app/onboarding/scoring.py). response_due_at is when the staff verification call
+    # is due; escalation_level counts how far up the chain an overdue customer has gone.
+    score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    score_band: Mapped[Optional[ScoreBand]] = mapped_column(SAEnum(ScoreBand), nullable=True)
+    score_factors: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    scored_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    response_due_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    escalation_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_escalated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+    # The last attempt to prepare the formal proposal failed (app/onboarding/formal.py) —
+    # kept until a draft succeeds, so the failure stays visible (formal_proposal_blocked).
+    formal_draft_failed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    formal_draft_failure: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now, nullable=False)
+
+
+class OnboardingAttributionFlag(Base):
+    """A later onboarding that matches an earlier one from a DIFFERENT associate (same
+    electricity consumer number or customer mobile). Never resolved automatically:
+    an Admin decides, and neither onboarding can be verified while it is open."""
+    __tablename__ = "onboarding_attribution_flags"
+    __table_args__ = (
+        UniqueConstraint("onboarding_id", "existing_onboarding_id", name="uq_onboarding_attribution_pair"),
+        Index("ix_onboarding_attribution_flags_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False)
+    existing_onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False)
+    matched_on: Mapped[list] = mapped_column(JSON, nullable=False)   # ["consumer_number", "mobile"]
+    existing_was_locked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    status: Mapped[AttributionFlagStatus] = mapped_column(
+        SAEnum(AttributionFlagStatus), nullable=False, default=AttributionFlagStatus.open,
+    )
+    resolution: Mapped[Optional[AttributionResolution]] = mapped_column(SAEnum(AttributionResolution), nullable=True)
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolved_by_employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class ProjectStage(str, enum.Enum):
+    """Sales-side progress of an associate-sourced project (app/onboarding/progress.py)."""
+    registered = "registered"
+    verified = "verified"
+    site_assessed = "site_assessed"
+    proposal_requested = "proposal_requested"
+    proposal_prepared = "proposal_prepared"   # staff drafted the formal proposal
+    proposal_issued = "proposal_issued"
+    accepted = "accepted"
+    agreement_signed = "agreement_signed"
+    portal_agreement_approved = "portal_agreement_approved"   # PM Surya Ghar-linked projects only
+
+
+class ProjectStageEvent(Base):
+    """One recorded progress stage: who moved it, when, and the evidence behind it.
+    Append-only — each stage is recorded once per project and never edited or deleted."""
+    __tablename__ = "project_stage_events"
+    __table_args__ = (UniqueConstraint("project_id", "stage", name="uq_project_stage_once"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    stage: Mapped[ProjectStage] = mapped_column(SAEnum(ProjectStage), nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class CustomerAgreement(Base):
+    """The customer agreement for an associate-sourced project: the PDF generated for
+    printing on stamp paper, then the signed scan with the stamp-paper number and date.
+    Never deleted; once signed it can no longer be regenerated."""
+    __tablename__ = "customer_agreements"
+    __table_args__ = (
+        CheckConstraint(
+            "(signed_scan_key IS NULL AND stamp_paper_number IS NULL AND stamp_paper_date IS NULL "
+            "AND signed_uploaded_at IS NULL) OR (signed_scan_key IS NOT NULL AND stamp_paper_number IS NOT NULL "
+            "AND stamp_paper_date IS NOT NULL AND signed_uploaded_at IS NOT NULL)",
+            name="ck_customer_agreements_signed_together",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), nullable=False)
+    agreement_storage_key: Mapped[str] = mapped_column(String, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    generated_by: Mapped[str] = mapped_column(String, nullable=False)
+    stamp_paper_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    stamp_paper_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    signed_scan_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    signed_scan_filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    signed_scan_content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    signed_uploaded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    signed_uploaded_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class IndicativeEstimate(Base):
+    """An approximate, unsigned estimate an associate shows the customer during
+    onboarding — computed by the same engine as the public Solar Calculator
+    (app/pricing/instant_estimate.py) and kept exactly as shown. Not a proposal: no
+    approval, no send-guard, never feeds the formal proposal or the agreement."""
+    __tablename__ = "indicative_estimates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    inputs: Mapped[dict] = mapped_column(JSON, nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
