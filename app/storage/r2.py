@@ -107,3 +107,21 @@ def signed_get_url(key: str, filename: Optional[str] = None, as_attachment: bool
     )
     url = s3.generate_presigned_url("get_object", Params=params, ExpiresIn=ttl)
     return url, datetime.now(timezone.utc) + timedelta(seconds=ttl)
+
+
+def download_bytes(key: str) -> bytes:
+    """Read one object's bytes server-side (e.g. an applicant's photo, to embed in
+    their ID card). Raises StorageNotConfiguredError when unconfigured, and whatever
+    boto3 raises for a missing object or a real failure."""
+    if not is_configured():
+        raise StorageNotConfiguredError("R2 storage is not configured — set STORAGE_* environment variables.")
+
+    import boto3
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=settings.storage_endpoint_url,
+        aws_access_key_id=settings.storage_access_key,
+        aws_secret_access_key=settings.storage_secret_key,
+    )
+    return s3.get_object(Bucket=settings.storage_bucket, Key=key)["Body"].read()

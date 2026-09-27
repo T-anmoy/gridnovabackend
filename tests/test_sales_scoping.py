@@ -1,6 +1,6 @@
 """One lead-visibility rule everywhere (app/auth/scoping.py): Sales reads and acts on
 leads assigned to them or unassigned; Admin/Management see everything; Engineers keep
-their technical views; Subcontractors see no leads."""
+their technical views; Operations sees no leads."""
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -14,7 +14,7 @@ from tests.conftest import (
 DASH = "/api/v1/dashboard"
 INPUTS = "/api/v1/proposal-inputs"
 SALES = sales_headers("emp-sales-1")
-SUB = {"X-Employee-Id": "emp-sub-1", "X-Employee-Role": "subcontractor"}
+SUB = {"X-Employee-Id": "emp-sub-1", "X-Employee-Role": "operations"}
 
 
 @pytest.fixture
@@ -78,13 +78,13 @@ class TestLeadList:
     def test_invalid_filter_is_422(self, client, world):
         assert client.get(f"{DASH}/leads", params={"assigned": "theirs"}, headers=SALES).status_code == 422
 
-    def test_subcontractor_sees_none(self, client, world):
+    def test_operations_sees_none(self, client, world):
         assert client.get(f"{DASH}/leads", headers=SUB).json() == []
         assert client.get(f"{DASH}/proposals", headers=SUB).json()["items"] == []
         assert client.get(f"{INPUTS}/", headers=SUB).json()["items"] == []
         assert client.get(f"{DASH}/activity/recent", headers=SUB).json()["items"] == []
 
-    def test_subcontractor_cannot_list_meetings(self, client, world):
+    def test_operations_cannot_list_meetings(self, client, world):
         assert client.get(f"{DASH}/meetings", headers=SUB).status_code == 403
         assert client.get(f"{DASH}/meetings", headers=admin_headers()).status_code == 200
 
@@ -170,7 +170,7 @@ class TestSingleRecordMatrix:
         assert client.get(_pdf(w), headers=engineer_headers()).status_code == 403
 
     @pytest.mark.parametrize("method, path, body", READS)
-    def test_subcontractor_blocked(self, client, world, method, path, body):
+    def test_operations_blocked(self, client, world, method, path, body):
         w = world["unassigned"]
         assert _call(client, method, path(w), body, w, SUB).status_code == 403
 

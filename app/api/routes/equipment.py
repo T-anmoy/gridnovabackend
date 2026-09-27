@@ -22,9 +22,9 @@ from app.memory.models import EmployeeRole, EquipmentCategory
 # Same population that sees proposal pricing elsewhere (dashboard.py's
 # `if employee.is_engineer:` restricted-projection pattern) — Admin, Sales and
 # Management see commercial figures; Engineer does not. Written as an allow-list
-# rather than replicating the `is_engineer` check literally so Subcontractor
-# (a role that didn't exist when that precedent was set, and which starts
-# maximally restricted by design) is excluded too, not accidentally included.
+# rather than replicating the `is_engineer` check literally so Operations and
+# Accounts (roles that didn't exist when that precedent was set, and which start
+# maximally restricted by design) are excluded too, not accidentally included.
 _CAN_VIEW_PROCUREMENT_PRICE = (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.management)
 
 router = APIRouter(prefix="/api/v1/equipment")

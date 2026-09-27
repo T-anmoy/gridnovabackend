@@ -1,12 +1,13 @@
 import enum
 from datetime import datetime, timezone
 from typing import Optional
+from datetime import date
 from sqlalchemy import (
     String, Float, Boolean, Text, JSON, ForeignKey,
-    Enum as SAEnum, DateTime, Integer, UniqueConstraint, CheckConstraint,
-    Index, text,
+    Enum as SAEnum, DateTime, Date, Integer, UniqueConstraint, CheckConstraint,
+    Index, text, DDL, event,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship, validates
 from sqlalchemy.types import TypeDecorator
 from app.memory.db import Base
 
@@ -44,11 +45,13 @@ class EmployeeRole(str, enum.Enum):
     sales = "sales"
     management = "management"
     engineer = "engineer"
-    # Deliberately maximally restricted for now — see
-    # AuthenticatedEmployee.can_view_assigned_work() in app/auth/dependencies.py.
-    # There is nothing for this role to access yet (Work Orders don't exist);
-    # granting broad access now that gets tightened later is the wrong default.
-    subcontractor = "subcontractor"
+    # operations (formerly `subcontractor`, renamed in 0026_operations_accounts_roles)
+    # and accounts are deliberately maximally restricted for now — every can_*()
+    # gate in app/auth/dependencies.py denies them. They authenticate and are
+    # recognised; their business permissions arrive with the phases that give them
+    # something real to do, rather than starting broad and being tightened later.
+    operations = "operations"
+    accounts = "accounts"
 
 
 class LeadScore(str, enum.Enum):
@@ -742,3 +745,348 @@ class CustomerProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 
     customer: Mapped["Customer"] = relationship(back_populates="profile")
+
+
+# ── Territory master (State → District → Block) ─────────────────────────────────
+# Keyed by Local Government Directory (LGD) codes; loaded from data/territories/ by
+# scripts/seed_territories.py. Never deleted — switched off with is_active, since
+# applications, associates and seats keep pointing at them.
+
+class TerritoryState(Base):
+    __tablename__ = "territory_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lgd_code: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    # ISO 3166-2:IN code without the "IN-" prefix — the {STATE} in Associate IDs.
+    iso_code: Mapped[str] = mapped_column(String(2), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+
+class TerritoryDistrict(Base):
+    __tablename__ = "territory_districts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False, index=True)
+    lgd_code: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+    state: Mapped["TerritoryState"] = relationship()
+
+
+class TerritoryBlock(Base):
+    __tablename__ = "territory_blocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    district_id: Mapped[int] = mapped_column(ForeignKey("territory_districts.id"), nullable=False, index=True)
+    lgd_code: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+    district: Mapped["TerritoryDistrict"] = relationship()
+
+
+# ── Associates ───────────────────────────────────────────────────────────────────
+# Associates are a separate kind of user from employees: they never get an Employee
+# row, and they authenticate through app/auth/dependencies.py get_current_associate
+# on their own Clerk claims. See the Phase 2A report for the claim structure.
+
+class AssociateType(str, enum.Enum):
+    associate = "associate"
+    preferred_associate = "preferred_associate"
+
+
+class AssociateCapability(str, enum.Enum):
+    sales = "sales"
+    execution = "execution"
+
+
+class TerritoryLevel(str, enum.Enum):
+    state_head = "state_head"
+    district_head = "district_head"
+    block = "block"
+
+
+class ApplicationStatus(str, enum.Enum):
+    submitted = "submitted"
+    under_review = "under_review"
+    needs_info = "needs_info"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class AssociateStatus(str, enum.Enum):
+    active = "active"
+    suspended = "suspended"
+    deactivated = "deactivated"
+
+
+class ClerkInviteStatus(str, enum.Enum):
+    sent = "sent"          # Clerk created the invitation
+    skipped = "skipped"    # no CLERK_SECRET_KEY (local dev)
+    failed = "failed"      # Clerk refused or was unreachable — retry from the dashboard
+
+
+# Documents every registration must upload. Keys into the application's `documents`.
+APPLICATION_DOCUMENTS = ("masked_aadhaar", "pan_card", "photo", "cancelled_cheque")
+
+
+class _ApplicationKyc:
+    """Columns shared by both registration tables. The full Aadhaar number is never
+    stored — only its last four digits, after a Verhoeff check. The bank account
+    number is stored Fernet-encrypted (app/security/encryption.py) with its last four
+    digits alongside for display."""
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[ApplicationStatus] = mapped_column(
+        SAEnum(ApplicationStatus), nullable=False, default=ApplicationStatus.submitted,
+    )
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+    date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
+    address_line: Mapped[str] = mapped_column(Text, nullable=False)
+    state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False)
+    district_id: Mapped[int] = mapped_column(ForeignKey("territory_districts.id"), nullable=False)
+    # Null only where the district has no blocks (e.g. Kolkata).
+    block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    pin_code: Mapped[str] = mapped_column(String(6), nullable=False)
+    mobile: Mapped[str] = mapped_column(String(10), nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    aadhaar_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    pan: Mapped[str] = mapped_column(String(10), nullable=False)
+    bank_account_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    bank_account_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    bank_ifsc: Mapped[str] = mapped_column(String(11), nullable=False)
+    kyc_consent_version: Mapped[str] = mapped_column(String, nullable=False)
+    kyc_consent_accepted_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    # {doc: {storage_key, filename, content_type, size}} for each APPLICATION_DOCUMENTS.
+    documents: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    submitted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    status_changed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    needs_info_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Stands in for OTP: an Admin phones the applicant and records that they did.
+    verification_call_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verification_call_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+    @declared_attr
+    def decided_by_employee_id(cls) -> Mapped[Optional[str]]:
+        return mapped_column(ForeignKey("employees.id"), nullable=True)
+
+    @declared_attr.directive
+    def __table_args__(cls):
+        t = cls.__tablename__
+        return (
+            # DB-level backstops for the approval gate, like ck_proposal_approved_requires_approver.
+            CheckConstraint("status != 'rejected' OR rejection_reason IS NOT NULL",
+                            name=f"ck_{t}_rejected_has_reason"),
+            CheckConstraint(
+                "status != 'approved' OR (verification_call_completed = true "
+                "AND verification_call_note IS NOT NULL AND decided_by_employee_id IS NOT NULL)",
+                name=f"ck_{t}_approved_after_call",
+            ),
+            Index(f"ix_{t}_status", "status"),
+        )
+
+
+class AssociateApplication(_ApplicationKyc, Base):
+    __tablename__ = "associate_applications"
+
+    capability: Mapped[AssociateCapability] = mapped_column(SAEnum(AssociateCapability), nullable=False)
+
+
+class PreferredAssociateApplication(_ApplicationKyc, Base):
+    __tablename__ = "preferred_associate_applications"
+
+    requested_level: Mapped[TerritoryLevel] = mapped_column(SAEnum(TerritoryLevel), nullable=False)
+    requested_state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False)
+    requested_district_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_districts.id"), nullable=True)
+    requested_block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    # Free text: Grid Nova has not fixed a list of business types.
+    business_type: Mapped[str] = mapped_column(String, nullable=False)
+    gstin: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    office_address: Mapped[str] = mapped_column(Text, nullable=False)
+    prior_experience: Mapped[str] = mapped_column(Text, nullable=False)
+    team_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Exactly two: [{name, mobile}, {name, mobile}].
+    references: Mapped[list] = mapped_column(JSON, nullable=False)
+
+
+class AssociateIdentityClaim(Base):
+    """One row per identity attribute an application has claimed, across BOTH
+    registration tables. The unique (kind, value_hash) index is what refuses a
+    duplicate registration — in the database, so two simultaneous submissions
+    cannot both get through. value_hash is an HMAC (app/associates/service.py), so
+    this table reveals nothing about the values themselves. Claims are never
+    released: a rejected applicant cannot re-register under the same identity."""
+    __tablename__ = "associate_identity_claims"
+    __table_args__ = (UniqueConstraint("kind", "value_hash", name="uq_associate_identity_claim"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # pan | mobile | bank_account | aadhaar_dob_name
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    value_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    application_type: Mapped[AssociateType] = mapped_column(SAEnum(AssociateType), nullable=False)
+    application_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+
+class AssociateIdCounter(Base):
+    """One row per (state, two-digit year) bucket — the atomic counter behind
+    GNA-{STATE}-{YY}-{SEQ}, incremented with the same single-statement upsert as
+    project_sequence_counters (app/memory/reference_id.py)."""
+    __tablename__ = "associate_id_counters"
+
+    counter_key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class Associate(Base):
+    """An approved Associate or Preferred Associate. Created only by approving an
+    application; never deleted — deactivation is a status."""
+    __tablename__ = "associates"
+    __table_args__ = (
+        CheckConstraint(
+            "(associate_type = 'associate' AND associate_application_id IS NOT NULL "
+            "AND preferred_application_id IS NULL AND capability IS NOT NULL AND level IS NULL) OR "
+            "(associate_type = 'preferred_associate' AND preferred_application_id IS NOT NULL "
+            "AND associate_application_id IS NULL AND level IS NOT NULL)",
+            name="ck_associates_type_shape",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # GNA-{STATE}-{YY}-{SEQ}. Immutable once issued: the ORM refuses a change and a
+    # database trigger (below) refuses one made by any other route.
+    associate_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    associate_type: Mapped[AssociateType] = mapped_column(SAEnum(AssociateType), nullable=False)
+    status: Mapped[AssociateStatus] = mapped_column(
+        SAEnum(AssociateStatus), nullable=False, default=AssociateStatus.active,
+    )
+    associate_application_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("associate_applications.id"), unique=True, nullable=True,
+    )
+    preferred_application_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("preferred_associate_applications.id"), unique=True, nullable=True,
+    )
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    mobile: Mapped[str] = mapped_column(String(10), nullable=False)
+    # The state whose code is in associate_id.
+    state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False)
+    capability: Mapped[Optional[AssociateCapability]] = mapped_column(SAEnum(AssociateCapability), nullable=True)
+    level: Mapped[Optional[TerritoryLevel]] = mapped_column(SAEnum(TerritoryLevel), nullable=True)
+    territory_state_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_states.id"), nullable=True)
+    territory_district_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_districts.id"), nullable=True)
+    territory_block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    photo_storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    photo_content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # The Clerk user this associate signs in as — bound on first sign-in, then fixed.
+    clerk_user_id: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
+    clerk_invitation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    clerk_invite_status: Mapped[Optional[ClerkInviteStatus]] = mapped_column(SAEnum(ClerkInviteStatus), nullable=True)
+
+    # Private-bucket object keys; null until generated (a failure is retried from the dashboard).
+    id_card_storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    welcome_letter_storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    documents_generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    documents_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    approved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    approved_by_employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    status_changed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    status_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+    @validates("associate_id")
+    def _associate_id_is_immutable(self, key, value):
+        current = self.__dict__.get("associate_id")
+        if current is not None and value != current:
+            raise ValueError("associate_id is immutable once issued")
+        return value
+
+
+# The database-level half of associate_id immutability: an UPDATE that changes it
+# fails whatever issued it (raw SQL, a bulk update, another service). Attached to
+# the table so create_all builds it too, and created by 0028_associates for
+# migrated databases.
+ASSOCIATE_ID_IMMUTABLE_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION associates_id_immutable() RETURNS trigger AS $$
+BEGIN
+    IF NEW.associate_id IS DISTINCT FROM OLD.associate_id THEN
+        RAISE EXCEPTION 'associate_id is immutable once issued';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+"""
+ASSOCIATE_ID_IMMUTABLE_PG_TRIGGER = (
+    "CREATE TRIGGER trg_associates_id_immutable BEFORE UPDATE ON associates "
+    "FOR EACH ROW EXECUTE FUNCTION associates_id_immutable()"
+)
+ASSOCIATE_ID_IMMUTABLE_SQLITE_TRIGGER = (
+    "CREATE TRIGGER trg_associates_id_immutable BEFORE UPDATE OF associate_id ON associates "
+    "WHEN NEW.associate_id IS NOT OLD.associate_id "
+    "BEGIN SELECT RAISE(ABORT, 'associate_id is immutable once issued'); END"
+)
+event.listen(Associate.__table__, "after_create",
+             DDL(ASSOCIATE_ID_IMMUTABLE_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(Associate.__table__, "after_create",
+             DDL(ASSOCIATE_ID_IMMUTABLE_PG_TRIGGER).execute_if(dialect="postgresql"))
+event.listen(Associate.__table__, "after_create",
+             DDL(ASSOCIATE_ID_IMMUTABLE_SQLITE_TRIGGER).execute_if(dialect="sqlite"))
+
+
+# Seats held: at most 2 State Heads per state, at most 1 District Head per district.
+# Enforced by the database, not only by application code: a state head seat carries
+# seat_no 1 or 2 and a district head seat seat_no 1 (the CHECK), and (territory,
+# seat_no) is unique among seats not yet released (the partial unique indexes) — so
+# a third State Head, or a second District Head, cannot be inserted however the
+# write arrives, including two approvals racing each other. Block seats have no
+# limit in this phase (none was specified). Releasing a seat sets released_at; the
+# row stays as history.
+MAX_STATE_HEADS_PER_STATE = 2
+MAX_DISTRICT_HEADS_PER_DISTRICT = 1
+
+_SEAT_HELD = "released_at IS NULL"
+
+
+class TerritorySeat(Base):
+    __tablename__ = "territory_seats"
+    __table_args__ = (
+        CheckConstraint(
+            "(level = 'state_head' AND district_id IS NULL AND block_id IS NULL "
+            f"AND seat_no BETWEEN 1 AND {MAX_STATE_HEADS_PER_STATE}) OR "
+            "(level = 'district_head' AND district_id IS NOT NULL AND block_id IS NULL "
+            f"AND seat_no BETWEEN 1 AND {MAX_DISTRICT_HEADS_PER_DISTRICT}) OR "
+            "(level = 'block' AND district_id IS NOT NULL AND block_id IS NOT NULL AND seat_no IS NULL)",
+            name="ck_territory_seats_shape",
+        ),
+        Index("uq_territory_seats_state_head", "state_id", "seat_no", unique=True,
+              sqlite_where=text(f"level = 'state_head' AND {_SEAT_HELD}"),
+              postgresql_where=text(f"level = 'state_head' AND {_SEAT_HELD}")),
+        Index("uq_territory_seats_district_head", "district_id", "seat_no", unique=True,
+              sqlite_where=text(f"level = 'district_head' AND {_SEAT_HELD}"),
+              postgresql_where=text(f"level = 'district_head' AND {_SEAT_HELD}")),
+        # One held seat per associate.
+        Index("uq_territory_seats_holder", "holder_id", unique=True,
+              sqlite_where=text(_SEAT_HELD), postgresql_where=text(_SEAT_HELD)),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    level: Mapped[TerritoryLevel] = mapped_column(SAEnum(TerritoryLevel), nullable=False)
+    state_id: Mapped[int] = mapped_column(ForeignKey("territory_states.id"), nullable=False)
+    district_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_districts.id"), nullable=True)
+    block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    seat_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    holder_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    claimed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    released_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    released_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    release_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

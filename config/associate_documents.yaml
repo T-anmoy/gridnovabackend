@@ -1,0 +1,24 @@
+# Grid Nova Energy — Associate programme texts
+#
+# Read by app/associates/texts.py. Grid Nova staff edit the wording here, without
+# touching code. Anything still marked [PLACEHOLDER] has not been supplied by Grid
+# Nova yet: a production boot logs a warning for each one (app/config.py).
+
+# The KYC consent notice an applicant must accept on the registration forms. Every
+# application stores the `version` it was accepted under. Publishing new wording
+# means adding a NEW version and pointing `current_kyc_consent_version` at it —
+# never editing a version applicants have already accepted, so what each applicant
+# agreed to stays on record exactly.
+current_kyc_consent_version: "placeholder-v0"
+kyc_consent_versions:
+  placeholder-v0:
+    text: >-
+      [PLACEHOLDER — the KYC consent notice text is to be supplied by Grid Nova.
+      While this placeholder is the current version, a production deployment
+      refuses registrations rather than collect KYC data under it.]
+
+# The body of the welcome letter PDF issued on approval. The letter's header
+# (name, Associate ID, date, programme, territory) is generated; only this
+# paragraph is Grid Nova's copy.
+welcome_letter_body: >-
+  [PLACEHOLDER — the welcome letter text is to be supplied by Grid Nova.]

@@ -129,6 +129,10 @@ def reset_chat_inmemory_state():
     import app.api.routes.public_intake as public_intake
     import app.api.routes.public_booking as public_booking
     import app.api.routes.public_proposals as public_proposals
+    import app.api.routes.public_associates as public_associates
+    for log in (public_associates._apply_request_log, public_associates._verify_request_log,
+                public_associates._lookup_request_log):
+        log.clear()
     chat._request_log.clear()
     chat._recent_messages.clear()
     public_proposals._accept_request_log.clear()
@@ -142,6 +146,9 @@ def reset_chat_inmemory_state():
     public_intake._contact_request_log.clear()
     public_intake._recent_contact_emails.clear()
     yield
+    for log in (public_associates._apply_request_log, public_associates._verify_request_log,
+                public_associates._lookup_request_log):
+        log.clear()
     chat._request_log.clear()
     chat._recent_messages.clear()
     public_proposals._accept_request_log.clear()
@@ -191,6 +198,15 @@ class FakeS3:
 
     def put_object(self, **kwargs):
         self.put.append(kwargs)
+        _FAKE_BUCKET[kwargs["Key"]] = kwargs["Body"]
+
+    def get_object(self, Bucket, Key):
+        import io
+        return {"Body": io.BytesIO(_FAKE_BUCKET[Key])}
+
+
+# Objects "uploaded" through FakeS3 during one test, readable back via get_object.
+_FAKE_BUCKET: dict[str, bytes] = {}
 
 
 @pytest.fixture
@@ -215,6 +231,7 @@ def fake_storage(monkeypatch):
         return clients[-1]
 
     monkeypatch.setattr(boto3, "client", _client)
+    _FAKE_BUCKET.clear()
     return clients
 
 

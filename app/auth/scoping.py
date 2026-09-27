@@ -5,7 +5,8 @@ endpoint:
   * Engineer          — every lead, through the technical-only views each endpoint
                         already limits them to (unchanged here).
   * Sales             — leads assigned to them, or not assigned to anyone.
-  * Subcontractor     — none (the role is deliberately maximally restricted; see
+  * Operations,
+    Accounts          — none (both roles are deliberately maximally restricted; see
                         AuthenticatedEmployee.can_view_assigned_work()).
 
 Single records go through require_lead_access(); list queries through LeadScope,

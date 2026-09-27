@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# `public_metadata.principal` values. Staff tokens may omit it (every token issued
+# before associates existed does); associate tokens must carry ASSOCIATE_PRINCIPAL.
+STAFF_PRINCIPAL = "staff"
+ASSOCIATE_PRINCIPAL = "associate"
+
 
 class DeactivatedEmployeeError(Exception):
     """Raised when a deactivated employee's credentials are otherwise valid."""
@@ -176,8 +181,19 @@ class AuthenticatedEmployee:
     def can_manage_proposal_inputs(self) -> bool:
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)
 
+    def can_review_associate_applications(self) -> bool:
+        """Review, approve and reject Associate / Preferred Associate applications,
+        and suspend, reinstate or deactivate associates."""
+        return self.role == EmployeeRole.admin
+
+    def can_manage_territories(self) -> bool:
+        return self.role == EmployeeRole.admin
+
+    def can_manage_seats(self) -> bool:
+        return self.role == EmployeeRole.admin
+
     def can_view_assigned_work(self) -> bool:
-        """Intentionally False for every role, including Subcontractor.
+        """Intentionally False for every role, including Operations and Accounts.
 
         Not a broken check — there is genuinely nothing to view yet. Work
         Orders don't exist. This role starts maximally restricted and gets
@@ -230,7 +246,13 @@ async def get_current_employee(
         )
 
     employee_id = payload.get("sub", "")
-    metadata = payload.get("public_metadata", {})
+    metadata = payload.get("public_metadata") or {}
+    # A staff token has no `principal` claim (or "staff"). Anything else — above all
+    # an associate's token — is refused BEFORE an Employee row could be provisioned:
+    # associates are a separate kind of user and must never become employees.
+    principal = metadata.get("principal")
+    if principal not in (None, "", STAFF_PRINCIPAL):
+        raise HTTPException(status_code=403, detail="This account cannot access staff endpoints.")
     role_str = metadata.get("role", "")
 
     try:
@@ -251,3 +273,89 @@ async def get_current_employee(
         email=email,
         name=name,
     )
+
+
+# ── Associates: a separate principal ──────────────────────────────────────────
+
+class AuthenticatedAssociate:
+    def __init__(self, associate_pk: int, associate_id: str, associate_type: str, clerk_user_id: Optional[str]):
+        self.associate_pk = associate_pk
+        self.associate_id = associate_id
+        self.associate_type = associate_type
+        self.clerk_user_id = clerk_user_id
+
+
+_ASSOCIATE_ONLY = "This endpoint is for Grid Nova associates only."
+
+
+def _resolve_associate(db: Session, associate_id: str, clerk_user_id: Optional[str]) -> AuthenticatedAssociate:
+    """Load the associate a verified identity claims to be, and refuse unless it is
+    active. The first Clerk sign-in binds that Clerk user to the associate; from then
+    on a token for any other Clerk user naming the same associate_id is refused."""
+    from sqlalchemy import select
+    from app.memory.models import Associate, AssociateStatus, AuditLog
+
+    associate = db.execute(select(Associate).where(Associate.associate_id == associate_id)).scalar_one_or_none()
+    if associate is None:
+        raise HTTPException(status_code=403, detail="Unknown associate.")
+    if associate.status != AssociateStatus.active:
+        raise HTTPException(status_code=403, detail=f"This associate account is {associate.status.value}.")
+    if clerk_user_id is not None:
+        if associate.clerk_user_id is None:
+            associate.clerk_user_id = clerk_user_id
+            db.add(AuditLog(entity_type="associate", entity_id=associate.associate_id,
+                            action="clerk_user_bound", performed_by=clerk_user_id,
+                            before_value={"clerk_user_id": None},
+                            after_value={"clerk_user_id": clerk_user_id}))
+            db.commit()
+        elif associate.clerk_user_id != clerk_user_id:
+            raise HTTPException(status_code=403, detail="This sign-in does not belong to that associate.")
+    return AuthenticatedAssociate(
+        associate_pk=associate.id, associate_id=associate.associate_id,
+        associate_type=associate.associate_type.value, clerk_user_id=associate.clerk_user_id,
+    )
+
+
+async def get_current_associate(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> AuthenticatedAssociate:
+    """Authenticate an Associate / Preferred Associate. Accepts ONLY a Clerk token
+    whose public_metadata carries principal="associate" and an associate_id; a staff
+    token (a role claim, no associate principal) is refused. Never reads the staff
+    X-Employee-* headers and never provisions an Employee row."""
+    # ── Dev-only header bypass (mirrors X-Employee-Id) ─────────────────────────
+    dev_associate = request.headers.get("X-Associate-Id")
+    if dev_associate:
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Dev auth headers are not permitted in production.",
+            )
+        return _resolve_associate(db, dev_associate, clerk_user_id=None)
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = _verify_clerk_jwt(credentials.credentials)
+    except Exception as exc:
+        logger.warning("JWT verification failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    metadata = payload.get("public_metadata") or {}
+    if metadata.get("principal") != ASSOCIATE_PRINCIPAL:
+        raise HTTPException(status_code=403, detail=_ASSOCIATE_ONLY)
+    associate_id = metadata.get("associate_id")
+    sub = payload.get("sub")
+    if not associate_id or not isinstance(associate_id, str) or not sub:
+        raise HTTPException(status_code=403, detail=_ASSOCIATE_ONLY)
+    return _resolve_associate(db, associate_id, clerk_user_id=sub)

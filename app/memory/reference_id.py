@@ -34,14 +34,73 @@ from app.memory.models import ProjectFamily
 UNKNOWN_STATE_CODE = "XX"
 UNKNOWN_TYPE_CODE = "GEN"
 
-# Confirmed primary service states (see app/llm/company_facts.py). Anything
-# else falls back to the first two letters of the given name, uppercased —
-# a judgment call: reasonable as a stand-in, not a real state-code registry,
-# and flagged as such in the accompanying report.
+# Every Indian state and union territory, keyed by lower-case name, mapped to its
+# ISO 3166-2:IN subdivision code (without the "IN-" prefix) as currently published
+# — including the 23 Nov 2023 recoding (Odisha OD, Chhattisgarh CG, Telangana TS,
+# Uttarakhand UK) and the 2020 merger of Dadra and Nagar Haveli with Daman and Diu
+# (DH). Former names and spellings still in common use are listed as aliases so
+# they resolve to the same code. Anything that is not a recognised name or code
+# becomes UNKNOWN_STATE_CODE — there is no guessing from the name's letters, which
+# collided with real codes (Uttar Pradesh -> "UT").
 STATE_CODES: dict[str, str] = {
-    "west bengal": "WB",
+    "andaman and nicobar islands": "AN",
+    "andhra pradesh": "AP",
+    "arunachal pradesh": "AR",
+    "assam": "AS",
     "bihar": "BR",
+    "chandigarh": "CH",
+    "chhattisgarh": "CG",
+    "dadra and nagar haveli and daman and diu": "DH",
+    "delhi": "DL",
+    "goa": "GA",
+    "gujarat": "GJ",
+    "haryana": "HR",
+    "himachal pradesh": "HP",
+    "jammu and kashmir": "JK",
+    "jharkhand": "JH",
+    "karnataka": "KA",
+    "kerala": "KL",
+    "ladakh": "LA",
+    "lakshadweep": "LD",
+    "madhya pradesh": "MP",
+    "maharashtra": "MH",
+    "manipur": "MN",
+    "meghalaya": "ML",
+    "mizoram": "MZ",
+    "nagaland": "NL",
+    "odisha": "OD",
+    "puducherry": "PY",
+    "punjab": "PB",
+    "rajasthan": "RJ",
+    "sikkim": "SK",
+    "tamil nadu": "TN",
+    "telangana": "TS",
+    "tripura": "TR",
+    "uttar pradesh": "UP",
+    "uttarakhand": "UK",
+    "west bengal": "WB",
 }
+STATE_NAME_ALIASES: dict[str, str] = {
+    "andaman and nicobar": "AN",
+    "chattisgarh": "CG",
+    "dadra and nagar haveli": "DH",
+    "daman and diu": "DH",
+    "dadra and nagar haveli and diu and daman": "DH",
+    "nct of delhi": "DL",
+    "national capital territory of delhi": "DL",
+    "orissa": "OD",
+    "pondicherry": "PY",
+    "uttaranchal": "UK",
+}
+_KNOWN_CODES = frozenset(STATE_CODES.values())
+
+
+def _normalize_state(state: str) -> str:
+    import unicodedata
+
+    folded = unicodedata.normalize("NFKD", state).encode("ascii", "ignore").decode()
+    return " ".join(folded.replace("&", " and ").lower().split())
+
 
 # ProjectFamily -> 3-letter type code. rooftop_solar maps to ROF ("rooftop"),
 # not RES ("residential") — ProjectFamily carries no residential/commercial/
@@ -61,13 +120,19 @@ TYPE_CODES: dict[ProjectFamily, str] = {
 
 
 def state_code(state: Optional[str]) -> str:
+    """ISO 3166-2:IN code for a state/UT name (or for the code itself, with or
+    without "IN-"), else UNKNOWN_STATE_CODE."""
     if not state or not state.strip():
         return UNKNOWN_STATE_CODE
-    normalized = state.strip().lower()
+    normalized = _normalize_state(state)
     if normalized in STATE_CODES:
         return STATE_CODES[normalized]
-    fallback = state.strip()[:2].upper()
-    return fallback or UNKNOWN_STATE_CODE
+    if normalized in STATE_NAME_ALIASES:
+        return STATE_NAME_ALIASES[normalized]
+    code = normalized.upper().removeprefix("IN-")
+    if code in _KNOWN_CODES:
+        return code
+    return UNKNOWN_STATE_CODE
 
 
 def type_code(project_family) -> str:

@@ -1766,7 +1766,7 @@ def list_meetings(
     can_schedule_meeting()'s own admin/sales split); Admin/Management see every
     meeting. Engineers have no reason to see customer-identifying meeting data
     (same "nothing to access yet" restriction already applied to their lead view), and
-    Subcontractors see no customer data at all (app/auth/scoping.py)."""
+    Operations and Accounts see no customer data at all (app/auth/scoping.py)."""
     if employee.role not in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales):
         raise HTTPException(status_code=403, detail="Your role cannot view meetings.")
 

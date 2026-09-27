@@ -6,12 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.agent_governance import router as agent_governance_router
+from app.api.routes.associate_portal import router as associate_portal_router
+from app.api.routes.associates_admin import router as associates_admin_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.equipment import router as equipment_router
 from app.api.routes.health import router as health_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
+from app.api.routes.public_associates import router as public_associates_router
 from app.api.routes.public_booking import router as public_booking_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
@@ -41,7 +44,10 @@ async def lifespan(app: FastAPI):
 
 
 if settings.sentry_dsn:
-    sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.environment)
+    # No request bodies, and KYC values scrubbed from everything else — see
+    # app/security/sentry_scrub.py.
+    from app.security.sentry_scrub import sentry_init_options
+    sentry_sdk.init(**sentry_init_options(settings.sentry_dsn, settings.environment))
 
 app = FastAPI(
     title="Grid Nova AI Operations Platform",
@@ -74,6 +80,9 @@ app.include_router(public_booking_router)
 app.include_router(agent_governance_router)
 app.include_router(equipment_router)
 app.include_router(pricing_router)
+app.include_router(public_associates_router)
+app.include_router(associates_admin_router)
+app.include_router(associate_portal_router)
 
 
 @app.exception_handler(Exception)

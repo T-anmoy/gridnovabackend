@@ -25,8 +25,36 @@ class TestStateCode:
         assert refid.state_code("  west bengal ") == "WB"
         assert refid.state_code("BIHAR") == "BR"
 
-    def test_unknown_state_falls_back_to_first_two_letters(self):
+    def test_every_state_and_ut_has_its_iso_code(self):
         assert refid.state_code("Odisha") == "OD"
+        assert refid.state_code("Uttar Pradesh") == "UP"
+        assert refid.state_code("Uttarakhand") == "UK"
+        assert refid.state_code("Telangana") == "TS"
+        assert refid.state_code("Chhattisgarh") == "CG"
+        assert refid.state_code("Dadra and Nagar Haveli and Daman and Diu") == "DH"
+        assert len(refid.STATE_CODES) == 36  # 28 states + 8 union territories
+        assert len(set(refid.STATE_CODES.values())) == 36
+
+    def test_no_two_letter_prefix_collision_remains(self):
+        """The old fallback took a name's first two letters: Uttar Pradesh -> "UT"."""
+        for name, code in refid.STATE_CODES.items():
+            assert refid.state_code(name.title()) == code
+
+    def test_former_names_and_spellings(self):
+        assert refid.state_code("Orissa") == "OD"
+        assert refid.state_code("Uttaranchal") == "UK"
+        assert refid.state_code("Pondicherry") == "PY"
+        assert refid.state_code("Jammu & Kashmir") == "JK"
+        assert refid.state_code("Daman and Diu") == "DH"
+        assert refid.state_code("Bihār") == "BR"
+
+    def test_codes_are_accepted_as_input(self):
+        assert refid.state_code("wb") == "WB"
+        assert refid.state_code("IN-UP") == "UP"
+
+    def test_unrecognised_input_is_the_unknown_marker(self):
+        assert refid.state_code("Atlantis") == "XX"
+        assert refid.state_code("Ut") == "XX"
 
     def test_missing_state_uses_the_unknown_marker(self):
         assert refid.state_code(None) == "XX"

@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     # (the customer email's PDF download). Blank = such links are left out.
     public_api_base_url: str = ""
 
+    # Where Clerk sends an invited associate after they accept their invitation (the
+    # associate portal's sign-up page). Blank = Clerk's own default for the instance.
+    associate_invite_redirect_url: str = ""
+
     # Lifetime of presigned storage GET links (app/storage/r2.py). R2 caps it at 7 days.
     storage_signed_url_ttl_seconds: int = Field(default=600, ge=60, le=604_800)
 
@@ -193,6 +197,16 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
         )
     if _is_local_url(s.frontend_base_url):
         warnings.append(f"FRONTEND_BASE_URL is {s.frontend_base_url} — browser redirects will point at localhost")
+    if not s.public_api_base_url.strip():
+        warnings.append("PUBLIC_API_BASE_URL is empty — associate ID cards cannot be generated "
+                        "(their QR code links to this API's public verification endpoint)")
+    from app.associates import texts
+    if texts.consent_is_placeholder():
+        warnings.append("config/associate_documents.yaml: the current KYC consent notice is a [PLACEHOLDER] "
+                        "— associate registrations are refused until Grid Nova's text is added")
+    if texts.welcome_letter_is_placeholder():
+        warnings.append("config/associate_documents.yaml: welcome_letter_body is a [PLACEHOLDER] "
+                        "— welcome letters are issued with placeholder text")
     return errors, warnings
 
 

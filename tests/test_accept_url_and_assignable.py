@@ -10,7 +10,7 @@ from app.config import settings
 from app.memory.models import EmployeeRole, PipelineStage
 from tests.conftest import admin_headers, engineer_headers, management_headers, sales_headers
 
-SUB = {"X-Employee-Id": "emp-sub-1", "X-Employee-Role": "subcontractor"}
+SUB = {"X-Employee-Id": "emp-sub-1", "X-Employee-Role": "operations"}
 
 
 def _sent_proposal(client, memory, db_session, email="accept-url@example.com"):
@@ -150,7 +150,7 @@ class TestAssignableEmployees:
         r = client.get(self.ASSIGNABLE, headers=engineer_headers())
         assert r.status_code == 403
 
-    def test_subcontractor_forbidden(self, client, memory, db_session):
+    def test_operations_forbidden(self, client, memory, db_session):
         self._seed(memory, db_session)
         r = client.get(self.ASSIGNABLE, headers=SUB)
         assert r.status_code == 403

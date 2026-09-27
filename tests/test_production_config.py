@@ -20,7 +20,17 @@ GOOD = dict(
     google_oauth_client_id="id", google_oauth_client_secret="secret",
     google_oauth_redirect_uri="https://api.gridnova.in/api/v1/dashboard/employees/me/calendar/callback",
     frontend_base_url="https://www.gridnova.in",
+    public_api_base_url="https://api.gridnova.in",
 )
+
+
+@pytest.fixture
+def real_associate_texts(monkeypatch):
+    """config/associate_documents.yaml still holds placeholders (correctly warned
+    about); tests of an otherwise complete config stand in real texts."""
+    from app.associates import texts
+    monkeypatch.setattr(texts, "consent_is_placeholder", lambda: False)
+    monkeypatch.setattr(texts, "welcome_letter_is_placeholder", lambda: False)
 
 
 def _settings(**overrides) -> Settings:
@@ -28,7 +38,7 @@ def _settings(**overrides) -> Settings:
 
 
 class TestErrors:
-    def test_complete_production_config_passes(self):
+    def test_complete_production_config_passes(self, real_associate_texts):
         assert production_config_problems(_settings()) == ([], [])
         check_production_config(_settings())
 
@@ -56,11 +66,19 @@ class TestWarnings:
         ({"llm_api_key": ""}, "LLM_API_KEY"),
         ({"google_oauth_client_id": ""}, "GOOGLE_OAUTH_CLIENT_ID"),
         ({"frontend_base_url": "http://localhost:3000"}, "FRONTEND_BASE_URL"),
+        ({"public_api_base_url": ""}, "PUBLIC_API_BASE_URL"),
     ])
     def test_degraded_features_warn_but_do_not_fail(self, overrides, variable, caplog):
         with caplog.at_level(logging.WARNING, logger="app.config"):
             check_production_config(_settings(**overrides))
         assert any(variable in r.getMessage() for r in caplog.records)
+
+
+    def test_placeholder_associate_texts_warn(self):
+        """The shipped config/associate_documents.yaml really is still placeholder copy."""
+        _, warnings = production_config_problems(_settings())
+        assert any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
+        assert any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
 
 
 class TestNonProduction:
