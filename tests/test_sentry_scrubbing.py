@@ -146,6 +146,21 @@ class TestScrubber:
         assert "vars" not in frames[0] and "vars" not in frames[1]
         assert frames[2]["vars"] == {"lead_id": "7"}
 
+    def test_onboarding_frames_lose_their_local_variables(self):
+        """app.onboarding and its staff/associate route modules also handle customer
+        phone, address, consumer number and GPS — same treatment as registration."""
+        from app.security.sentry_scrub import scrub_event
+
+        event = {"exception": {"values": [{"stacktrace": {"frames": [
+            {"module": "app.onboarding.service", "vars": {"onboarding": "CustomerOnboarding(...)"}},
+            {"module": "app.api.routes.associate_onboarding", "vars": {"body": "..."}},
+            {"module": "app.api.routes.onboarding_admin", "vars": {"body": "..."}},
+            {"module": "app.api.routes.dashboard", "vars": {"lead_id": "7"}},
+        ]}}]}}
+        frames = scrub_event(event, {})["exception"]["values"][0]["stacktrace"]["frames"]
+        assert "vars" not in frames[0] and "vars" not in frames[1] and "vars" not in frames[2]
+        assert frames[3]["vars"] == {"lead_id": "7"}
+
     def test_init_options(self):
         options = sentry_init_options(dsn="https://x@o0.ingest.sentry.io/0", environment="production")
         assert options["max_request_body_size"] == "never"

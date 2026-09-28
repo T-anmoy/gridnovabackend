@@ -262,6 +262,8 @@ class TestSubmitAndChecklist:
         oid = _create(client, gna)["onboarding_id"]
         r = client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         assert r.status_code == 422 and r.json()["detail"]["code"] == "incomplete"
+        assert r.json()["detail"]["missing_documents"] == ["electricity_bill", "id_proof", "ownership_proof",
+                                                            "photo"]
         detail = client.get(f"{BASE}/{oid}", headers=headers(gna)).json()
         assert detail["checklist"]["required"] == ["electricity_bill", "id_proof", "ownership_proof", "photo"]
 

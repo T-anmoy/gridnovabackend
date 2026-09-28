@@ -151,7 +151,8 @@ def _name(payload: dict) -> str:
 def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tuple[str, list[str], str, str]]:
     """(subject, lines, link_label, link_url) for a staff email, or None. Lines are
     plain text; the caller escapes them for HTML."""
-    lead_url = f"{base_url}/dashboard/leads/{payload.get('lead_id')}"
+    lead_url = (f"{base_url}/dashboard/onboardings/{payload['onboarding_id']}" if payload.get("onboarding_id")
+                else f"{base_url}/dashboard/leads/{payload.get('lead_id')}")
     source = _SOURCE_LABELS.get(str(payload.get("source")), str(payload.get("source")))
     if event_type == "new_lead":
         return (f"New lead ({source}): {_name(payload)}",

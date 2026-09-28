@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 import app.notifications.notifier as notifier_module
-from app.memory.models import AuditLog, Customer, CustomerOnboarding, Proposal
+from app.memory.models import AuditLog, Customer, CustomerOnboarding, Lead, Proposal
 from app.notifications.notifier import LogNotifier
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
@@ -46,6 +46,38 @@ def _blocked(client, db_session, n=1):
     r = client.post(f"{BASE}/{oid}/request-formal-proposal", headers=headers(gna))
     assert r.json()["request"]["missing_fields"] == ["email"]
     return gna, oid
+
+
+class TestStaffFormalProposalGet:
+    def test_matches_the_associate_view(self, client, db_session, onboarding_ready):
+        gna, oid = _blocked(client, db_session)
+        associate_view = client.get(f"{BASE}/{oid}/formal-proposal", headers=headers(gna)).json()
+        r = client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=ADMIN)
+        assert r.status_code == 200 and r.json() == associate_view
+        assert associate_view == {"prepared": False, "missing_fields": ["email"]}
+
+    def test_reflects_a_prepared_proposal(self, client, db_session, onboarding_ready):
+        gna, oid = _blocked(client, db_session)
+        client.post(f"{DASH}/onboardings/{oid}/formal-proposal", json={"customer_email": "asha@example.test"},
+                    headers=SALES)
+        r = client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=ADMIN)
+        assert r.status_code == 200
+        assert r.json()["prepared"] is True and r.json()["proposal_id"]
+
+    def test_sales_keeps_its_own_plus_unassigned_rule(self, client, db_session, onboarding_ready):
+        gna, oid = _blocked(client, db_session)
+        assert client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=SALES).status_code == 200
+        onboarding = db_session.get(CustomerOnboarding, oid)
+        lead = db_session.get(Lead, onboarding.lead_id)
+        lead.assigned_employee_id = "emp-sales-1"
+        db_session.commit()
+        other_sales = {"X-Employee-Id": "emp-sales-2", "X-Employee-Role": "sales"}
+        assert client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=other_sales).status_code == 403
+        assert client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=SALES).status_code == 200
+
+    def test_role_without_view_access_is_refused(self, client, db_session, onboarding_ready):
+        gna, oid = _blocked(client, db_session)
+        assert client.get(f"{DASH}/onboardings/{oid}/formal-proposal", headers=ENG).status_code == 403
 
 
 class TestMarker:
@@ -119,7 +151,7 @@ class TestStaffEmail:
         assert [m["to"] for m in sent] == [["staff@x.test"], ["staff@x.test"]]
         assert sent[0]["subject"] == "Formal proposal blocked: Asha Roy — no email on file"
         assert "It cannot be drafted yet: no email on file." in sent[0]["text"]
-        assert "https://app.test/dashboard/leads/9" in sent[0]["text"]
+        assert "https://app.test/dashboard/onboardings/4" in sent[0]["text"]
         assert sent[1]["subject"] == "Formal proposal requested: Asha Roy"
 
 

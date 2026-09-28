@@ -272,6 +272,19 @@ def list_estimates(onboarding_id: int, db: Session = Depends(get_db),
     return {"items": [estimate.serialize(e) for e in estimate.list_for(db, onboarding)]}
 
 
+@router.get("/onboardings/{onboarding_id}/formal-proposal")
+def get_formal_proposal(onboarding_id: int, db: Session = Depends(get_db),
+                        employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """The latest formal proposal for this customer, if Grid Nova has prepared one —
+    same shape as the associate-facing endpoint."""
+    from app.onboarding import formal
+
+    if not employee.can_view_onboardings():
+        raise HTTPException(status_code=403, detail="Your role cannot view associate-sourced customers.")
+    onboarding = _load(db, employee, onboarding_id)
+    return formal.serialize_latest(db, onboarding)
+
+
 class FormalProposalRequest(BaseModel):
     customer_email: Optional[str] = None
 

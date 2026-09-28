@@ -53,7 +53,7 @@ class AssociateError(Exception):
     code = "conflict"
 
     def __init__(self, message: str, *, code: Optional[str] = None, status_code: Optional[int] = None,
-                 field: Optional[str] = None):
+                 field: Optional[str] = None, extra: Optional[dict] = None):
         super().__init__(message)
         self.message = message
         if code:
@@ -61,11 +61,14 @@ class AssociateError(Exception):
         if status_code:
             self.status_code = status_code
         self.field = field
+        self.extra = extra
 
     def body(self) -> dict:
         body = {"code": self.code, "message": self.message}
         if self.field:
             body["field"] = self.field
+        if self.extra:
+            body.update(self.extra)
         return body
 
 

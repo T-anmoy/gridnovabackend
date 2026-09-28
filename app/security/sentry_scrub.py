@@ -8,7 +8,10 @@ requests sends the parsed form in `request.data` — the full Aadhaar number inc
 1. max_request_body_size="never": no request body is attached to any event, on any
    endpoint.
 2. Frames from the registration code (app.api.routes.public_associates and
-   app.associates.*) lose their local variables — the raw form lives there.
+   app.associates.*) and the onboarding code (app.onboarding.*,
+   app.api.routes.associate_onboarding, app.api.routes.onboarding_admin — which
+   handle customer phone, address, consumer number and GPS) lose their local
+   variables — the raw form/record lives there.
 3. before_send scrubs whatever still reaches an event: the sensitive keys wherever
    they appear, and any Aadhaar-shaped (12 digits passing the Verhoeff check) or
    PAN-shaped value inside any string.
@@ -29,7 +32,8 @@ SENSITIVE_KEYS = frozenset({
     "aadhaar_number", "aadhaar", "pan", "bank_account_number", "bank_account", "bank_ifsc", "ifsc",
     "bank_account_encrypted",
 })
-_NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates")
+_NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app.onboarding",
+                      "app.api.routes.associate_onboarding", "app.api.routes.onboarding_admin")
 
 # 12 digits, optionally grouped 4-4-4 by spaces or hyphens as printed on the card.
 _AADHAAR_RE = re.compile(r"(?<!\d)(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")

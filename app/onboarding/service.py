@@ -383,7 +383,7 @@ def submit(db: Session, onboarding: CustomerOnboarding, associate: Associate) ->
     missing = checklist(db, onboarding)["missing"]
     if missing:
         raise AssociateError("Upload every required document before submitting: " + ", ".join(missing) + ".",
-                             code="incomplete", status_code=422)
+                             code="incomplete", status_code=422, extra={"missing_documents": missing})
     who = actor(associate)
     onboarding.status = OnboardingStatus.submitted
     onboarding.submitted_at = _now()
