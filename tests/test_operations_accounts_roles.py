@@ -1,12 +1,12 @@
-"""Operations and Accounts roles — recognised, deliberately maximally restricted.
+"""Operations and Accounts roles — each granted exactly what Phase 4A gives it, and
+nothing inherited from a neighbouring role.
 
 `operations` is the renamed `subcontractor` role (0026_operations_accounts_roles);
-`accounts` is new. Neither has business logic yet, so the correct default is
-deny-everything, not "inherits whatever the closest existing role happens to
-allow." Two kinds of proof here, run for BOTH roles: a reflection-based sweep of
-every can_*() gate on AuthenticatedEmployee (so a future gate added without
-updating its allow-list is caught automatically), and live requests against
-representative real endpoints in each named area — leads, proposals,
+`accounts` is new. Operations runs project execution; Accounts runs payments. Two
+kinds of proof, run for BOTH roles: a reflection-based sweep of every can_*() gate
+on AuthenticatedEmployee against an explicit allow-list (so a future gate that
+forgets to exclude these roles is caught automatically), and live requests against
+representative real endpoints in each area they must NOT reach — leads, proposals,
 employees, governance, proposal-inputs.
 """
 import inspect
@@ -33,20 +33,26 @@ def restricted_headers(role: str, employee_id: str = "emp-restricted-1") -> dict
     return {"X-Employee-Id": f"{employee_id}-{role}", "X-Employee-Role": role}
 
 
-class TestEveryPermissionGateDeniesByDefault:
-    def test_every_can_method_returns_false(self, role):
-        """Enumerates every can_*() method on AuthenticatedEmployee via
-        reflection — not a hand-picked subset — and asserts each one denies a
-        restricted role. A future gate that forgets to exclude this role fails
-        this test immediately, without needing its own dedicated test."""
+# Every can_*() gate each role is granted. Anything else must deny.
+GRANTED = {
+    "operations": {"can_view_execution", "can_verify_execution", "can_record_execution"},
+    "accounts": {"can_view_payments", "can_record_payment", "can_process_payments"},
+}
+
+
+class TestEveryPermissionGateIsExplicit:
+    def test_only_the_listed_gates_are_granted(self, role):
+        """Enumerates every can_*() method on AuthenticatedEmployee via reflection —
+        not a hand-picked subset — and asserts the role is granted exactly its
+        allow-list. A future gate that forgets to exclude this role fails here."""
         employee = _restricted(role)
         gates = [
             name for name, _ in inspect.getmembers(AuthenticatedEmployee, predicate=inspect.isfunction)
             if name.startswith("can_")
         ]
         assert len(gates) >= 12, "expected the full set of existing permission gates"
-        failures = [name for name in gates if getattr(employee, name)()]
-        assert not failures, f"{role} was granted: {failures}"
+        granted = {name for name in gates if getattr(employee, name)()}
+        assert granted == GRANTED[role], f"{role} was granted: {sorted(granted)}"
 
     def test_every_is_role_property_is_false_except_none(self, role):
         employee = _restricted(role)
@@ -54,12 +60,6 @@ class TestEveryPermissionGateDeniesByDefault:
         assert not employee.is_sales
         assert not employee.is_management
         assert not employee.is_engineer
-
-    def test_can_view_assigned_work_is_false_for_every_role(self):
-        """Not a broken check — there is genuinely nothing to view yet."""
-        for role in EmployeeRole:
-            employee = AuthenticatedEmployee(employee_id="x", role=role)
-            assert employee.can_view_assigned_work() is False
 
 
 class TestRestrictedRolesDeniedOnRealEndpoints:

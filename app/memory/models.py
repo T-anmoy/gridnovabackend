@@ -1,11 +1,12 @@
 import enum
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 from datetime import date
 from sqlalchemy import (
     String, Float, Boolean, Text, JSON, ForeignKey,
     Enum as SAEnum, DateTime, Date, Integer, UniqueConstraint, CheckConstraint,
-    Index, text, DDL, event,
+    Index, text, DDL, event, Numeric,
 )
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship, validates
 from sqlalchemy.types import TypeDecorator
@@ -46,10 +47,10 @@ class EmployeeRole(str, enum.Enum):
     management = "management"
     engineer = "engineer"
     # operations (formerly `subcontractor`, renamed in 0026_operations_accounts_roles)
-    # and accounts are deliberately maximally restricted for now — every can_*()
-    # gate in app/auth/dependencies.py denies them. They authenticate and are
-    # recognised; their business permissions arrive with the phases that give them
-    # something real to do, rather than starting broad and being tightened later.
+    # and accounts: no access to leads, proposals or pricing. Operations runs project
+    # execution (Phase 4A: can_view/verify/record_execution); Accounts runs payments.
+    # Each grant is explicit in app/auth/dependencies.py and pinned by
+    # tests/test_operations_accounts_roles.py.
     operations = "operations"
     accounts = "accounts"
 
@@ -108,6 +109,8 @@ class TimelineEventType(str, enum.Enum):
     attribution_flagged = "attribution_flagged"
     project_stage_recorded = "project_stage_recorded"
     indicative_estimate_created = "indicative_estimate_created"
+    execution_stage_submitted = "execution_stage_submitted"
+    execution_stage_rejected = "execution_stage_rejected"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -367,6 +370,9 @@ class Equipment(Base):
     # Cost to Grid Nova — TBD from Raju Paul, hence nullable.
     procurement_price_inr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Development-only dummy rows (scripts/seed_dummy_data.py): shown as such in the
+    # dashboard, and never named by Nova or put in front of a customer.
+    is_placeholder: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
 
@@ -1263,6 +1269,16 @@ class ProjectStage(str, enum.Enum):
     accepted = "accepted"
     agreement_signed = "agreement_signed"
     portal_agreement_approved = "portal_agreement_approved"   # PM Surya Ghar-linked projects only
+    # Execution (app/execution/) — which apply to a project comes from
+    # config/execution_payments.yaml execution.stages.applicability.
+    feasibility_submitted = "feasibility_submitted"   # DISCOM feasibility/application submitted
+    material_dispatched = "material_dispatched"
+    installed = "installed"
+    inspection_net_meter = "inspection_net_meter"
+    commissioned = "commissioned"
+    subsidy_claimed = "subsidy_claimed"
+    subsidy_received = "subsidy_received"
+    handover_complete = "handover_complete"
 
 
 class ProjectStageEvent(Base):
@@ -1321,4 +1337,333 @@ class IndicativeEstimate(Base):
     inputs: Mapped[dict] = mapped_column(JSON, nullable=False)
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class PlaceholderResolution(Base):
+    """An admin marking a `manual` placeholder-registry entry (config/placeholder_registry.yaml)
+    as resolved, with a note. Append-only: one row per entry, never edited or deleted.
+    Probed entries are never recorded here — their value itself says whether they are
+    resolved."""
+    __tablename__ = "placeholder_resolutions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entry_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    resolved_by: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# ── Execution (Phase 4A) ─────────────────────────────────────────────────────────
+
+class ExecutionMode(str, enum.Enum):
+    associate = "associate"    # the owning associate submits stages; Operations verifies
+    grid_nova = "grid_nova"    # Grid Nova's own team records stages directly
+
+
+class ProjectExecution(Base):
+    """One per associate-sourced project, created when `agreement_signed` is recorded
+    (app/execution/service.py). Execution files uploaded so far (the latest per photo
+    slot / document type) are kept here; a stage submission snapshots the ones it
+    relies on into its own evidence."""
+    __tablename__ = "project_executions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), unique=True, nullable=False)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    execution_mode: Mapped[ExecutionMode] = mapped_column(SAEnum(ExecutionMode), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    # {"photos": {slot: file}, "documents": {document_type: file}}
+    files: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # The installed-equipment serial register, once Operations has verified it.
+    register_verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    register_verified_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # The stage a "stuck" alert was last emailed for — so each stall is emailed once.
+    stuck_alerted_stage: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # PM Surya Ghar projects with a non-DCR module: emailed once (dcr_alerted_at), and
+    # subsidy_claimed is refused until an Admin records why it may proceed.
+    dcr_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    dcr_override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dcr_override_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    dcr_override_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+
+
+class StageSubmissionStatus(str, enum.Enum):
+    pending = "pending"
+    verified = "verified"
+    rejected = "rejected"
+
+
+class StageSubmission(Base):
+    """An associate's claim that an execution stage is done, with its evidence.
+    Operations (or Admin) verifies it — which records the ProjectStageEvent — or
+    rejects it with a note; a rejected stage is resubmitted as a new row. At most one
+    pending submission per project and stage. Never deleted."""
+    __tablename__ = "stage_submissions"
+    __table_args__ = (
+        Index("uq_stage_submissions_one_pending", "project_id", "stage", unique=True,
+              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    stage: Mapped[ProjectStage] = mapped_column(SAEnum(ProjectStage), nullable=False)
+    submitted_by: Mapped[str] = mapped_column(String, nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[StageSubmissionStatus] = mapped_column(
+        SAEnum(StageSubmissionStatus), nullable=False, default=StageSubmissionStatus.pending)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PhotoFingerprint(Base):
+    """The SHA-256 of every onboarding and execution photo, so the same image used
+    again on another project is flagged (duplicate_photo). Append-only."""
+    __tablename__ = "photo_fingerprints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)   # onboarding_photo | execution_photo
+    slot: Mapped[str] = mapped_column(String, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class InstalledUnitCategory(str, enum.Enum):
+    module = "module"
+    inverter = "inverter"
+    other = "other"
+
+
+class InstalledUnitStatus(str, enum.Enum):
+    entered = "entered"
+    verified = "verified"   # Operations verified the project's register
+    voided = "voided"       # entered by mistake; kept, never deleted
+
+
+class InstalledUnit(Base):
+    """One installed module/inverter/other unit, recorded by serial number
+    (app/execution/register.py). serial_normalized is unique across the whole system
+    — the database refuses a serial already installed anywhere. A voided unit keeps
+    what was entered in serial_number but gives up its serial_normalized (NULL), so a
+    typo cannot block the real serial elsewhere."""
+    __tablename__ = "installed_units"
+    __table_args__ = (
+        CheckConstraint("category = 'other' OR equipment_id IS NOT NULL",
+                        name="ck_installed_units_equipment_required"),
+        CheckConstraint("status = 'voided' OR serial_normalized IS NOT NULL",
+                        name="ck_installed_units_serial_held"),
+        CheckConstraint("warranty_start IS NULL OR warranty_end IS NULL OR warranty_end > warranty_start",
+                        name="ck_installed_units_warranty_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    category: Mapped[InstalledUnitCategory] = mapped_column(SAEnum(InstalledUnitCategory), nullable=False)
+    equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id"), nullable=True)
+    serial_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    serial_normalized: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True)
+    rating_wp: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    rating_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 3), nullable=True)
+    is_dcr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    warranty_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[InstalledUnitStatus] = mapped_column(SAEnum(InstalledUnitStatus), nullable=False,
+                                                        default=InstalledUnitStatus.entered)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    verified_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    void_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# ── Payments (Phase 4A) — app/payments/ ─────────────────────────────────────────
+# Exact decimals only (Numeric(12, 2)); amounts leave the API as decimal strings.
+
+class PaymentMode(str, enum.Enum):
+    """No cash mode, by design."""
+    cheque = "cheque"
+    demand_draft = "demand_draft"
+    neft = "neft"
+    rtgs = "rtgs"
+    imps = "imps"
+    upi = "upi"
+
+
+INSTRUMENT_MODES = (PaymentMode.cheque, PaymentMode.demand_draft)
+
+
+class PaymentStatus(str, enum.Enum):
+    recorded = "recorded"         # entered; not yet confirmed
+    deposited = "deposited"       # cheque/DD handed to the bank (optional step)
+    verified = "verified"         # funds confirmed in Grid Nova's bank — there is no separate "cleared"
+    dishonoured = "dishonoured"   # bounced/returned (before or after verification)
+    cancelled = "cancelled"       # entered by mistake
+
+
+class LedgerEntryKind(str, enum.Enum):
+    credit = "credit"       # a payment verified
+    reversal = "reversal"   # a verified payment dishonoured
+
+
+class PaymentMilestone(Base):
+    """One instalment of a project's payment schedule, made from the payments
+    schedule template (config/execution_payments.yaml) against the ACCEPTED
+    proposal's total. The last milestone carries any rounding remainder, so the
+    schedule always sums to the total exactly."""
+    __tablename__ = "payment_milestones"
+    __table_args__ = (UniqueConstraint("project_id", "number", name="uq_payment_milestones_number"),
+                      CheckConstraint("amount_due >= 0", name="ck_payment_milestones_amount"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    amount_due: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    trigger: Mapped[str] = mapped_column(String, nullable=False)   # a ProjectStage value
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # Overdue alert already emailed (once per milestone).
+    overdue_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class Payment(Base):
+    """A customer payment toward a project. Never deleted: a mistake is cancelled, a
+    bounce is dishonoured. The same instrument cannot be recorded twice
+    (mode + normalised reference + normalised bank), cancelled entries excepted."""
+    __tablename__ = "payments"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
+        Index("uq_payments_instrument", "mode", "reference_normalized", "bank_name_normalized", unique=True,
+              sqlite_where=text("status != 'cancelled'"), postgresql_where=text("status != 'cancelled'")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    milestone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payment_milestones.id"), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    mode: Mapped[PaymentMode] = mapped_column(SAEnum(PaymentMode), nullable=False)
+    reference: Mapped[str] = mapped_column(String(100), nullable=False)
+    reference_normalized: Mapped[str] = mapped_column(String(100), nullable=False)
+    bank_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    bank_name_normalized: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    instrument_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    payer_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    proof_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    proof_filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    proof_content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[PaymentStatus] = mapped_column(SAEnum(PaymentStatus), nullable=False,
+                                                  default=PaymentStatus.recorded)
+    recorded_by: Mapped[str] = mapped_column(String, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    deposited_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    deposited_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    verified_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    dishonoured_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    dishonoured_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    dishonour_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # "Awaiting verification" alert already emailed (once per payment).
+    alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class PaymentLedgerEntry(Base):
+    """Append-only (a database trigger refuses UPDATE and DELETE). A credit when a
+    payment is verified; a reversal — referencing that credit — when a verified
+    payment is dishonoured. Project balances are computed from here, and this is
+    the table commissions (Phase 5) trace back to. At most one credit and one
+    reversal per payment, enforced by the database."""
+    __tablename__ = "payment_ledger_entries"
+    __table_args__ = (
+        UniqueConstraint("payment_id", "kind", name="uq_payment_ledger_one_per_kind"),
+        CheckConstraint("(kind = 'credit' AND amount > 0 AND reverses_entry_id IS NULL) OR "
+                        "(kind = 'reversal' AND amount < 0 AND reverses_entry_id IS NOT NULL)",
+                        name="ck_payment_ledger_shape"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    kind: Mapped[LedgerEntryKind] = mapped_column(SAEnum(LedgerEntryKind), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    reverses_entry_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payment_ledger_entries.id"), unique=True,
+                                                             nullable=True)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+LEDGER_APPEND_ONLY_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION payment_ledger_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'payment_ledger_entries is append-only';
+END;
+$$ LANGUAGE plpgsql
+"""
+LEDGER_APPEND_ONLY_PG_TRIGGER = (
+    "CREATE TRIGGER payment_ledger_append_only BEFORE UPDATE OR DELETE ON payment_ledger_entries "
+    "FOR EACH ROW EXECUTE FUNCTION payment_ledger_append_only()"
+)
+LEDGER_APPEND_ONLY_SQLITE_TRIGGERS = (
+    "CREATE TRIGGER payment_ledger_no_update BEFORE UPDATE ON payment_ledger_entries "
+    "BEGIN SELECT RAISE(ABORT, 'payment_ledger_entries is append-only'); END",
+    "CREATE TRIGGER payment_ledger_no_delete BEFORE DELETE ON payment_ledger_entries "
+    "BEGIN SELECT RAISE(ABORT, 'payment_ledger_entries is append-only'); END",
+)
+event.listen(PaymentLedgerEntry.__table__, "after_create",
+             DDL(LEDGER_APPEND_ONLY_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(PaymentLedgerEntry.__table__, "after_create",
+             DDL(LEDGER_APPEND_ONLY_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in LEDGER_APPEND_ONLY_SQLITE_TRIGGERS:
+    event.listen(PaymentLedgerEntry.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+
+
+class ReceiptSequence(Base):
+    """Per-year receipt counter, advanced atomically (INSERT … ON CONFLICT … RETURNING)."""
+    __tablename__ = "receipt_sequences"
+
+    year: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ReceiptEmailStatus(str, enum.Enum):
+    pending = "pending"     # generated or being generated; not emailed yet
+    sent = "sent"
+    skipped = "skipped"     # nobody to send to (email_skipped_reason)
+    held = "held"           # would contain placeholder content (held_reason)
+    failed = "failed"       # render or delivery failed — retry with resend
+
+
+class PaymentReceipt(Base):
+    """The receipt for one verified payment — numbered when the payment is verified,
+    rendered and emailed after that commit (app/payments/receipts.py). Never before
+    verification; never deleted."""
+    __tablename__ = "payment_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), unique=True, nullable=False)
+    receipt_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    public_token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    pdf_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    render_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    email_status: Mapped[ReceiptEmailStatus] = mapped_column(SAEnum(ReceiptEmailStatus), nullable=False,
+                                                             default=ReceiptEmailStatus.pending)
+    email_skipped_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    held_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    emailed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)

@@ -49,7 +49,10 @@ class TestAutomaticStages:
     def test_portal_stage_only_for_pm_surya_ghar(self, client, db_session, onboarding_ready):
         gna, o = _new(client, db_session, scheme_linked=True, scheme_name="pm_surya_ghar")
         t = client.get(f"{BASE}/{o['onboarding_id']}/progress", headers=headers(gna)).json()
-        assert list(_stages(t))[-1] == "portal_agreement_approved"
+        stages = list(_stages(t))
+        # Straight after the agreement, before execution begins.
+        assert stages[stages.index("agreement_signed") + 1] == "portal_agreement_approved"
+        assert stages[stages.index("portal_agreement_approved") + 1] == "feasibility_submitted"
 
     def test_verified_and_site_assessed(self, client, db_session, onboarding_ready):
         gna, o = _new(client, db_session)

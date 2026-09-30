@@ -50,6 +50,8 @@ def db_at_0025(tmp_path):
         CREATE TABLE leads (id INTEGER PRIMARY KEY);
         CREATE TABLE proposal_inputs (id INTEGER PRIMARY KEY);
         CREATE TABLE proposals (id INTEGER PRIMARY KEY);
+        CREATE TABLE equipment (id INTEGER PRIMARY KEY, brand VARCHAR);
+        INSERT INTO equipment (id, brand) VALUES (1, 'Existing');
         CREATE TABLE audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type VARCHAR NOT NULL, entity_id VARCHAR NOT NULL,
             action VARCHAR NOT NULL, performed_by VARCHAR NOT NULL, before_value JSON, after_value JSON,
@@ -302,3 +304,113 @@ class TestDraftFailureColumns:
             conn.close()
         result = _run_alembic("downgrade", "0034_estimates_and_prepared", db_path=db_at_0025)
         assert result.returncode == 0, result.stderr
+
+
+class TestPlaceholderRegistry:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0036_placeholder_registry", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "placeholder_resolutions" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+            # Existing catalogue rows are real, not dummies.
+            assert conn.execute("SELECT is_placeholder FROM equipment WHERE id = 1").fetchone() == (0,)
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0035_formal_draft_failure", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+
+
+class TestExecutionStages:
+    def test_upgrade_backfills_projects_past_the_agreement_and_downgrades(self, db_at_0025):
+        assert _run_alembic("upgrade", "0036_placeholder_registry", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            conn.executescript(
+                """
+                INSERT INTO territory_states (id, lgd_code, name, iso_code, is_active, created_at)
+                    VALUES (1, 19, 'WEST BENGAL', 'WB', 1, '2026-09-01');
+                INSERT INTO territory_districts (id, state_id, lgd_code, name, is_active, created_at)
+                    VALUES (1, 1, 664, 'Alipurduar', 1, '2026-09-01');
+                INSERT INTO projects (id) VALUES (1), (2), (3);
+                """)
+            conn.execute("PRAGMA foreign_keys = OFF")
+            for pk, kind, capability, level in ((1, "associate", "execution", None), (2, "associate", "sales", None),
+                                                (3, "preferred_associate", None, "district_head")):
+                _insert(conn, "associates", id=pk, associate_id=f"GNA-WB-26-{pk:05d}", associate_type=kind,
+                        status="active", capability=capability, level=level, state_id=1,
+                        **({"associate_application_id": pk} if kind == "associate" else {"preferred_application_id": pk}))
+                _insert(conn, "customer_onboardings", id=pk, customer_id=pk, lead_id=pk, project_id=pk,
+                        proposal_inputs_id=pk, owner_associate_id=pk, status="submitted", state_id=1, district_id=1)
+            # Projects 1 and 3 are past the agreement; project 2 is not.
+            for project, stage in ((1, "agreement_signed"), (2, "accepted"), (3, "agreement_signed")):
+                conn.execute("INSERT INTO project_stage_events (project_id, stage, recorded_by, recorded_at, "
+                             "evidence) VALUES (?, ?, 'x', '2026-09-10 10:00:00', '{}')", (project, stage))
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("upgrade", "0037_execution_stages", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            rows = conn.execute("SELECT project_id, onboarding_id, execution_mode, started_at, files "
+                                "FROM project_executions ORDER BY project_id").fetchall()
+            assert rows == [(1, 1, "associate", "2026-09-10 10:00:00", "{}"),
+                            (3, 3, "associate", "2026-09-10 10:00:00", "{}")]
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+            assert {"stage_submissions", "photo_fingerprints", "uq_stage_submissions_one_pending"} <= tables
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0036_placeholder_registry", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+
+
+def _insert(conn, table: str, **values) -> None:
+    """Insert a row, filling every other NOT NULL column that has no default with a
+    plain value of its type — these tests only care about the columns they name."""
+    for _, name, ctype, notnull, default, pk in conn.execute(f"PRAGMA table_info({table})").fetchall():
+        if name in values or not notnull or default is not None or pk:
+            continue
+        ctype = (ctype or "").upper()
+        values[name] = 0 if ("INT" in ctype or "BOOL" in ctype) else (
+            "2026-09-01 00:00:00" if ("DATE" in ctype or "TIME" in ctype) else f"x-{name}-{values.get('id', 0)}")
+    keys = list(values)
+    conn.execute(f"INSERT INTO {table} ({', '.join(keys)}) VALUES ({', '.join('?' * len(keys))})",
+                 [values[k] for k in keys])
+
+
+class TestInstalledUnits:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0038_installed_units", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            indexes = {r[1]: r[2] for r in conn.execute("PRAGMA index_list(installed_units)")}
+            # The system-wide uniqueness on the normalised serial is in the database itself.
+            unique = [name for name, is_unique in indexes.items() if is_unique]
+            cols = [conn.execute(f"PRAGMA index_info({name})").fetchall()[0][2] for name in unique]
+            assert "serial_normalized" in cols
+            exec_cols = {r[1] for r in conn.execute("PRAGMA table_info(project_executions)")}
+            assert {"dcr_alerted_at", "dcr_override_reason", "dcr_override_by", "dcr_override_at"} <= exec_cols
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0037_execution_stages", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+
+
+class TestPaymentsAndReceipts:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0040_receipts", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+            assert {"payment_milestones", "payments", "payment_ledger_entries", "receipt_sequences",
+                    "payment_receipts", "uq_payments_instrument", "payment_ledger_no_update",
+                    "payment_ledger_no_delete"} <= names
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0038_installed_units", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "payments" not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()

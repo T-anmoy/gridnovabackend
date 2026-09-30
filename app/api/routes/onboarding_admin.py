@@ -65,11 +65,11 @@ def list_onboardings(status: Optional[OnboardingStatus] = None, flagged: Optiona
         from app.onboarding import formal
         rows = [o for o in db.execute(ordered).scalars() if bool(formal.blocked(db, o)) == needs_attention]
         start = (page - 1) * page_size
-        return {"items": [serialize.onboarding(db, o, staff=True) for o in rows[start:start + page_size]],
+        return {"items": serialize.list_items(db, rows[start:start + page_size], lambda o: {"staff": True}),
                 "page": page, "page_size": page_size, "total": len(rows)}
     total = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
-    rows = db.execute(ordered.offset((page - 1) * page_size).limit(page_size)).scalars()
-    return {"items": [serialize.onboarding(db, o, staff=True) for o in rows],
+    rows = list(db.execute(ordered.offset((page - 1) * page_size).limit(page_size)).scalars())
+    return {"items": serialize.list_items(db, rows, lambda o: {"staff": True}),
             "page": page, "page_size": page_size, "total": total}
 
 

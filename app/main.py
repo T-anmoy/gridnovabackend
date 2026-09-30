@@ -7,19 +7,26 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes.agent_governance import router as agent_governance_router
 from app.api.routes.associate_onboarding import router as associate_onboarding_router
+from app.api.routes.associate_execution import router as associate_execution_router
+from app.api.routes.associate_payments import router as associate_payments_router
 from app.api.routes.associate_portal import router as associate_portal_router
 from app.api.routes.associates_admin import router as associates_admin_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.equipment import router as equipment_router
+from app.api.routes.execution_admin import router as execution_admin_router
+from app.api.routes.execution_register_admin import router as execution_register_admin_router
 from app.api.routes.health import router as health_router
 from app.api.routes.onboarding_admin import router as onboarding_admin_router
+from app.api.routes.payments_admin import router as payments_admin_router
+from app.api.routes.placeholders_admin import router as placeholders_admin_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
 from app.api.routes.public_associates import router as public_associates_router
 from app.api.routes.public_booking import router as public_booking_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
+from app.api.routes.public_receipts import router as public_receipts_router
 from app.config import check_production_config, settings
 from app.memory.db import Base, engine
 from app.security.upload_limit import UploadSizeLimitMiddleware
@@ -45,6 +52,12 @@ async def lifespan(app: FastAPI):
     # Same for the associate onboarding config (checklist, thresholds, notice text).
     from app.onboarding.config import load as load_onboarding_config
     load_onboarding_config()
+    # And execution/payments (config/execution_payments.yaml).
+    from app.execution.config import load as load_execution_config
+    load_execution_config()
+    # And the placeholder registry (config/placeholder_registry.yaml).
+    from app.placeholders.registry import load as load_placeholder_registry
+    load_placeholder_registry()
     yield
 
 
@@ -90,6 +103,15 @@ app.include_router(associates_admin_router)
 app.include_router(associate_portal_router)
 app.include_router(associate_onboarding_router)
 app.include_router(onboarding_admin_router)
+app.include_router(placeholders_admin_router)
+app.include_router(associate_execution_router)
+# Before execution_admin: its POST .../execution/{stage} would otherwise swallow
+# .../execution/units and .../execution/dcr-override.
+app.include_router(execution_register_admin_router)
+app.include_router(execution_admin_router)
+app.include_router(associate_payments_router)
+app.include_router(payments_admin_router)
+app.include_router(public_receipts_router)
 
 
 @app.exception_handler(Exception)

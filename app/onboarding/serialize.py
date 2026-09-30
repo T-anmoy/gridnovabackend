@@ -47,7 +47,8 @@ def _files(inputs: ProposalInputs) -> tuple[list, list]:
         if f["target"] == "document":
             documents.append({"document_type": f.get("document_type"), **item})
         elif f["target"] == "installation_photo":
-            photos.append({"photo_slot": f.get("photo_slot"), **item})
+            from app.execution.photos import public_fields
+            photos.append({"photo_slot": f.get("photo_slot"), **item, **public_fields(ref)})
     return documents, photos
 
 
@@ -105,3 +106,14 @@ def flag(f) -> dict:
             "resolution": _val(f.resolution), "resolution_note": f.resolution_note,
             "resolved_by_employee_id": f.resolved_by_employee_id, "resolved_at": _iso(f.resolved_at),
             "created_at": _iso(f.created_at)}
+
+
+def list_items(db: Session, rows: list[CustomerOnboarding], options) -> list[dict]:
+    """A page of customers for a list: each serialized as usual plus its
+    `progress_summary`, with every related row bulk-loaded first (app/onboarding/
+    preload.py) so the page costs a fixed number of queries, not a few per card."""
+    from app.onboarding import todo
+    from app.onboarding.preload import preloaded
+
+    with preloaded(db, rows):
+        return [{**onboarding(db, o, **options(o)), "progress_summary": todo.progress_summary(db, o)} for o in rows]

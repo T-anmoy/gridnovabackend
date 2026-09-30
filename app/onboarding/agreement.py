@@ -40,6 +40,10 @@ def source_proposal(db: Session, onboarding: CustomerOnboarding) -> Optional[Pro
 
 
 def get(db: Session, onboarding: CustomerOnboarding) -> Optional[CustomerAgreement]:
+    from app.onboarding.preload import current
+    pre = current(db)
+    if pre is not None and onboarding.id in pre.agreements:
+        return pre.agreements[onboarding.id]
     return db.execute(select(CustomerAgreement).where(CustomerAgreement.onboarding_id == onboarding.id)).scalar_one_or_none()
 
 

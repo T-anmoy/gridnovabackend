@@ -1,0 +1,549 @@
+# Grid Nova Energy — placeholder registry
+#
+# Every value in this codebase that Grid Nova has not supplied or confirmed yet, in one
+# list. Read by app/placeholders/registry.py; served at GET /api/v1/dashboard/placeholders
+# and printed by scripts/list_placeholders.py. This list is the client data request.
+#
+# Each entry:
+#   id, area, location, description, dummy_value, needed_from_grid_nova, blocking, probe
+#   area      proposals | pricing | onboarding | associates | execution | payments | company | policies
+#   blocking  blocks_launch (customer-facing or legally required) | blocks_feature | tunable
+#   probe     how the app tells whether the dummy is still in place:
+#     yaml_contains_marker  the key's lines (its value, its comments) still carry a marker
+#     yaml_equals           the key's value still equals dummy_value
+#     constant_equals       a Python constant still equals its dummy_value
+#     setting_equals        an environment setting still equals dummy_value
+#     count_query           a named database check still finds dummy rows
+#     manual                open until an admin marks it resolved (with a note)
+#   location  YAML: {file, key} — `{other.key}` in a key is read from the same file.
+#             Python: {file, symbols}. Settings: {env}.
+#
+# tests/test_placeholder_registry.py fails the build if any marker in app/, config/ or
+# scripts/ — or any module-level PLACEHOLDER_* constant — is not claimed by an entry or
+# listed under `exemptions` (with a reason). Resolving a dummy is an edit to the value
+# where it lives, never to this file (except to record a new dummy).
+
+entries:
+
+  # ── Company ────────────────────────────────────────────────────────────────────
+  - id: CMP-1
+    area: company
+    location: {file: config/proposal_content.yaml, key: company.gstin}
+    description: GSTIN printed on every proposal PDF.
+    dummy_value: "[PLACEHOLDER]"
+    needed_from_grid_nova: What is Grid Nova's GSTIN?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+
+  # ── Proposals ──────────────────────────────────────────────────────────────────
+  - id: PRO-1
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: base_sections.cover_letter_intro}
+    description: Cover letter introduction at the start of every proposal.
+    dummy_value: "[PLACEHOLDER: Cover letter introduction …]"
+    needed_from_grid_nova: Please supply the cover letter introduction for proposals.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-2
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: base_sections.standard_terms}
+    description: Standard commercial terms and conditions in every proposal.
+    dummy_value: "[PLACEHOLDER: Standard commercial terms and conditions …]"
+    needed_from_grid_nova: Please supply the standard terms and conditions (reviewed by counsel) for proposals.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-3
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: base_sections.closing}
+    description: Closing paragraph (validity, next steps, contact) of every proposal.
+    dummy_value: "[PLACEHOLDER: Closing paragraph …]"
+    needed_from_grid_nova: Please supply the closing paragraph for proposals, including how long a proposal stays valid.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-4
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.residential_rooftop_scope}
+    description: Scope of work for residential rooftop proposals.
+    dummy_value: "[PLACEHOLDER: Scope of work for a residential rooftop installation …]"
+    needed_from_grid_nova: Please supply the scope-of-work text for residential rooftop projects.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-5
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.commercial_rooftop_scope}
+    description: Scope of work for commercial rooftop proposals.
+    dummy_value: "[PLACEHOLDER: Scope of work for a commercial rooftop installation …]"
+    needed_from_grid_nova: Please supply the scope-of-work text for commercial rooftop projects.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-6
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.industrial_rooftop_scope}
+    description: Scope of work for industrial rooftop proposals.
+    dummy_value: "[PLACEHOLDER: Scope of work for an industrial rooftop installation …]"
+    needed_from_grid_nova: Please supply the scope-of-work text for industrial rooftop projects.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-7
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.utility_scale_scope}
+    description: Scope of work for utility-scale ground-mounted proposals.
+    dummy_value: "[PLACEHOLDER: Scope of work for a utility-scale ground-mounted plant …]"
+    needed_from_grid_nova: Please supply the scope-of-work text for utility-scale ground-mounted plants.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-8
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.government_scope}
+    description: Scope of work for government / institutional proposals.
+    dummy_value: "[PLACEHOLDER: Scope of work for a government / institutional project …]"
+    needed_from_grid_nova: Please supply the scope-of-work text for government and institutional projects.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-9
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.pm_surya_ghar_subsidy_note}
+    description: PM Surya Ghar subsidy note in scheme-linked proposals.
+    dummy_value: "[PLACEHOLDER: PM Surya Ghar subsidy note …]"
+    needed_from_grid_nova: Please supply the PM Surya Ghar subsidy note (eligibility and how the subsidy reduces the price).
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-10
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.pm_kusum_note}
+    description: PM-KUSUM note in agricultural proposals.
+    dummy_value: "[PLACEHOLDER: PM-KUSUM note …]"
+    needed_from_grid_nova: Please supply the PM-KUSUM note (subsidy and eligibility) for agricultural projects.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-11
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.government_compliance_note}
+    description: Compliance note in government proposals.
+    dummy_value: "[PLACEHOLDER: Government compliance note …]"
+    needed_from_grid_nova: Please supply the compliance note for government projects (tender terms, statutory approvals).
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-12
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: sections_library.fallback_generic_scope}
+    description: Generic scope of work, used only when no rule matches a project.
+    dummy_value: "[PLACEHOLDER: Generic scope of work …]"
+    needed_from_grid_nova: Please supply a generic scope-of-work paragraph for projects that fit no other category.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-13
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: pricing.tiers}
+    description: Formal-proposal price per kW for each capacity tier (all three are 0).
+    dummy_value: {rooftop_0_10kw: 0, rooftop_10_100kw: 0, ground_mounted: 0}
+    needed_from_grid_nova: What is the price per kW (INR) for rooftop 0–10 kW, rooftop 10–100 kW, and ground-mounted projects?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: PRO-14
+    area: proposals
+    location: {file: config/proposal_content.yaml, key: pricing.segment_modifiers}
+    description: Price modifier for government customers in formal proposals.
+    dummy_value: {government: 1.0}
+    needed_from_grid_nova: Do government customers get a different price per kW, and if so by what percentage?
+    blocking: tunable
+    probe: yaml_contains_marker
+
+  # ── Pricing engine (instant estimate / Solar Calculator) ───────────────────────
+  # These live in Python, not config: resolving one is a code edit until they move
+  # to config (a follow-up recorded in the Phase 4A report).
+  - id: PRC-1
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_BASE_RATE_PER_KW, PLACEHOLDER_SIZE_BAND_MODIFIER]}
+    description: Base price per kW by customer segment and size band, and the size-band discount.
+    dummy_value:
+      PLACEHOLDER_BASE_RATE_PER_KW: {residential: {small: 55000.0, medium: 50000.0, large: 46000.0}, commercial: {small: 50000.0, medium: 46000.0, large: 42000.0}, industrial: {small: 48000.0, medium: 44000.0, large: 40000.0}, government: {small: 47000.0, medium: 43000.0, large: 39000.0}}
+      PLACEHOLDER_SIZE_BAND_MODIFIER: {small: 1.0, medium: 0.97, large: 0.94}
+    needed_from_grid_nova: What is the base price per kW for residential, commercial, industrial and government customers, by system size?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-2
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_EQUIPMENT_MARKUP_PERCENT, PLACEHOLDER_TIER_MULTIPLIER]}
+    description: Markup on equipment cost, and the price multiplier for each equipment tier.
+    dummy_value:
+      PLACEHOLDER_EQUIPMENT_MARKUP_PERCENT: 20.0
+      PLACEHOLDER_TIER_MULTIPLIER: {good: 1.0, better: 1.1, best: 1.25}
+    needed_from_grid_nova: What markup does Grid Nova apply to equipment, and how much more do the premium equipment tiers cost?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-3
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_ROOF_TYPE_MODIFIER, PLACEHOLDER_DEFAULT_ROOF_TYPE_MODIFIER, PLACEHOLDER_PER_EXTRA_FLOOR_MODIFIER, PLACEHOLDER_MAX_EXTRA_FLOORS_COUNTED, PLACEHOLDER_SHADING_MODIFIER, PLACEHOLDER_DEFAULT_SHADING_MODIFIER, PLACEHOLDER_ACCESS_DIFFICULTY_MODIFIER, PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER]}
+    description: Site-difficulty price multipliers (roof type, extra floors, shading, access).
+    dummy_value:
+      PLACEHOLDER_ROOF_TYPE_MODIFIER: {rcc: 1.0, tin: 1.05, metal: 1.05, asbestos: 1.08}
+      PLACEHOLDER_DEFAULT_ROOF_TYPE_MODIFIER: 1.03
+      PLACEHOLDER_PER_EXTRA_FLOOR_MODIFIER: 0.02
+      PLACEHOLDER_MAX_EXTRA_FLOORS_COUNTED: 5
+      PLACEHOLDER_SHADING_MODIFIER: {none: 1.0, partial_morning: 1.03, partial_evening: 1.03, heavy: 1.07}
+      PLACEHOLDER_DEFAULT_SHADING_MODIFIER: 1.0
+      PLACEHOLDER_ACCESS_DIFFICULTY_MODIFIER: {easy: 1.0, moderate: 1.05, difficult: 1.12}
+      PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER: 1.0
+    needed_from_grid_nova: How much does the price change for tin/metal/asbestos roofs, each extra floor, shading, and difficult site access?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-4
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_STATE_MODIFIER, PLACEHOLDER_DEFAULT_STATE_MODIFIER, PLACEHOLDER_REMOTE_SITE_MODIFIER]}
+    description: Logistics multipliers by state and for remote sites.
+    dummy_value:
+      PLACEHOLDER_STATE_MODIFIER: {west bengal: 1.0, bihar: 1.0}
+      PLACEHOLDER_DEFAULT_STATE_MODIFIER: 1.05
+      PLACEHOLDER_REMOTE_SITE_MODIFIER: 1.03
+    needed_from_grid_nova: Does the price differ by state or for remote sites, and by how much?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-5
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_BOS_RATE_PER_KW, PLACEHOLDER_CIVIL_ADDITION_BY_SITE_TYPE, PLACEHOLDER_DEFAULT_CIVIL_ADDITION]}
+    description: Balance-of-system rate per kW, and the civil-work addition by site type.
+    dummy_value:
+      PLACEHOLDER_BOS_RATE_PER_KW: 3000.0
+      PLACEHOLDER_CIVIL_ADDITION_BY_SITE_TYPE: {rooftop_residential: 8000.0, rooftop_commercial: 15000.0, rooftop_institutional: 20000.0, ground_mounted: 60000.0, carport: 35000.0}
+      PLACEHOLDER_DEFAULT_CIVIL_ADDITION: 10000.0
+    needed_from_grid_nova: What are the balance-of-system cost per kW and the civil-work cost for each type of site?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-6
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_REGULATORY_BASE_BY_STATE, PLACEHOLDER_DEFAULT_REGULATORY_BASE, PLACEHOLDER_NET_METERING_ADDITION]}
+    description: Regulatory/DISCOM filing charges by state, and the net-metering addition.
+    dummy_value:
+      PLACEHOLDER_REGULATORY_BASE_BY_STATE: {west bengal: 5000.0, bihar: 6000.0}
+      PLACEHOLDER_DEFAULT_REGULATORY_BASE: 8000.0
+      PLACEHOLDER_NET_METERING_ADDITION: 4000.0
+    needed_from_grid_nova: What do the DISCOM/regulatory filings and the net-metering application cost in each state?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-7
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_OPTIONAL_SERVICE_PRICES]}
+    description: Prices of the optional services (extended warranty, AMC, premium monitoring).
+    dummy_value:
+      PLACEHOLDER_OPTIONAL_SERVICE_PRICES: {extended_warranty: 15000.0, annual_maintenance_contract: 8000.0, monitoring_app_premium: 5000.0}
+    needed_from_grid_nova: Which optional services does Grid Nova sell, and at what price?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-8
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_GST_RATE_PERCENT]}
+    description: GST rate applied to estimates.
+    dummy_value:
+      PLACEHOLDER_GST_RATE_PERCENT: 13.8
+    needed_from_grid_nova: What GST treatment applies to Grid Nova's solar systems (rate, and any split between goods and services)?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-9
+    area: pricing
+    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT, PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW]}
+    description: Electricity tariff and annual yield per kW used for the savings shown to customers.
+    dummy_value:
+      PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT: 8.0
+      PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW: 1400.0
+    needed_from_grid_nova: What tariff (INR per unit) and annual generation per kW should savings estimates assume?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-10
+    area: pricing
+    location: {file: app/pricing/sizing.py, symbols: [PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY, PLACEHOLDER_DEFAULT_GENERATION_FACTOR]}
+    description: Daily generation per kW by state, used to size the recommended system.
+    dummy_value:
+      PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: {west bengal: 4.0, bihar: 4.2}
+      PLACEHOLDER_DEFAULT_GENERATION_FACTOR: 4.0
+    needed_from_grid_nova: How many units per kW per day does a system generate in West Bengal, Bihar, and elsewhere?
+    blocking: blocks_launch
+    probe: constant_equals
+  - id: PRC-11
+    area: pricing
+    location: {file: app/pricing/sizing.py, symbols: [DEFAULT_TARGET_OFFSET_PERCENT]}
+    description: Share of monthly consumption the recommended system aims to cover.
+    dummy_value:
+      DEFAULT_TARGET_OFFSET_PERCENT: 90.0
+    needed_from_grid_nova: What share of a customer's consumption should a recommended system cover (e.g. 90%)?
+    blocking: tunable
+    probe: constant_equals
+  - id: PRC-12
+    area: pricing
+    location: {file: app/pricing/sizing.py, symbols: [PLACEHOLDER_PHASE_CAP_KW]}
+    description: Maximum system size by connection phase.
+    dummy_value:
+      PLACEHOLDER_PHASE_CAP_KW: {single_phase: 5.0, three_phase: 10.0}
+    needed_from_grid_nova: What is the largest system allowed on a single-phase and on a three-phase connection (per DISCOM if they differ)?
+    blocking: tunable
+    probe: constant_equals
+  - id: PRC-13
+    area: pricing
+    location: {file: app/pricing/instant_estimate.py, symbols: [SIGNIFICANT_SHADING_RANGE_PERCENT]}
+    description: How wide the price range is when a site reports significant shading.
+    dummy_value:
+      SIGNIFICANT_SHADING_RANGE_PERCENT: 15.0
+    needed_from_grid_nova: When a site has significant shading, how wide should the indicative price range be (plus/minus %)?
+    blocking: tunable
+    probe: constant_equals
+  - id: PRC-14
+    area: pricing
+    location: {file: app/pricing/margin.py, symbols: [MARGIN_WARNING_PERCENT, MARGIN_FLOOR_PERCENT]}
+    description: Margin below which a proposal is flagged, and the hard floor that needs sign-off.
+    dummy_value:
+      MARGIN_WARNING_PERCENT: 20.0
+      MARGIN_FLOOR_PERCENT: 10.0
+    needed_from_grid_nova: Below what margin should a proposal be flagged, and below what margin does it need senior sign-off?
+    blocking: blocks_feature
+    probe: constant_equals
+  - id: PRC-15
+    area: pricing
+    location: {file: app/rules/approval_engine.py, symbols: [PLACEHOLDER_PARTNER_SIGNOFF_VALUE_THRESHOLD_INR, PLACEHOLDER_HIGH_DISCOUNT_PERCENT_THRESHOLD, PLACEHOLDER_VERY_HIGH_DISCOUNT_PERCENT_THRESHOLD]}
+    description: Proposal value and discount levels that require manager or partner sign-off.
+    dummy_value:
+      PLACEHOLDER_PARTNER_SIGNOFF_VALUE_THRESHOLD_INR: 2000000.0
+      PLACEHOLDER_HIGH_DISCOUNT_PERCENT_THRESHOLD: 15.0
+      PLACEHOLDER_VERY_HIGH_DISCOUNT_PERCENT_THRESHOLD: 25.0
+    needed_from_grid_nova: Above what proposal value, and above what discount percentages, is manager or partner sign-off required?
+    blocking: blocks_feature
+    probe: constant_equals
+
+  # ── Associates ─────────────────────────────────────────────────────────────────
+  - id: ASC-1
+    area: associates
+    location: {file: config/associate_documents.yaml, key: "kyc_consent_versions.{current_kyc_consent_version}.text"}
+    description: KYC consent notice applicants accept when registering (registrations are refused in production while it is a placeholder).
+    dummy_value: "[PLACEHOLDER — the KYC consent notice text is to be supplied by Grid Nova …]"
+    needed_from_grid_nova: Please supply the KYC consent notice associates must accept (reviewed for data-protection compliance).
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: ASC-2
+    area: associates
+    location: {file: config/associate_documents.yaml, key: welcome_letter_body}
+    description: Body of the welcome letter issued to every approved associate.
+    dummy_value: "[PLACEHOLDER — the welcome letter text is to be supplied by Grid Nova.]"
+    needed_from_grid_nova: Please supply the welcome letter text for new associates.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+
+  # ── Onboarding ─────────────────────────────────────────────────────────────────
+  - id: ONB-1
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: "notice_versions.{current_notice_version}.text"}
+    description: Customer Information Notice an associate shows the customer and records as acknowledged.
+    dummy_value: "[PLACEHOLDER — the Customer Information Notice text is to be supplied by Grid Nova.]"
+    needed_from_grid_nova: Please supply the Customer Information Notice (what data is collected and why) for associates to show customers.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: ONB-2
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: sanity}
+    description: Warning thresholds on what an associate enters (capacity vs sanctioned load, generation vs consumption, tariff).
+    dummy_value: {max_kw_to_sanctioned_load_ratio: 1.0, kwh_per_kw_per_month: 120, max_generation_to_consumption_ratio: 1.5, inr_per_kwh_for_bill_check: null}
+    needed_from_grid_nova: When should the onboarding form warn about capacity vs sanctioned load, generation vs consumption, and which tariff should convert a bill into units?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: ONB-3
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: equipment_packages}
+    description: '"Nova Assured" = standard and "Nova Signature" = premium equipment tier — an assumption.'
+    dummy_value: {nova_assured: standard, nova_signature: premium}
+    needed_from_grid_nova: Are "Nova Assured" and "Nova Signature" Grid Nova's package names, and which equipment tier does each mean?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: ONB-4
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: scoring}
+    description: Lead-scoring weights, bands and verification-call response hours for associate-sourced customers.
+    dummy_value: {bands: {hot_min: 70, warm_min: 40}, response_hours: {hot: 4, warm: 24, cold: 72}}
+    needed_from_grid_nova: How quickly must staff call a hot, warm and cold customer, and which factors matter most when ranking customers?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: ONB-5
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: agreement.body}
+    description: Wording of the customer agreement printed on stamp paper.
+    dummy_value: "[PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]"
+    needed_from_grid_nova: Please supply the customer agreement text (reviewed by counsel).
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: ONB-6
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: agreement.stamp_paper_top_margin_mm}
+    description: Blank space at the top of page 1 for the stamp paper's printed header.
+    dummy_value: 100
+    needed_from_grid_nova: How much blank space (in mm) does the top of the stamp paper Grid Nova uses need?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+
+  # ── Execution (Phase 4A) ───────────────────────────────────────────────────────
+  - id: E1
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.stages.applicability}
+    description: Which execution stages apply to which projects.
+    dummy_value: {grid_connected_only: [feasibility_submitted, inspection_net_meter], grid_connected_types: [on_grid, hybrid], pm_surya_ghar_only: [subsidy_claimed, subsidy_received]}
+    needed_from_grid_nova: For each type of project (on-grid, off-grid, hybrid, PM Surya Ghar or not), which execution steps does Grid Nova actually go through?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: E2
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.stuck_threshold_days}
+    description: Days a project may wait for each execution stage before it is flagged as stuck.
+    dummy_value: {feasibility_submitted: 15, material_dispatched: 14, installed: 10, inspection_net_meter: 21, commissioned: 7, subsidy_claimed: 30, subsidy_received: 60, handover_complete: 7}
+    needed_from_grid_nova: How many days should each execution step normally take before someone should chase it?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: E3
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.evidence}
+    description: Evidence required to record each execution stage.
+    dummy_value: see config/execution_payments.yaml execution.evidence
+    needed_from_grid_nova: For each execution step, what proof (photos, documents, reference numbers) must be collected?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: E4
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.photo_slots}
+    description: Post-installation photo checklist.
+    dummy_value: [array_installed, inverter_installed, earthing, meter_and_net_meter, completion_overview]
+    needed_from_grid_nova: Which photos must be taken after installation?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: E5
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.document_types}
+    description: Execution documents that can be uploaded.
+    dummy_value: [dispatch_challan, feasibility_acknowledgement, inspection_report, net_meter_report, commissioning_report, oem_dcr_declaration, handover_checklist]
+    needed_from_grid_nova: Which documents are produced during execution (dispatch, inspection, commissioning, handover)?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: E6
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.gates.material_dispatched}
+    description: Whether material may be dispatched before the pre-dispatch payment is verified (gate built, switched off).
+    dummy_value: {enabled: false, through_milestone: 2}
+    needed_from_grid_nova: Must the customer's pre-dispatch payment be confirmed in the bank before material is dispatched, or is it only a due date?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: E7
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.register.sanity}
+    description: Sanity ranges for the installed-equipment serial register.
+    dummy_value: {module_wp_min: 300, module_wp_max: 800, inverter_kw_min: 0.5, inverter_kw_max: 200, warranty_max_years: 40, capacity_tolerance_percent: 10, serial_min_length: 4, serial_max_length: 40, bulk_max_rows: 200}
+    needed_from_grid_nova: What module wattages, inverter sizes and warranty periods are normal, and how far may installed capacity differ from the proposal?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: E9
+    area: execution
+    location: {file: config/execution_payments.yaml, key: execution.photo_policy}
+    description: Whether photos chosen from the phone gallery count as fully as photos taken in the app.
+    dummy_value: {allow_gallery: true, gallery_counts_fully: true, exif_max_age_days: 30}
+    needed_from_grid_nova: Are photos uploaded from a phone's gallery (not taken in the app) acceptable evidence, and how old may they be?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: D1
+    area: execution
+    location: {file: scripts/seed_dummy_data.py, symbols: [__doc__, DUMMY_EQUIPMENT, seed, main]}
+    description: Development-only equipment catalogue (brands prefixed DUMMY), and the absence of a real one.
+    dummy_value: 5 DUMMY catalogue rows (2 DCR modules, 1 non-DCR module, 2 inverters)
+    needed_from_grid_nova: Which module and inverter brands and models does Grid Nova install (wattage, DCR status, warranty)?
+    blocking: blocks_feature
+    probe: count_query
+    query: equipment_catalogue_not_real
+
+  # ── Payments (Phase 4A) ────────────────────────────────────────────────────────
+  - id: P1
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.schedule_template}
+    description: Payment terms 20/60/20 (provided 28 Sep 2026) — the pre-dispatch milestone's due trigger is unconfirmed.
+    dummy_value: "milestone 2 falls due when agreement_signed is recorded"
+    needed_from_grid_nova: Please confirm the 20/60/20 terms in writing, and exactly when each part falls due (in particular the 60% before dispatch).
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: P2
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.enabled_modes}
+    description: Accepted payment modes (demand draft and UPI unconfirmed; never cash).
+    dummy_value: [cheque, demand_draft, neft, rtgs, imps, upi]
+    needed_from_grid_nova: Which payment methods does Grid Nova accept from customers (cheque, demand draft, NEFT, RTGS, IMPS, UPI)?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: P3
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.thresholds}
+    description: Accounts timings — verification alert, cheque hold, overpayment tolerance, overdue milestone alert.
+    dummy_value: {awaiting_verification_hours: 24, cheque_hold_days: 7, overpayment_tolerance_inr: "0.00", milestone_overdue_days: 7}
+    needed_from_grid_nova: How quickly should Accounts confirm a payment, how long do cheques take to clear, and when is a due payment overdue?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: P4
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.receipt.numbering}
+    description: Receipt number format.
+    dummy_value: "GNR-{YYYY}-{SEQ:06}"
+    needed_from_grid_nova: How should payment receipts be numbered?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: P5
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.receipt.company}
+    description: Company block on receipts and the "pay only here" bank details shown to associates.
+    dummy_value: {legal_name: "Grid Nova Energy (legal form pending)", gstin: DUMMY, bank_name: DUMMY, account_number: DUMMY, ifsc: DUMMY}
+    needed_from_grid_nova: What is Grid Nova's exact legal entity name, GSTIN, and the bank account (bank, account number, IFSC) customers must pay into?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: P6
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.receipt.wording}
+    description: Receipt heading and footer.
+    dummy_value: DUMMY heading and footer
+    needed_from_grid_nova: Please supply the wording for payment receipts, and say whether customers also need GST tax invoices.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: P7
+    area: payments
+    location: {env: [ACCOUNTS_NOTIFY_EMAILS, OPERATIONS_NOTIFY_EMAILS]}
+    description: Who receives Accounts and Operations alerts (blank = everyone on STAFF_NOTIFY_EMAILS).
+    dummy_value: {ACCOUNTS_NOTIFY_EMAILS: "", OPERATIONS_NOTIFY_EMAILS: ""}
+    needed_from_grid_nova: Which email addresses should receive payment alerts, and which should receive installation/execution alerts?
+    blocking: blocks_feature
+    probe: setting_equals
+  - id: P8
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.proof_required_for_associates}
+    description: An associate recording a payment must attach proof.
+    dummy_value: true
+    needed_from_grid_nova: Must associates attach proof (screenshot or scan) whenever they record a customer's payment?
+    blocking: tunable
+    probe: yaml_contains_marker
+
+  # ── Policies ───────────────────────────────────────────────────────────────────
+  - id: A1
+    area: policies
+    location: {env: [NOTIFY_ASSOCIATES]}
+    description: Associates are emailed at three events (proposal ready, stage rejected, payment verified).
+    dummy_value: {NOTIFY_ASSOCIATES: true}
+    needed_from_grid_nova: May Grid Nova email associates about their customers' progress, and from which sender name?
+    blocking: blocks_feature
+    probe: manual
+
+exemptions:
+  # Markers that are not dummy values — each still has to match a marker somewhere,
+  # so a stale exemption fails the build too.
+  - {file: app/associates/texts.py, anchor: PLACEHOLDER_MARKER, reason: detector constant — finds placeholder text}
+  - {file: app/onboarding/config.py, anchor: PLACEHOLDER_MARKER, reason: detector constant — finds placeholder text}
+  - {file: app/proposals/content_engine.py, anchor: PLACEHOLDER_MARKER, reason: detector constant used by the proposal send-guard}
+  - {file: app/proposals/content_engine.py, anchor: compose_content, reason: "fallback text when a config key or the customer is missing: deliberately trips the send-guard"}
+  - {file: app/proposals/content_engine.py, anchor: _format_pricing_body, reason: "fallback text when no price exists: deliberately trips the send-guard"}
+  - {file: app/pdf/generator.py, anchor: _render_body_sections, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
+  - {file: app/pdf/generator.py, anchor: _build_html, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
+  - {file: app/memory/memory_manager.py, anchor: PLACEHOLDER_EMAIL_DOMAIN, reason: internal domain for customers with no email yet — a mechanism, not a dummy value}
+  - {file: app/config.py, anchor: production_config_problems, reason: boot warnings that name the marker}
+  - {file: app/payments/receipts.py, anchor: __doc__, reason: explains the receipt placeholder hold}
+  - {file: app/payments/receipts.py, anchor: _content_has_dummy, reason: detector — holds a receipt that contains DUMMY text}
+  - {file: app/placeholders/registry.py, anchor: MARKERS, reason: the registry's own marker patterns}
+  - {file: app/placeholders/registry.py, anchor: DUMMY_TEXT_PREFIX, reason: the registry's own marker patterns}
+  - {file: config/proposal_content.yaml, anchor: company, reason: file header explaining the marker convention}
+  - {file: config/associate_documents.yaml, anchor: current_kyc_consent_version, reason: file header explaining the marker convention}
+  - {file: config/associate_onboarding.yaml, anchor: current_notice_version, reason: file header explaining the marker convention}
+  - {file: config/execution_payments.yaml, anchor: execution, reason: file header explaining the marker convention}

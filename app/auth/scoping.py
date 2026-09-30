@@ -6,8 +6,9 @@ endpoint:
                         already limits them to (unchanged here).
   * Sales             — leads assigned to them, or not assigned to anyone.
   * Operations,
-    Accounts          — none (both roles are deliberately maximally restricted; see
-                        AuthenticatedEmployee.can_view_assigned_work()).
+    Accounts          — no leads. Operations reaches projects only through execution
+                        (require_execution_access, below); Accounts only through
+                        payments.
 
 Single records go through require_lead_access(); list queries through LeadScope,
 which becomes a WHERE clause so filtering never happens after the fact.
@@ -211,3 +212,45 @@ def roster_scope(associate) -> RosterScope:
     if level is None or territory_id is None:
         raise HTTPException(status_code=403, detail=ROSTER_PREFERRED_ONLY)
     return RosterScope(level=level, territory_id=territory_id)
+
+
+# ── Staff visibility over execution (Phase 4A) ────────────────────────────────────
+#
+#   * Admin, Management, Engineer — every project in execution.
+#   * Sales      — its own or unassigned leads (the lead rule above).
+#   * Operations — every project at or after agreement_signed (it has an execution
+#                  row only from then), no per-person assignment yet. Never money.
+#   * Accounts   — none (Accounts reads the payments side instead).
+
+EXECUTION_NOT_VISIBLE = "Your role cannot view this project's execution."
+
+
+def can_access_execution(employee, lead, has_execution: bool) -> bool:
+    if not employee.can_view_execution():
+        return False
+    if employee.role == EmployeeRole.sales:
+        return can_access_lead(employee, lead)
+    if employee.role == EmployeeRole.operations:
+        return has_execution
+    return True
+
+
+def require_execution_access(employee, lead, has_execution: bool) -> None:
+    if not can_access_execution(employee, lead, has_execution):
+        raise HTTPException(status_code=403, detail=EXECUTION_NOT_VISIBLE)
+
+
+# ── Staff visibility over payments (Phase 4A) ─────────────────────────────────────
+#
+#   * Admin, Management, Accounts — every project's payments.
+#   * Sales                       — its own or unassigned leads.
+#   * Operations, Engineer        — none (no money in their views at all).
+
+PAYMENTS_NOT_VISIBLE = "Your role cannot view this customer's payments."
+
+
+def require_payment_access(employee, lead) -> None:
+    if not employee.can_view_payments():
+        raise HTTPException(status_code=403, detail=PAYMENTS_NOT_VISIBLE)
+    if employee.role == EmployeeRole.sales and not can_access_lead(employee, lead):
+        raise HTTPException(status_code=403, detail=PAYMENTS_NOT_VISIBLE)

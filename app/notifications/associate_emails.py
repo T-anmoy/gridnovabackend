@@ -1,0 +1,93 @@
+"""Emails to associates about their OWN customers (NOTIFY_ASSOCIATES, placeholder A1):
+
+  * the formal proposal is approved and ready to hand over;
+  * an execution stage was sent back, with the reviewer's note;
+  * a payment was verified, with the receipt link.
+
+Sent after the commit, never raising. Skipped cleanly when NOTIFY_ASSOCIATES is off or
+the associate has no email. Each email names only that customer. There is no deep link
+into the associate app (its routes belong to the frontend) — only the receipt's own
+public link, which is real.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.memory.models import Associate, Customer, CustomerOnboarding
+
+logger = logging.getLogger(__name__)
+
+
+def _target(db: Session, onboarding: CustomerOnboarding) -> Optional[tuple[str, str]]:
+    from app.config import settings
+    if not settings.notify_associates:
+        return None
+    associate = db.get(Associate, onboarding.owner_associate_id)
+    if associate is None or not (associate.email or "").strip():
+        return None
+    customer = db.get(Customer, onboarding.customer_id)
+    return associate.email.strip(), (customer.name if customer and customer.name else "your customer")
+
+
+def _queue(db: Session, event: str, to: str, subject: str, lines: list[str], link_label=None, link_url=None) -> None:
+    from app.memory.memory_manager import MemoryManager
+    from app.notifications import notifier as notifier_module
+
+    def send():
+        notifier_module.notifier.send_associate_email(to=to, subject=subject, lines=lines, link_label=link_label,
+                                                      link_url=link_url, event_type=event)
+    MemoryManager(db).notify_after_commit(send, event)
+
+
+def proposal_ready(db: Session, lead_id: int) -> None:
+    try:
+        onboarding = db.execute(select(CustomerOnboarding).where(
+            CustomerOnboarding.lead_id == lead_id)).scalar_one_or_none()
+        target = onboarding and _target(db, onboarding)
+        if not target:
+            return
+        to, name = target
+        _queue(db, "associate_proposal_ready", to, f"Proposal ready for {name}",
+               [f"Grid Nova has approved the formal proposal for {name}.",
+                "Open the Grid Nova app to hand it over to the customer."])
+    except Exception:
+        logger.exception("associate proposal-ready email not queued")
+
+
+def stage_rejected(db: Session, onboarding: CustomerOnboarding, submission) -> None:
+    from app.onboarding.progress import LABELS
+    try:
+        target = _target(db, onboarding)
+        if not target:
+            return
+        to, name = target
+        label = LABELS[submission.stage]
+        _queue(db, "associate_stage_rejected", to, f"Please resubmit: {label} for {name}",
+               [f"Grid Nova checked \"{label}\" for {name} and sent it back.",
+                f"Note from Grid Nova: {submission.review_note}",
+                "Open the Grid Nova app, fix what is noted and submit it again."])
+    except Exception:
+        logger.exception("associate stage-rejected email not queued")
+
+
+def payment_verified(db: Session, payment, receipt_url: Optional[str]) -> None:
+    """After the receipt is rendered. The link is included only when the receipt is
+    one the customer may see (not held for placeholder content)."""
+    from app.payments.service import s
+    try:
+        onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
+        target = _target(db, onboarding)
+        if not target:
+            return
+        to, name = target
+        lines = [f"Grid Nova has confirmed the payment of INR {s(payment.amount)} from {name}."]
+        if receipt_url:
+            lines.append("The customer's receipt is available at the link below.")
+        _queue(db, "associate_payment_verified", to, f"Payment confirmed for {name}", lines,
+               "Download the receipt" if receipt_url else None, receipt_url)
+    except Exception:
+        logger.exception("associate payment-verified email not queued")

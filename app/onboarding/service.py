@@ -167,6 +167,10 @@ def _flag_conflicts(db: Session, memory: MemoryManager, onboarding: CustomerOnbo
 
 
 def open_flags(db: Session, onboarding_id: int) -> list[OnboardingAttributionFlag]:
+    from app.onboarding.preload import current
+    pre = current(db)
+    if pre is not None and onboarding_id in pre.open_flags:
+        return list(pre.open_flags[onboarding_id])
     return list(db.execute(select(OnboardingAttributionFlag).where(
         OnboardingAttributionFlag.status == AttributionFlagStatus.open,
         or_(OnboardingAttributionFlag.onboarding_id == onboarding_id,

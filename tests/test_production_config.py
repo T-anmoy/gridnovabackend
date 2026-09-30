@@ -34,6 +34,8 @@ def real_associate_texts(monkeypatch):
     from app.onboarding import config as onboarding_config
     monkeypatch.setattr(onboarding_config, "notice_is_placeholder", lambda: False)
     monkeypatch.setattr(onboarding_config, "agreement_is_placeholder", lambda: False)
+    from app.placeholders import registry
+    monkeypatch.setattr(registry, "unresolved_launch_blockers", lambda db=None: 0)
 
 
 def _settings(**overrides) -> Settings:
@@ -84,6 +86,19 @@ class TestWarnings:
         assert any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
         assert any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
         assert any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
+
+    def test_unresolved_launch_blocking_placeholders_warn_once(self, caplog):
+        """One WARNING with the count — never a refusal to boot."""
+        from app.placeholders import registry
+        _, warnings = production_config_problems(_settings())
+        count = registry.unresolved_launch_blockers()
+        assert count > 0
+        assert [w for w in warnings if "placeholder(s) unresolved" in w] == [
+            f"{count} launch-blocking placeholder(s) unresolved — see GET /api/v1/dashboard/placeholders "
+            "or scripts/list_placeholders.py"]
+        with caplog.at_level(logging.WARNING, logger="app.config"):
+            check_production_config(_settings())
+        assert sum("placeholder(s) unresolved" in r.getMessage() for r in caplog.records) == 1
 
 
 class TestNonProduction:

@@ -48,7 +48,7 @@ class TestProcurementPriceVisibility:
         # Not just missing from this assertion — genuinely not a key at all.
         assert set(item.keys()) == {
             "id", "category", "brand", "model_name", "specification",
-            "is_dcr_compliant", "is_active", "created_at",
+            "is_dcr_compliant", "is_active", "is_placeholder", "created_at",
         }
 
     def test_omitted_when_no_price_is_set_too_not_just_when_one_exists(self, client):

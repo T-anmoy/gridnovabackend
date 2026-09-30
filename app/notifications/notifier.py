@@ -74,6 +74,17 @@ class Notifier(ABC):
         days_quiet, assigned_employee_id, threshold."""
         self.notify("stale_lead_digest", {"count": len(leads), "leads": leads})
 
+    def send_receipt_to_customer(self, customer_email: Optional[str], customer_name: Optional[str],
+                                 receipt_number: str, receipt_url: str) -> tuple[bool, Optional[str]]:
+        """Email the customer a link to their payment receipt. (sent, reason-if-not)."""
+        return False, "email_not_configured"
+
+    def send_associate_email(self, to: str, subject: str, lines: list[str], link_label: Optional[str] = None,
+                             link_url: Optional[str] = None, event_type: str = "associate_email") -> bool:
+        """One plain email to an associate (app/notifications/associate_emails.py)."""
+        self.notify(event_type, {"to": to, "subject": subject})
+        return False
+
     def send_proposal_to_customer(
         self,
         proposal_id: int,
@@ -124,7 +135,18 @@ RESEND_API_URL = "https://api.resend.com/emails"
 # backend mirror.)
 STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "manager_signoff_required", "customer_accepted", "stale_lead_digest",
-                      "formal_proposal_requested")
+                      "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
+                      "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention")
+# Events for one team rather than all staff: sent to that team's own recipients
+# (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
+EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
+                  "dcr_mismatch": ("operations", "staff"), "payment_recorded": ("accounts",),
+                  "payment_dishonoured": ("accounts", "staff"), "receipt_blocked": ("accounts",),
+                  "payments_attention": ("accounts",)}
+_RECEIPT_REASONS = {"held": "it would contain placeholder text (company or wording not yet supplied)",
+                    "no_customer_email": "the customer has no email address on file",
+                    "render_failed": "the receipt PDF could not be generated",
+                    "no_public_api_base_url": "PUBLIC_API_BASE_URL is not set"}
 _NO_STAFF_EMAIL_SOURCES = ("website_estimate_form", "website_contact")
 
 _SOURCE_LABELS = {
@@ -183,6 +205,39 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
         return (f"Formal proposal requested: {who}",
                 [intro, "The customer record has everything a formal proposal needs."],
                 "Open the lead", lead_url)
+    if event_type == "stage_submitted":
+        who = payload.get("customer_name") or "a customer"
+        return (f"Stage to check: {payload.get('stage_label')} — {who}",
+                [f"{payload.get('submitted_by')} submitted \"{payload.get('stage_label')}\" for {who} "
+                 f"(associate-sourced customer #{payload.get('onboarding_id')}).",
+                 "Check the evidence, then verify it or send it back with a note."],
+                "Open the customer", lead_url)
+    if event_type == "dcr_mismatch":
+        who = payload.get("customer_name") or "a customer"
+        return (f"DCR mismatch: {who} ({payload.get('project_reference_id')})",
+                [f"A non-DCR module was registered on {who}'s PM Surya Ghar project "
+                 f"(associate-sourced customer #{payload.get('onboarding_id')}).",
+                 "The subsidy cannot be claimed until the module is corrected or an Admin records why it may proceed."],
+                "Open the customer", lead_url)
+    if event_type in ("payment_recorded", "payment_dishonoured"):
+        who = payload.get("customer_name") or "a customer"
+        amount = f"INR {payload.get('amount')} by {str(payload.get('mode', '')).replace('_', ' ').upper()}"
+        if event_type == "payment_recorded":
+            return (f"Payment to verify: {who} — {amount}",
+                    [f"{payload.get('recorded_by')} recorded a payment of {amount} for {who} "
+                     f"(associate-sourced customer #{payload.get('onboarding_id')}).",
+                     "Confirm it has reached Grid Nova's bank, then verify it."],
+                    "Open the customer", lead_url)
+        return (f"Payment dishonoured: {who} — {amount}",
+                [f"A payment of {amount} for {who} (customer #{payload.get('onboarding_id')}) was dishonoured.",
+                 f"Reason: {payload.get('reason')}"],
+                "Open the customer", lead_url)
+    if event_type == "receipt_blocked":
+        reason = _RECEIPT_REASONS.get(str(payload.get("reason")), str(payload.get("reason")))
+        return (f"Receipt {payload.get('receipt_number')} not sent to the customer",
+                [f"Receipt {payload.get('receipt_number')} (customer #{payload.get('onboarding_id')}) was not "
+                 f"emailed because {reason}.", "The payment itself is verified."],
+                "Open the customer", lead_url)
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
     if event_type == "manager_signoff_required":
         value = payload.get("total_value")
@@ -222,6 +277,40 @@ def _render_stale_digest(leads: list[dict], base_url: str) -> tuple[str, str, st
     return subject, html_body, text_body
 
 
+def _render_execution_stuck(projects: list[dict], base_url: str) -> tuple[str, str, str]:
+    """(subject, html, text) for projects that have waited past their stage's threshold."""
+    subject = f"{len(projects)} project{'s' if len(projects) != 1 else ''} stuck in execution"
+    intro = "These projects have waited longer than expected for their next execution stage:"
+    rows_html, rows_text = [], []
+    for item in projects:
+        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        name = item.get("customer_name") or f"Customer #{item.get('onboarding_id')}"
+        detail = (f"waiting for {item.get('next_stage_label')} · {item.get('days_in_stage')} days "
+                  f"(expected within {item.get('stuck_threshold_days')})")
+        rows_html.append(f'<li><a href="{_esc(url)}">{_esc(name)}</a> — {_esc(detail)}</li>')
+        rows_text.append(f"- {name} — {detail}\n  {url}")
+    return subject, f"<div><p>{_esc(intro)}</p><ul>{''.join(rows_html)}</ul></div>", \
+        intro + "\n\n" + "\n".join(rows_text)
+
+
+def _render_payments_attention(payload: dict, base_url: str) -> tuple[str, str, str]:
+    overdue, waiting = payload.get("overdue_milestones") or [], payload.get("awaiting_verification") or []
+    subject = f"Payments needing attention: {len(overdue)} overdue, {len(waiting)} awaiting verification"
+    rows_html, rows_text = [], []
+    for item in overdue:
+        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        line = (f"{item.get('customer_name') or 'Customer'} — {item.get('label')} overdue, INR "
+                f"{item.get('outstanding')} outstanding")
+        rows_html.append(f'<li><a href="{_esc(url)}">{_esc(line)}</a></li>')
+        rows_text.append(f"- {line}\n  {url}")
+    for item in waiting:
+        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        line = f"Payment #{item.get('payment_id')} — INR {item.get('amount')} by {item.get('mode')}, not yet verified"
+        rows_html.append(f'<li><a href="{_esc(url)}">{_esc(line)}</a></li>')
+        rows_text.append(f"- {line}\n  {url}")
+    return subject, f"<div><ul>{''.join(rows_html)}</ul></div>", "\n".join(rows_text)
+
+
 def _render(lines: list[str], link_label: Optional[str] = None, link_url: Optional[str] = None) -> tuple[str, str]:
     """(html, text) bodies. Every interpolated value is escaped — customer names and
     anything else a visitor typed end up here."""
@@ -252,19 +341,33 @@ class EmailNotifier(Notifier):
     proposal email needs only the key and sender. Never raises into the caller."""
 
     def __init__(self, api_key: str, from_email: str, staff_emails: list[str],
-                 frontend_base_url: str, inner: Notifier) -> None:
+                 frontend_base_url: str, inner: Notifier, role_emails: Optional[dict] = None) -> None:
         self._api_key = api_key
         self._from = from_email
         self._staff = staff_emails
         self._base_url = frontend_base_url.rstrip("/")
         self._inner = inner
+        # {"accounts": [...], "operations": [...]} — a team with none falls back to staff.
+        self._roles = role_emails or {}
+
+    def _recipients(self, event_type: str) -> list[str]:
+        audience = EVENT_AUDIENCE.get(event_type)
+        if not audience:
+            return list(self._staff)
+        to: list[str] = []
+        for team in audience:
+            for email in self._roles.get(team) or self._staff:
+                if email not in to:
+                    to.append(email)
+        return to
 
     def notify(self, event_type: str, payload: dict) -> None:
         self._inner.notify(event_type, payload)
         if event_type == "onboarding_overdue":
             self._send_onboarding_overdue(payload)
             return
-        if not self._staff or event_type not in STAFF_EMAIL_EVENTS:
+        to = self._recipients(event_type)
+        if not to or event_type not in STAFF_EMAIL_EVENTS:
             return
         if payload.get("source") in _NO_STAFF_EMAIL_SOURCES:
             return
@@ -273,6 +376,12 @@ class EmailNotifier(Notifier):
                 if not payload.get("leads"):
                     return
                 subject, html_body, text_body = _render_stale_digest(payload["leads"], self._base_url)
+            elif event_type == "payments_attention":
+                subject, html_body, text_body = _render_payments_attention(payload, self._base_url)
+            elif event_type == "execution_stuck":
+                if not payload.get("projects"):
+                    return
+                subject, html_body, text_body = _render_execution_stuck(payload["projects"], self._base_url)
             else:
                 message = _staff_message(event_type, payload, self._base_url)
                 if message is None:
@@ -282,12 +391,13 @@ class EmailNotifier(Notifier):
         except Exception as exc:
             _report_failure(event_type, f"could not build the email: {exc}", exc)
             return
-        self._send(self._staff, subject, html_body, text_body, event_type)
+        self._send(to, subject, html_body, text_body, event_type)
 
     def _send_onboarding_overdue(self, payload: dict) -> None:
         """An associate-sourced customer's verification call is overdue: email the
         Preferred Associates the job escalated to, or staff at the Admin step."""
-        if payload.get("escalated_to") == "admin":
+        staff = payload.get("escalated_to") == "admin"
+        if staff:
             to = self._staff
         else:
             to = [r["email"] for r in payload.get("recipients", []) if r.get("email")]
@@ -299,12 +409,30 @@ class EmailNotifier(Notifier):
                      f"Score band: {payload.get('band')} (score {payload.get('score')}). "
                      f"It was due at {payload.get('response_due_at')}.",
                      "Please make sure Grid Nova staff contact the customer."]
-            html_body, text_body = _render(lines)
+            # Staff get the dashboard link; Preferred Associates cannot open the dashboard.
+            link = f"{self._base_url}/dashboard/onboardings/{payload.get('onboarding_id')}" if staff else None
+            html_body, text_body = _render(lines, "Open the customer" if link else None, link)
         except Exception as exc:
             _report_failure("onboarding_overdue", f"could not build the email: {exc}", exc)
             return
         self._send(to, f"Overdue: verification call for customer #{payload.get('onboarding_id')}",
                    html_body, text_body, "onboarding_overdue")
+
+    def send_associate_email(self, to, subject, lines, link_label=None, link_url=None,
+                             event_type="associate_email") -> bool:
+        self._inner.notify(event_type, {"to": to, "subject": subject})
+        html_body, text_body = _render(lines, link_label, link_url)
+        return self._send([to], subject, html_body, text_body, event_type)
+
+    def send_receipt_to_customer(self, customer_email, customer_name, receipt_number,
+                                 receipt_url) -> tuple[bool, Optional[str]]:
+        lines = [f"Dear {customer_name or 'Customer'},",
+                 f"Thank you for your payment to Grid Nova Energy. Your receipt {receipt_number} is ready.",
+                 "You can download it using the link below."]
+        html_body, text_body = _render(lines, "Download your receipt", receipt_url)
+        sent = self._send([customer_email], f"Payment receipt {receipt_number} — Grid Nova Energy",
+                          html_body, text_body, "receipt_customer_email")
+        return (True, None) if sent else (False, "send_failed")
 
     def send_proposal_to_customer(self, proposal_id, version, customer_email, customer_name,
                                   accept_url, pdf_url) -> tuple[bool, Optional[str]]:
@@ -347,6 +475,10 @@ class EmailNotifier(Notifier):
         return True
 
 
+def _own_list(raw: str) -> list[str]:
+    return [e.strip() for e in (raw or "").split(",") if e.strip()]
+
+
 def get_notifier() -> Notifier:
     """Select the active notifier based on configuration. Email wraps whichever of
     Slack/log would otherwise be active, so those keep behaving exactly as before."""
@@ -363,6 +495,8 @@ def get_notifier() -> Notifier:
             staff_emails=settings.staff_notify_email_list,
             frontend_base_url=settings.frontend_base_url,
             inner=inner,
+            role_emails={"accounts": _own_list(settings.accounts_notify_emails),
+                         "operations": _own_list(settings.operations_notify_emails)},
         )
     return inner
 

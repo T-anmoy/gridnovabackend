@@ -224,10 +224,10 @@ def list_onboardings(status: Optional[OnboardingStatus] = None, mine_only: bool 
     if status:
         q = q.where(CustomerOnboarding.status == status)
     total = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
-    rows = db.execute(q.order_by(CustomerOnboarding.created_at.desc(), CustomerOnboarding.id.desc())
-                      .offset((page - 1) * page_size).limit(page_size)).scalars()
-    return {"items": [serialize.onboarding(db, o, viewer_is_owner=o.owner_associate_id == associate.id)
-                      for o in rows], "page": page, "page_size": page_size, "total": total}
+    rows = list(db.execute(q.order_by(CustomerOnboarding.created_at.desc(), CustomerOnboarding.id.desc())
+                           .offset((page - 1) * page_size).limit(page_size)).scalars())
+    return {"items": serialize.list_items(db, rows, lambda o: {"viewer_is_owner": o.owner_associate_id == associate.id}),
+            "page": page, "page_size": page_size, "total": total}
 
 
 def _load(db: Session, onboarding_id: int) -> CustomerOnboarding:
@@ -278,10 +278,14 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
                       latitude: Optional[float] = Form(default=None, ge=-90, le=90),
                       longitude: Optional[float] = Form(default=None, ge=-180, le=180),
                       captured_at: Optional[str] = Form(default=None, max_length=40),
+                      capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
+                      exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
                       db: Session = Depends(get_db),
                       current: AuthenticatedAssociate = Depends(get_current_associate)):
     """Upload one checklist document or one site photo. The server records when it
-    received the file; GPS and the client's capture time are stored if supplied."""
+    received the file; GPS and the client's capture time are stored if supplied.
+    Photos record their provenance (app/execution/photos.py): `capture_method` camera
+    (GPS + captured_at required) or gallery (phone gallery; location optional)."""
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
     require_onboarding_edit(associate, onboarding)
@@ -305,7 +309,16 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
         document = await uploads.read_document(file, document_type or photo_slot, allowed=allowed,
                                                max_bytes=MAX_FILE_BYTES)
     except uploads.UploadRejected as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"code": "invalid_file", "message": str(exc)})
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
+    provenance = None
+    if kind == "photo":
+        from app.execution import photos
+        try:
+            provenance = photos.provenance(content=document.content, capture_method=capture_method,
+                                           latitude=latitude, longitude=longitude, captured_at=captured_at,
+                                           exif_taken_at_client=exif_taken_at_client)
+        except AssociateError as exc:
+            raise _error(exc)
 
     from app.storage import r2
 
@@ -323,6 +336,11 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
         metadata.update(latitude=latitude, longitude=longitude)
     if captured_at:
         metadata["client_captured_at"] = captured_at
+    if provenance is not None:
+        from app.execution import photos
+        metadata.update(photos.flag_duplicate_and_record(db, provenance, project_id=onboarding.project_id,
+                                                         source="onboarding_photo", slot=photo_slot,
+                                                         storage_key=key))
     MemoryManager(db).attach_proposal_input_upload(
         inputs_id=inputs.id, target=target, filename=document.filename, storage_key=key,
         performed_by=service.actor(associate), document_type=document_type if kind == "document" else None,
@@ -538,7 +556,7 @@ async def _signed_upload(db: Session, onboarding: CustomerOnboarding, performed_
         document = await uploads.read_document(file, "signed agreement", allowed=uploads.DOCUMENT_TYPES,
                                                max_bytes=MAX_FILE_BYTES)
     except uploads.UploadRejected as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"code": "invalid_file", "message": str(exc)})
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
     from app.storage import r2
     try:
         record = agreement.record_signed(db, onboarding, performed_by, content=document.content,

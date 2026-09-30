@@ -1,5 +1,6 @@
-"""Reject an oversized upload while it is arriving, not after — site-assessment files
-and the associate registration forms (four documents each).
+"""Reject an oversized upload while it is arriving, not after — site-assessment files,
+the associate registration forms (four documents each), onboarding files and
+execution evidence. Every upload route must be listed here, or its body is unbounded.
 
 FastAPI parses a whole multipart body before the endpoint runs, so a size check in
 the endpoint only happens once every byte has been received and spooled. This
@@ -17,6 +18,15 @@ _UPLOAD_PATH = re.compile(r"^/api/v1/proposal-inputs/\d+/upload/?$")
 _REGISTRATION_PATH = re.compile(r"^/api/v1/public/(associates|preferred)/apply/?$")
 _ONBOARDING_FILE_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/(files|agreement/signed)|dashboard/onboardings/\d+/agreement/signed)/?$")
+_EXECUTION_FILE_PATH = re.compile(
+    r"^/api/v1/(associate/onboardings/\d+/execution/files|dashboard/onboardings/\d+/execution/files)/?$")
+_PAYMENT_PROOF_PATH = re.compile(
+    r"^/api/v1/(associate/onboardings/\d+/payments/\d+/proof|dashboard/payments/\d+/proof)/?$")
+_FILE_ROUTES = (
+    (_ONBOARDING_FILE_PATH, "app.api.routes.associate_onboarding", "MAX_FILE_BYTES"),
+    (_EXECUTION_FILE_PATH, "app.execution.files", "MAX_FILE_BYTES"),
+    (_PAYMENT_PROOF_PATH, "app.api.routes.associate_payments", "MAX_PROOF_BYTES"),
+)
 # Multipart framing (boundaries, part headers, the small form fields) on top of the
 # file itself. Generous: this bound exists to stop a flood, not to measure the file.
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -42,6 +52,21 @@ def _registration_too_large_detail() -> str:
     return f"Upload exceeds the limit ({uploads.MAX_DOCUMENT_BYTES // (1024 * 1024)}MB per document)."
 
 
+def limit_for(path: str):
+    """(allowed body bytes, 413 detail) for an upload route, or None for any other
+    path. tests/test_upload_limits.py checks every route that takes a file is here."""
+    if _UPLOAD_PATH.match(path):
+        return _limit() + MULTIPART_OVERHEAD_BYTES, too_large_detail()
+    if _REGISTRATION_PATH.match(path):
+        return _registration_limit() + MULTIPART_OVERHEAD_BYTES, _registration_too_large_detail()
+    for pattern, module, attr in _FILE_ROUTES:
+        if pattern.match(path):
+            import importlib
+            limit = getattr(importlib.import_module(module), attr)   # read at call time: tests shrink it
+            return limit + MULTIPART_OVERHEAD_BYTES, f"File exceeds the {limit // (1024 * 1024)}MB limit."
+    return None
+
+
 class _BodyTooLarge(Exception):
     pass
 
@@ -62,16 +87,10 @@ class UploadSizeLimitMiddleware:
         path = scope.get("path", "")
         if scope["type"] != "http" or scope.get("method") != "POST":
             return await self.app(scope, receive, send)
-        if _UPLOAD_PATH.match(path):
-            allowed, detail = _limit() + MULTIPART_OVERHEAD_BYTES, too_large_detail()
-        elif _REGISTRATION_PATH.match(path):
-            allowed, detail = _registration_limit() + MULTIPART_OVERHEAD_BYTES, _registration_too_large_detail()
-        elif _ONBOARDING_FILE_PATH.match(path):
-            from app.api.routes import associate_onboarding  # read at call time: tests shrink it
-            limit = associate_onboarding.MAX_FILE_BYTES
-            allowed, detail = limit + MULTIPART_OVERHEAD_BYTES, f"File exceeds the {limit // (1024 * 1024)}MB limit."
-        else:
+        bound = limit_for(path)
+        if bound is None:
             return await self.app(scope, receive, send)
+        allowed, detail = bound
 
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None:

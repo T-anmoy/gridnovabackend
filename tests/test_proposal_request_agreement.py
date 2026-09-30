@@ -331,6 +331,11 @@ class TestAgreement:
         assert ok.status_code == 200 and ok.json()["signed"] and ok.json()["links"]["signed_scan"]["url"]
         t = progress.timeline(db_session, db_session.get(CustomerOnboarding, oid))
         assert _stages(t)["agreement_signed"]["evidence"]["stamp_paper_number"] == "WB 123/45"
+        # Recording the signed agreement starts execution (Phase 4A); this associate
+        # has the sales capability, so Grid Nova's own team executes.
+        from app.memory.models import ProjectExecution
+        record = db_session.execute(select(ProjectExecution)).scalar_one()
+        assert record.onboarding_id == oid and record.execution_mode.value == "grid_nova"
         again = client.post(url, data={"stamp_paper_number": "X1", "stamp_paper_date": "2026-09-01"},
                             files={"file": ("s.pdf", PDF, "application/pdf")}, headers=headers(gna))
         assert again.status_code == 409

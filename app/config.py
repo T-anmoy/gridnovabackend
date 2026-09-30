@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     notify_from_email: str = ""
     # Comma-separated staff recipients for internal alerts. Blank = no staff emails.
     staff_notify_emails: str = ""
+    # Role-specific recipients for payment (Accounts) and execution (Operations) alerts.
+    # Blank = fall back to STAFF_NOTIFY_EMAILS. Placeholder-registry entry P7.
+    accounts_notify_emails: str = ""
+    operations_notify_emails: str = ""
+    # Email associates about their own customers (proposal ready, stage rejected,
+    # payment verified). Placeholder-registry entry A1 — not yet confirmed by Grid Nova.
+    notify_associates: bool = True
 
     @property
     def is_production(self) -> bool:
@@ -136,6 +143,16 @@ class Settings(BaseSettings):
     @property
     def staff_notify_email_list(self) -> List[str]:
         return [e.strip() for e in self.staff_notify_emails.split(",") if e.strip()]
+
+    @property
+    def accounts_notify_email_list(self) -> List[str]:
+        own = [e.strip() for e in self.accounts_notify_emails.split(",") if e.strip()]
+        return own or self.staff_notify_email_list
+
+    @property
+    def operations_notify_email_list(self) -> List[str]:
+        own = [e.strip() for e in self.operations_notify_emails.split(",") if e.strip()]
+        return own or self.staff_notify_email_list
 
     @property
     def llm_mock_mode(self) -> bool:
@@ -214,6 +231,16 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
     if onboarding_config.agreement_is_placeholder():
         warnings.append("config/associate_onboarding.yaml: agreement.body is a [PLACEHOLDER] "
                         "— customer agreements are generated with placeholder text")
+    try:
+        from app.memory.db import SessionLocal
+        from app.placeholders import registry
+        with SessionLocal() as db:
+            blockers = registry.unresolved_launch_blockers(db)
+        if blockers:
+            warnings.append(f"{blockers} launch-blocking placeholder(s) unresolved — "
+                            "see GET /api/v1/dashboard/placeholders or scripts/list_placeholders.py")
+    except Exception as exc:  # the count is advisory: never let it stop a boot
+        warnings.append(f"could not count unresolved placeholders: {type(exc).__name__}: {exc}")
     return errors, warnings
 
 

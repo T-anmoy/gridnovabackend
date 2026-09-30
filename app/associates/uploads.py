@@ -21,9 +21,19 @@ _READ_CHUNK = 1024 * 1024
 
 
 class UploadRejected(ValueError):
-    def __init__(self, message: str, status_code: int = 422):
+    def __init__(self, message: str, status_code: int = 422, code: str = "invalid_file"):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+
+
+# iPhone photos (HEIC/HEIF) are not accepted: the app converts them to JPEG before
+# uploading. They are recognised so the refusal says so, rather than "not an image".
+_HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1")
+
+
+def is_heif(head: bytes) -> bool:
+    return len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] in _HEIF_BRANDS
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,9 @@ async def read_document(upload, doc: str, allowed: Optional[tuple] = None,
         raise UploadRejected(f"{doc} is empty.")
     content_type = sniff(content[:16])
     allowed = ALLOWED_TYPES[doc] if allowed is None else allowed
+    if content_type is None and is_heif(content[:16]):
+        raise UploadRejected(f"{doc} is an iPhone HEIC/HEIF photo — convert it to JPEG before uploading.",
+                             code="heic_not_supported")
     if content_type not in allowed:
         kinds = "a JPEG, PNG or WEBP image" if allowed == IMAGE_TYPES else "a JPEG, PNG or WEBP image, or a PDF"
         raise UploadRejected(f"{doc} must be {kinds}.")

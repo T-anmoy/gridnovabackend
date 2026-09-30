@@ -41,7 +41,8 @@ def _row(db, model, code):
 
 def make_associate(db, *, level: str | None = None, territory: int | None = None,
                    home_district: int = KOLKATA, home_block: int | None = None,
-                   status: AssociateStatus = AssociateStatus.active) -> str:
+                   status: AssociateStatus = AssociateStatus.active,
+                   capability: AssociateCapability = AssociateCapability.sales) -> str:
     """Insert an associate; `level` + `territory` (an LGD code) make it a Preferred
     Associate. `home_district`/`home_block` (LGD codes) are the registered address —
     which is what locates a plain Associate. Returns its GNA id."""
@@ -59,11 +60,11 @@ def make_associate(db, *, level: str | None = None, territory: int | None = None
                   verification_call_completed=False)
     associate_id = f"GNA-WB-26-{90000 + n:05d}"
     if level is None:
-        app = AssociateApplication(**common, capability=AssociateCapability.sales)
+        app = AssociateApplication(**common, capability=capability)
         db.add(app)
         db.flush()
         row = Associate(associate_id=associate_id, associate_type=AssociateType.associate,
-                        associate_application_id=app.id, capability=AssociateCapability.sales)
+                        associate_application_id=app.id, capability=capability)
     else:
         lvl = TerritoryLevel(level)
         st = dist = blk = None

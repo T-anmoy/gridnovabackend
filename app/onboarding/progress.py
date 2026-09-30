@@ -1,5 +1,7 @@
-"""Per-project sales progress for associate-sourced customers (execution stages come in
-Phase 4).
+"""Per-project progress for associate-sourced customers: the sales stages below, then the
+execution stages (app/execution/ — submitted by the associate and verified by Operations,
+or recorded directly by Grid Nova's team; which of them apply comes from
+config/execution_payments.yaml).
 
     registered → verified → site assessed → proposal requested → proposal prepared →
     proposal issued → accepted → agreement signed → customer approved the agreement on
@@ -50,6 +52,9 @@ ORDER = (
     ProjectStage.registered, ProjectStage.verified, ProjectStage.site_assessed, ProjectStage.proposal_requested,
     ProjectStage.proposal_prepared, ProjectStage.proposal_issued, ProjectStage.accepted, ProjectStage.agreement_signed,
     ProjectStage.portal_agreement_approved,
+    ProjectStage.feasibility_submitted, ProjectStage.material_dispatched, ProjectStage.installed,
+    ProjectStage.inspection_net_meter, ProjectStage.commissioned, ProjectStage.subsidy_claimed,
+    ProjectStage.subsidy_received, ProjectStage.handover_complete,
 )
 LABELS = {
     ProjectStage.registered: "Registered",
@@ -61,6 +66,14 @@ LABELS = {
     ProjectStage.accepted: "Accepted",
     ProjectStage.agreement_signed: "Agreement signed",
     ProjectStage.portal_agreement_approved: "Customer approved the agreement on the PM Surya Ghar portal",
+    ProjectStage.feasibility_submitted: "DISCOM feasibility submitted",
+    ProjectStage.material_dispatched: "Material dispatched",
+    ProjectStage.installed: "Installed",
+    ProjectStage.inspection_net_meter: "Inspection and net meter",
+    ProjectStage.commissioned: "Commissioned",
+    ProjectStage.subsidy_claimed: "Subsidy claimed",
+    ProjectStage.subsidy_received: "Subsidy received",
+    ProjectStage.handover_complete: "Handover complete",
 }
 # Stages staff may record by hand (everything else is recorded by its own action —
 # including in-person acceptance, which has its own endpoint so the Proposal itself
@@ -69,14 +82,34 @@ MANUAL_STAGES = (ProjectStage.portal_agreement_approved,)
 
 
 def applicable(db: Session, onboarding: CustomerOnboarding) -> list[ProjectStage]:
+    """The stages this project goes through. Execution stages follow
+    execution.stages.applicability (placeholder E1); where the project's details are
+    not known yet, the stage is included."""
+    from app.execution import config as execution_config
+
     inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
-    stages = list(ORDER)
-    if inputs.scheme_name != GovernmentScheme.pm_surya_ghar:
-        stages.remove(ProjectStage.portal_agreement_approved)
+    rules = execution_config.execution()["stages"]["applicability"]
+    pm_surya_ghar = inputs.scheme_name == GovernmentScheme.pm_surya_ghar
+    scheme_known = inputs.scheme_name is not None
+    connection = inputs.connection_type.value if inputs.connection_type is not None else None
+    stages = []
+    for stage in ORDER:
+        if stage == ProjectStage.portal_agreement_approved and not pm_surya_ghar:
+            continue
+        if stage.value in rules.get("pm_surya_ghar_only", []) and scheme_known and not pm_surya_ghar:
+            continue
+        if (stage.value in rules.get("grid_connected_only", []) and connection is not None
+                and connection not in rules.get("grid_connected_types", [])):
+            continue
+        stages.append(stage)
     return stages
 
 
 def recorded(db: Session, project_id: int) -> dict[ProjectStage, ProjectStageEvent]:
+    from app.onboarding.preload import current
+    pre = current(db)
+    if pre is not None and project_id in pre.stage_events:
+        return dict(pre.stage_events[project_id])
     rows = db.execute(select(ProjectStageEvent).where(ProjectStageEvent.project_id == project_id)).scalars()
     return {r.stage: r for r in rows}
 
@@ -107,6 +140,14 @@ def record(db: Session, onboarding: CustomerOnboarding, stage: ProjectStage, rec
                                                            "note": note}))
     MemoryManager(db).add_timeline_event(lead_id=onboarding.lead_id, event_type=TimelineEventType.project_stage_recorded,
                                          description=f"Progress: {LABELS[stage]}", created_by=recorded_by)
+    if stage == ProjectStage.agreement_signed:
+        from app.execution import service as execution
+        execution.start(db, onboarding, recorded_by)
+    if stage == ProjectStage.accepted:
+        # The payment schedule is made against the accepted proposal's total (nothing
+        # happens, and nothing fails, while there is no total yet).
+        from app.payments import service as payments
+        payments.ensure_schedule(db, onboarding, recorded_by)
     return event
 
 
@@ -136,7 +177,10 @@ def timeline(db: Session, onboarding: CustomerOnboarding) -> dict:
                       "evidence": e.evidence if e else None, "note": e.note if e else None})
     current = next((s.value for s in reversed(stages) if s in done), None)
     nxt = next((s.value for s in stages if s not in done), None)
-    return {"project_id": onboarding.project_id, "current_stage": current, "next_stage": nxt, "stages": items}
+    from app.execution import service as execution
+    not_applicable = [{"stage": s.value, "label": LABELS[s]} for s in ORDER if s not in stages]
+    return {"project_id": onboarding.project_id, "current_stage": current, "next_stage": nxt, "stages": items,
+            "not_applicable": not_applicable, **execution.progress_extras(db, onboarding, stages, done)}
 
 
 def record_formal_draft(db: Session, *, lead_id: int, proposal_id: int, version: int,

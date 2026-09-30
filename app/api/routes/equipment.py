@@ -58,6 +58,8 @@ def _serialize(item, employee: AuthenticatedEmployee) -> dict:
         "specification": item.specification,
         "is_dcr_compliant": item.is_dcr_compliant,
         "is_active": item.is_active,
+        # Development-only dummy row (scripts/seed_dummy_data.py) — show it as such.
+        "is_placeholder": bool(item.is_placeholder),
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
     # Absent, not null, for a role that can't see it — so the frontend can tell

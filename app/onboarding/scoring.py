@@ -108,7 +108,8 @@ def compute(db: Session, onboarding: CustomerOnboarding) -> dict:
     factors.append(_factor("customer_timeline", cfg["timeline_fractions"][timeline],
                            f"customer timeline: {timeline.replace('_', ' ')}", weights))
 
-    photos = [s for s in INSTALLATION_PHOTO_SLOTS if (inputs.installation_photo_refs or {}).get(s, {}).get("storage_key")]
+    from app.execution.photos import counts_as_evidence
+    photos = [s for s in INSTALLATION_PHOTO_SLOTS if counts_as_evidence((inputs.installation_photo_refs or {}).get(s, {}))]
     factors.append(_factor("site_readiness", len(photos) / len(INSTALLATION_PHOTO_SLOTS),
                            f"{len(photos)} of {len(INSTALLATION_PHOTO_SLOTS)} site photos uploaded", weights))
 

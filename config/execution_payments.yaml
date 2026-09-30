@@ -1,0 +1,153 @@
+# Grid Nova Energy — project execution and payments (Phase 4A)
+#
+# Read by app/execution/config.py and validated at startup (a malformed file stops the
+# app from booting rather than failing mid-request). Grid Nova staff edit these values
+# here without touching code.
+#
+# Anything Grid Nova has not supplied or confirmed yet is marked where it stands: a
+# number or list carries a placeholder/unconfirmed comment on its own line, and text
+# begins with the word DUMMY. Every one of them has an entry in
+# config/placeholder_registry.yaml (see scripts/list_placeholders.py); resolving one
+# is an edit to this file.
+
+execution:
+  stages:
+    # E1 — which execution stages apply to which projects. A stage not named here
+    # applies to every project.
+    applicability:
+      # Only for grid-connected projects (connection_type in the list below).
+      grid_connected_only: [feasibility_submitted, inspection_net_meter]   # [UNCONFIRMED]
+      grid_connected_types: [on_grid, hybrid]                             # [UNCONFIRMED]
+      # Only for PM Surya Ghar-linked projects.
+      pm_surya_ghar_only: [subsidy_claimed, subsidy_received]             # [UNCONFIRMED]
+
+  # E2 — days a project may wait for its NEXT stage before it counts as stuck, keyed by
+  # that next stage.
+  stuck_threshold_days:
+    feasibility_submitted: 15     # [PLACEHOLDER]
+    material_dispatched: 14       # [PLACEHOLDER]
+    installed: 10                 # [PLACEHOLDER]
+    inspection_net_meter: 21      # [PLACEHOLDER]
+    commissioned: 7               # [PLACEHOLDER]
+    subsidy_claimed: 30           # [PLACEHOLDER]
+    subsidy_received: 60          # [PLACEHOLDER]
+    handover_complete: 7          # [PLACEHOLDER]
+
+  # E3 — evidence each execution stage needs. `text`: required text fields;
+  # `documents`: required uploads (from document_types); `optional_documents`;
+  # `photos`: required photo slots (from photo_slots); `register_verified`: the
+  # installed-equipment serial register must be verified by Operations first.
+  evidence:                       # [PLACEHOLDER]
+    feasibility_submitted:
+      text: [feasibility_reference]
+      optional_documents: [feasibility_acknowledgement]
+    material_dispatched:
+      text: [dispatch_reference]
+      optional_documents: [dispatch_challan]
+    installed:
+      photos: [array_installed, inverter_installed, earthing, meter_and_net_meter, completion_overview]
+      documents: [oem_dcr_declaration]
+      register_verified: true
+    inspection_net_meter:
+      text: [net_meter_serial]
+      documents: [inspection_report]
+      optional_documents: [net_meter_report]
+    commissioned:
+      documents: [commissioning_report]
+      photos: [completion_overview]
+    subsidy_claimed:
+      text: [portal_reference]
+    subsidy_received:
+      text: [portal_reference]
+    handover_complete:
+      documents: [handover_checklist]
+
+  # E4 — post-installation photo checklist (separate from the pre-installation site
+  # photos taken during onboarding).
+  photo_slots: [array_installed, inverter_installed, earthing, meter_and_net_meter, completion_overview]   # [PLACEHOLDER]
+
+  # E5 — execution documents.
+  document_types: [dispatch_challan, feasibility_acknowledgement, inspection_report, net_meter_report, commissioning_report, oem_dcr_declaration, handover_checklist]   # [PLACEHOLDER]
+
+  gates:
+    # E6 — when enabled, material_dispatched cannot be recorded until every payment
+    # milestone up to and including `through_milestone` is fully verified.
+    material_dispatched:
+      enabled: false              # [UNCONFIRMED]
+      through_milestone: 2        # [UNCONFIRMED]
+
+  # E9 — photos taken in the app (camera) or chosen from the phone's gallery.
+  photo_policy:
+    allow_gallery: true           # [UNCONFIRMED]
+    gallery_counts_fully: true    # [UNCONFIRMED]
+    exif_max_age_days: 30         # [UNCONFIRMED]
+
+  register:
+    # E7 — sanity ranges for the installed-equipment serial register. Outside a range
+    # is a WARNING, never a rejection (except the serial length and bulk size).
+    sanity:
+      module_wp_min: 300            # [PLACEHOLDER]
+      module_wp_max: 800            # [PLACEHOLDER]
+      inverter_kw_min: 0.5          # [PLACEHOLDER]
+      inverter_kw_max: 200          # [PLACEHOLDER]
+      warranty_max_years: 40        # [PLACEHOLDER]
+      capacity_tolerance_percent: 10   # [PLACEHOLDER]
+      serial_min_length: 4          # [PLACEHOLDER]
+      serial_max_length: 40         # [PLACEHOLDER]
+      bulk_max_rows: 200            # [PLACEHOLDER]
+
+payments:
+  # P1 — provided by Tanmoy on 28 Sep 2026 (20/60/20): real, still editable here.
+  # Each milestone falls due when its trigger stage is recorded. Percentages must sum
+  # to 100; the last milestone takes any rounding remainder.
+  schedule_template:
+    - number: 1
+      label: "On acceptance"
+      percent: 20
+      trigger: accepted
+    - number: 2
+      label: "Before dispatch"
+      percent: 60
+      trigger: agreement_signed   # [UNCONFIRMED] — due trigger for the pre-dispatch milestone
+    - number: 3
+      label: "After commissioning"
+      percent: 20
+      trigger: commissioned
+
+  # P2 — payment modes accepted. There is no cash mode, by design.
+  enabled_modes:
+    - cheque
+    - demand_draft                # [UNCONFIRMED]
+    - neft
+    - rtgs
+    - imps
+    - upi                         # [UNCONFIRMED]
+
+  # P3 — accounts timings and tolerance.
+  thresholds:
+    awaiting_verification_hours: 24     # [PLACEHOLDER]
+    cheque_hold_days: 7                 # [PLACEHOLDER]
+    overpayment_tolerance_inr: "0.00"   # [PLACEHOLDER]
+    milestone_overdue_days: 7           # [PLACEHOLDER]
+
+  # P8 — an associate recording a payment must attach proof (a screenshot or a scan).
+  proof_required_for_associates: true   # [PLACEHOLDER]
+
+  receipt:
+    # P4 — receipt numbering. {YYYY} is the year of verification, {SEQ:06} a per-year
+    # sequence padded to six digits.
+    numbering: "GNR-{YYYY}-{SEQ:06}"    # [UNCONFIRMED]
+    # P5 — company block printed on every receipt and on the "pay only here" reminder.
+    company:
+      legal_name: "Grid Nova Energy"    # [UNCONFIRMED] — legal form pending
+      address: "Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal, India"
+      phone: "+91 98747 74440"
+      email: "info@gridnova.in"
+      gstin: "DUMMY — GSTIN to be supplied by Grid Nova"
+      bank_name: "DUMMY — bank name to be supplied by Grid Nova"
+      account_number: "DUMMY — account number to be supplied by Grid Nova"
+      ifsc: "DUMMY — IFSC to be supplied by Grid Nova"
+    # P6 — receipt wording.
+    wording:
+      heading: "DUMMY — receipt heading to be supplied by Grid Nova"
+      footer: "DUMMY — receipt footer to be supplied by Grid Nova. This is a payment receipt, not a GST tax invoice."

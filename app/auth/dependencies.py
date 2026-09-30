@@ -213,15 +213,38 @@ class AuthenticatedEmployee:
     def can_manage_seats(self) -> bool:
         return self.role == EmployeeRole.admin
 
-    def can_view_assigned_work(self) -> bool:
-        """Intentionally False for every role, including Operations and Accounts.
+    # ── Payments (Phase 4A) — see app/auth/scoping.py require_payment_access ──
 
-        Not a broken check — there is genuinely nothing to view yet. Work
-        Orders don't exist. This role starts maximally restricted and gets
-        expanded deliberately once there's something real to grant access to,
-        rather than starting broad and being tightened later.
-        """
-        return False
+    def can_view_payments(self) -> bool:
+        """Payment amounts and the ledger. Sales only for its own or unassigned
+        leads (it records payments there too). Operations and Engineer: never."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.accounts,
+                             EmployeeRole.sales)
+
+    def can_record_payment(self) -> bool:
+        return self.role in (EmployeeRole.admin, EmployeeRole.accounts, EmployeeRole.sales)
+
+    def can_process_payments(self) -> bool:
+        """Deposit, verify, dishonour, cancel any payment; edit schedules; receipts;
+        exports. Management reads but does not act."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.accounts)
+
+    # ── Execution (Phase 4A) — see app/auth/scoping.py require_execution_access ──
+
+    def can_view_execution(self) -> bool:
+        """Execution status, submissions, photos and the serial register. Sales is
+        limited to its own or unassigned leads; Operations to projects at or after
+        agreement_signed; Engineer reads the technical record. Accounts: none."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales,
+                             EmployeeRole.engineer, EmployeeRole.operations)
+
+    def can_verify_execution(self) -> bool:
+        """Verify or reject an associate's stage submission; verify the serial register."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.operations)
+
+    def can_record_execution(self) -> bool:
+        """Record a stage directly (grid_nova mode) and upload execution evidence."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.operations)
 
 
 async def get_current_employee(

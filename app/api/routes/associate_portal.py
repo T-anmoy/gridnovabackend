@@ -87,3 +87,11 @@ def territory_members(status: Optional[AssociateStatus] = None, associate_type: 
                        "verified_customer_count": int(verified)}
                       for a, customers, verified in rows],
             "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("/home")
+def home(db: Session = Depends(get_db), current: AuthenticatedAssociate = Depends(get_current_associate)):
+    """The associate's prioritised to-do feed over their own customers, with totals.
+    Items carry message keys (app/onboarding/todo.py), not English."""
+    from app.onboarding import todo
+    return todo.home(db, db.get(Associate, current.associate_pk))

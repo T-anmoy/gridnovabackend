@@ -31,9 +31,15 @@ REDACTED = "[Filtered]"
 SENSITIVE_KEYS = frozenset({
     "aadhaar_number", "aadhaar", "pan", "bank_account_number", "bank_account", "bank_ifsc", "ifsc",
     "bank_account_encrypted",
+    # Payments (Phase 4A)
+    "cheque_number", "utr", "payment_reference", "payer_account_number", "reference", "reference_normalized",
 })
 _NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app.onboarding",
-                      "app.api.routes.associate_onboarding", "app.api.routes.onboarding_admin")
+                      "app.api.routes.associate_onboarding", "app.api.routes.onboarding_admin",
+                      "app.execution", "app.api.routes.associate_execution", "app.api.routes.execution_admin",
+                      "app.api.routes.execution_register_admin", "app.payments", "app.jobs.payment_alerts",
+                      "app.api.routes.associate_payments", "app.api.routes.payments_admin",
+                      "app.api.routes.public_receipts")
 
 # 12 digits, optionally grouped 4-4-4 by spaces or hyphens as printed on the card.
 _AADHAAR_RE = re.compile(r"(?<!\d)(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")

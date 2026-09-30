@@ -821,6 +821,10 @@ class MemoryManager:
             "proposal", str(proposal_id), f"status_changed_to_{new_status}",
             performed_by, before=before, after={"status": new_status},
         )
+        if new_status == ProposalStatus.approved:
+            # Associate-sourced projects: tell the owning associate it can be handed over.
+            from app.notifications import associate_emails
+            associate_emails.proposal_ready(self._db, proposal.lead_id)
         if new_status == ProposalStatus.sent:
             # Associate-sourced projects: the proposal-issued progress stage (no-op otherwise).
             from app.memory.models import ProjectStage
@@ -1963,9 +1967,12 @@ class MemoryManager:
 
     def active_equipment_terms(self) -> list[str]:
         """Brand and model names of every active Equipment/SKU Master record — the
-        only makes the Sales Agent may name as something Grid Nova supplies."""
+        only makes the Sales Agent may name as something Grid Nova supplies. Dummy
+        catalogue rows (is_placeholder) never count: Nova must not name them."""
         terms: list[str] = []
         for item in self.list_equipment(is_active=True):
+            if item.is_placeholder:
+                continue
             terms += [t for t in (item.brand, item.model_name, f"{item.brand} {item.model_name}") if t]
         return terms
 
