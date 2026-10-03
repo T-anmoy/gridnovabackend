@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.memory.models import (
-    Customer, CustomerOnboarding, Payment, PaymentLedgerEntry, PaymentReceipt, Project,
+    Customer, Payment, PaymentLedgerEntry, PaymentReceipt, Project,
 )
 
 BOM = "﻿"
@@ -52,13 +52,12 @@ def _csv(header: list[str], rows: Iterable[list]) -> str:
     return BOM + out.getvalue()
 
 
-def _context(db: Session, onboarding_id: int, cache: dict) -> tuple[str, str]:
-    if onboarding_id not in cache:
-        o = db.get(CustomerOnboarding, onboarding_id)
-        customer = db.get(Customer, o.customer_id)
-        project = db.get(Project, o.project_id)
-        cache[onboarding_id] = (customer.name if customer else "", project.reference_id if project else "")
-    return cache[onboarding_id]
+def _context(db: Session, project_id: int, cache: dict) -> tuple[str, str]:
+    if project_id not in cache:
+        project = db.get(Project, project_id)
+        customer = db.get(Customer, project.customer_id) if project else None
+        cache[project_id] = (customer.name if customer else "", project.reference_id if project else "")
+    return cache[project_id]
 
 
 def _in_range(q, column, date_from, date_to):
@@ -76,7 +75,7 @@ def payments_csv(db: Session, date_from=None, date_to=None) -> str:
     q = _in_range(select(Payment), Payment.recorded_at, date_from, date_to).order_by(Payment.id)
     rows = []
     for p in db.execute(q).scalars():
-        name, ref = _context(db, p.onboarding_id, cache)
+        name, ref = _context(db, p.project_id, cache)
         rows.append([p.id, ref, name, s(p.amount), p.mode.value, p.reference, p.bank_name,
                      p.instrument_date.isoformat() if p.instrument_date else "", p.payer_name, p.status.value,
                      p.recorded_by, *_times(p.recorded_at), p.verified_by, *_times(p.verified_at),
@@ -94,7 +93,7 @@ def receipts_csv(db: Session, date_from=None, date_to=None) -> str:
     rows = []
     for r in db.execute(q).scalars():
         p = db.get(Payment, r.payment_id)
-        name, ref = _context(db, p.onboarding_id, cache)
+        name, ref = _context(db, p.project_id, cache)
         rows.append([r.receipt_number, p.id, ref, name, s(p.amount), p.mode.value, *_times(r.created_at),
                      r.email_status.value, r.email_skipped_reason, r.held_reason, *_times(r.emailed_at)])
     return _csv(["receipt_number", "payment_id", "project_reference_id", "customer_name", "amount_inr", "mode",
@@ -110,7 +109,7 @@ def ledger_csv(db: Session, date_from=None, date_to=None) -> str:
     rows = []
     for e in db.execute(q).scalars():
         p = db.get(Payment, e.payment_id)
-        name, ref = _context(db, p.onboarding_id, cache)
+        name, ref = _context(db, p.project_id, cache)
         rows.append([e.id, e.kind.value, s(e.amount), e.payment_id, e.reverses_entry_id, ref, name, e.actor,
                      *_times(e.created_at)])
     return _csv(["entry_id", "kind", "amount_inr", "payment_id", "reverses_entry_id", "project_reference_id",

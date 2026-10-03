@@ -66,7 +66,7 @@ def _unit(db: Session, onboarding, unit_id: int) -> InstalledUnit:
 def list_units(onboarding_id: int, db: Session = Depends(get_db),
                employee: AuthenticatedEmployee = Depends(get_current_employee)):
     onboarding, record, _ = _target(db, employee, onboarding_id, change=False)
-    return register.summary(db, onboarding, record)["register"]
+    return register.summary(db, onboarding, record, staff=True)["register"]
 
 
 @router.get("/units/check-serial")
@@ -82,8 +82,8 @@ def add_unit(onboarding_id: int, body: UnitIn, reason: Optional[str] = None, db:
     onboarding, record, viewer = _target(db, employee, onboarding_id, change=True)
     units, warnings = _write(db, lambda: register.add_units(db, onboarding, record, [body.model_dump()], viewer,
                                                             reason))
-    return {"unit": register.unit_json(db, units[0]), "warnings": warnings,
-            "register": register.summary(db, onboarding, record)["register"]}
+    return {"unit": register.unit_json(db, units[0], staff=True), "warnings": warnings,
+            "register": register.summary(db, onboarding, record, staff=True)["register"]}
 
 
 @router.post("/units/bulk", status_code=201)
@@ -92,8 +92,8 @@ def add_units_bulk(onboarding_id: int, body: BulkUnitsIn, db: Session = Depends(
     onboarding, record, viewer = _target(db, employee, onboarding_id, change=True)
     units, warnings = _write(db, lambda: register.add_units(
         db, onboarding, record, [u.model_dump() for u in body.units], viewer, body.reason))
-    return {"units": [register.unit_json(db, u) for u in units], "warnings": warnings,
-            "register": register.summary(db, onboarding, record)["register"]}
+    return {"units": [register.unit_json(db, u, staff=True) for u in units], "warnings": warnings,
+            "register": register.summary(db, onboarding, record, staff=True)["register"]}
 
 
 @router.patch("/units/{unit_id}")
@@ -104,8 +104,8 @@ def update_unit(onboarding_id: int, unit_id: int, body: UnitPatch, db: Session =
     changes = body.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     unit, warnings = _write(db, lambda: register.update_unit(db, onboarding, record, unit, changes, viewer, reason))
-    return {"unit": register.unit_json(db, unit), "warnings": warnings,
-            "register": register.summary(db, onboarding, record)["register"]}
+    return {"unit": register.unit_json(db, unit, staff=True), "warnings": warnings,
+            "register": register.summary(db, onboarding, record, staff=True)["register"]}
 
 
 @router.post("/units/{unit_id}/void")
@@ -114,7 +114,7 @@ def void_unit(onboarding_id: int, unit_id: int, body: VoidIn, db: Session = Depe
     onboarding, record, viewer = _target(db, employee, onboarding_id, change=True)
     unit = _unit(db, onboarding, unit_id)
     _write(db, lambda: register.void_unit(db, onboarding, record, unit, viewer, body.reason))
-    return {"unit": register.unit_json(db, unit), "register": register.summary(db, onboarding, record)["register"]}
+    return {"unit": register.unit_json(db, unit, staff=True), "register": register.summary(db, onboarding, record, staff=True)["register"]}
 
 
 @router.post("/register/verify")

@@ -50,7 +50,10 @@ def _payment(db: Session, employee: AuthenticatedEmployee, payment_id: int) -> P
     payment = db.get(Payment, payment_id)
     if payment is None:
         raise HTTPException(status_code=404, detail="Payment not found")
-    _onboarding(db, employee, payment.onboarding_id)
+    if payment.onboarding_id is not None:
+        _onboarding(db, employee, payment.onboarding_id)
+    elif employee.role == EmployeeRole.sales:   # no lead to scope it by: not Sales' to see
+        raise HTTPException(status_code=403, detail="Your role cannot view this payment.")
     return payment
 
 
@@ -60,8 +63,7 @@ def _processor(employee: AuthenticatedEmployee) -> None:
 
 
 def _detail(db: Session, payment: Payment) -> dict:
-    onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
-    return {**payments.payment_json(db, payment), "project": payments.project_summary(db, onboarding)}
+    return {**payments.payment_json(db, payment), "project": payments.payment_project_summary(db, payment)}
 
 
 def _act(db: Session, fn):
@@ -165,14 +167,22 @@ def deposit(payment_id: int, db: Session = Depends(get_db),
     return _detail(db, _act(db, lambda: payments.deposit(db, payment_id, employee.employee_id)))
 
 
+class VerifyIn(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
 @router.post("/payments/{payment_id}/verify")
-def verify(payment_id: int, db: Session = Depends(get_db),
+def verify(payment_id: int, body: Optional[VerifyIn] = None, db: Session = Depends(get_db),
            employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Funds confirmed in Grid Nova's bank. Writes the ledger credit; the receipt is
-    numbered now and rendered/emailed after the commit."""
+    numbered now and rendered/emailed after the commit. Not by whoever recorded the
+    payment (409 self_verification) — except an Admin, who must give `reason`
+    (audited as segregation_override)."""
     _processor(employee)
     _payment(db, employee, payment_id)
-    return _detail(db, _act(db, lambda: payments.verify(db, payment_id, employee.employee_id)))
+    return _detail(db, _act(db, lambda: payments.verify(db, payment_id, employee.employee_id,
+                                                        is_admin=employee.is_admin,
+                                                        reason=body.reason if body else None)))
 
 
 @router.post("/payments/{payment_id}/dishonour")

@@ -23,6 +23,8 @@ EXPECTED = {
     ("payment_schedule", "created"), ("payment_schedule", "updated"),
     ("payment", "recorded"), ("payment", "proof_attached"), ("payment", "deposited"), ("payment", "verified"),
     ("payment", "dishonoured"), ("payment", "cancelled"),
+    ("project_execution", "admin_override"), ("project_execution", "mode_changed"),
+    ("payment", "segregation_override"),
     ("payment_receipt", "numbered"), ("payment_receipt", "resend"), ("payment_receipt", "released"),
 }
 
@@ -79,6 +81,18 @@ def test_every_new_mutation_is_audited(client, db_session, onboarding_ready, stu
                                                  "account_number": "1", "ifsc": "I"})
     monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a tax invoice."})
     client.post(f"{DASH}/payment-receipts/release-held", headers=ACCOUNTS)
+
+    # Follow-ups: admin override, mode switch (on a third, associate-mode project), and an
+    # admin verifying a payment they recorded.
+    gna3, oid3 = accepted_customer(client, db_session, stage=ProjectStage.agreement_signed,
+                                   capability=AssociateCapability.execution)
+    assert client.post(f"{staff_exec_url(oid3)}/feasibility_submitted", headers=ADMIN, json={
+        "text": {"feasibility_reference": "R9"}, "admin_override_reason": "Associate unreachable."}).status_code == 200
+    assert client.post(f"{staff_exec_url(oid3)}/mode", headers=ADMIN, json={
+        "execution_mode": "grid_nova", "reason": "Taking over."}).status_code == 200
+    own = client.post(f"{DASH}/onboardings/{oid2}/payments", headers=ADMIN, json=neft(reference="UTR-OWN"))
+    assert client.post(f"{PAY}/{own.json()['payment_id']}/verify", headers=ADMIN,
+                       json={"reason": "Paid in person."}).status_code == 200
 
     seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
     assert EXPECTED <= seen, f"not audited: {sorted(EXPECTED - seen)}"

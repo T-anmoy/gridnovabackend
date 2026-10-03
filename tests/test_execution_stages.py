@@ -168,8 +168,12 @@ class TestTwoStep:
     def test_direct_recording_refused_in_associate_mode(self, client, db_session, onboarding_ready):
         _, oid = associate_in_execution(client, db_session)
         r = client.post(f"{staff_exec_url(oid)}/feasibility_submitted",
-                        json={"text": {"feasibility_reference": "R"}}, headers=ADMIN)
+                        json={"text": {"feasibility_reference": "R"}}, headers=OPS)
         assert r.status_code == 409 and r.json()["detail"]["code"] == "execution_mode_associate"
+        # An Admin may, but only with a reason (see tests/test_phase4a_followups.py).
+        r = client.post(f"{staff_exec_url(oid)}/feasibility_submitted",
+                        json={"text": {"feasibility_reference": "R"}}, headers=ADMIN)
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "reason_required"
 
     def test_unknown_and_non_execution_stages(self, client, db_session, onboarding_ready):
         gna, oid = associate_in_execution(client, db_session)

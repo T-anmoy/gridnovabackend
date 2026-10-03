@@ -119,6 +119,8 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/register/verify"): (EXECUTION_ACTORS, {}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/dcr-override"):
         (ADMIN_ONLY, {"json": {"reason": "x"}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/mode"):
+        (ADMIN_ONLY, {"json": {"execution_mode": "grid_nova", "reason": "x"}}),
     ("GET", "/api/v1/dashboard/payments"): (PAY_READERS, {}),
     ("GET", "/api/v1/dashboard/payment-milestones"): (PAY_READERS, {}),
     ("GET", "/api/v1/dashboard/payments/{payment_id}"): (PAY_READERS, {}),

@@ -43,7 +43,15 @@ def cheque(amount="20000.00", reference="000123", bank="State Bank of India", **
             "instrument_date": "2026-09-20", **extra}
 
 
+# A second Accounts person. Nobody verifies a payment they recorded (segregation of
+# duties), so when a test has "Accounts" record a payment and "Accounts" verify it, the
+# recording is done by this colleague.
+RECORDER = {"X-Employee-Id": "emp-acc-2", "X-Employee-Role": "accounts"}
+
+
 def record(client, who, oid, body, staff=False):
+    if staff and who == ACCOUNTS:
+        who = RECORDER
     return client.post(staff_pay_url(oid) if staff else pay_url(oid), json=body, headers=who)
 
 

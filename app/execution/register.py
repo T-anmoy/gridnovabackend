@@ -345,6 +345,9 @@ def void_unit(db: Session, onboarding: CustomerOnboarding, execution: ProjectExe
         raise AssociateError("This unit is already voided.", code="unit_voided", status_code=409)
     _locked_guard(execution, viewer, reason)
     before = _json(unit)
+    # The raw serial_number stays as entered; the normalised form moves to
+    # voided_serial_normalized so the same serial on another project can be flagged.
+    unit.voided_serial_normalized = unit.serial_normalized
     unit.status, unit.void_reason, unit.serial_normalized, unit.updated_at = (
         InstalledUnitStatus.voided, reason, None, _now())
     db.flush()
@@ -427,12 +430,25 @@ def capacity(db: Session, onboarding: CustomerOnboarding, units: Optional[list] 
             "tolerance_percent": str(tolerance), "mismatch": mismatch}
 
 
-def project_flags(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution) -> list[str]:
+def previously_voided(db: Session, unit: InstalledUnit) -> bool:
+    """This serial was voided on a DIFFERENT project before — a staff-only, non-blocking
+    signal (a serial wrongly entered there, or one being reused)."""
+    if unit.status == InstalledUnitStatus.voided or not unit.serial_normalized:
+        return False
+    return db.execute(select(InstalledUnit.id).where(
+        InstalledUnit.voided_serial_normalized == unit.serial_normalized,
+        InstalledUnit.project_id != unit.project_id)).first() is not None
+
+
+def project_flags(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution,
+                  staff: bool = False) -> list[str]:
     flags = []
     if dcr_mismatch(db, onboarding) and execution.dcr_override_at is None:
         flags.append("dcr_mismatch")
     if capacity(db, onboarding)["mismatch"]:
         flags.append("capacity_mismatch")
+    if staff and any(previously_voided(db, u) for u in _active_units(db, onboarding.project_id)):
+        flags.append("previously_voided")
     return flags
 
 
@@ -464,9 +480,9 @@ def _after_change(db: Session, onboarding: CustomerOnboarding, execution: Projec
                                           "dcr_mismatch")
 
 
-def unit_json(db: Session, unit: InstalledUnit) -> dict:
+def unit_json(db: Session, unit: InstalledUnit, staff: bool = False) -> dict:
     equipment = db.get(Equipment, unit.equipment_id) if unit.equipment_id else None
-    return {
+    body = {
         "unit_id": unit.id, "category": unit.category.value, "serial_number": unit.serial_number,
         "serial_normalized": unit.serial_normalized,
         "equipment": None if equipment is None else {
@@ -481,9 +497,12 @@ def unit_json(db: Session, unit: InstalledUnit) -> dict:
         "verified_by": unit.verified_by, "verified_at": unit.verified_at.isoformat() if unit.verified_at else None,
         "void_reason": unit.void_reason,
     }
+    if staff:   # never shown to an associate
+        body["previously_voided"] = previously_voided(db, unit)
+    return body
 
 
-def summary(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution) -> dict:
+def summary(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution, staff: bool = False) -> dict:
     """The register block of the execution status."""
     units = list(db.execute(select(InstalledUnit).where(InstalledUnit.project_id == onboarding.project_id)
                             .order_by(InstalledUnit.id)).scalars())
@@ -493,7 +512,7 @@ def summary(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecu
     return {"register": {
         "verified_at": execution.register_verified_at.isoformat() if execution.register_verified_at else None,
         "verified_by": execution.register_verified_by,
-        "units": [unit_json(db, u) for u in units],
+        "units": [unit_json(db, u, staff) for u in units],
         "totals": {"modules": sum(u.category == InstalledUnitCategory.module for u in active),
                    "inverters": sum(u.category == InstalledUnitCategory.inverter for u in active),
                    "other": sum(u.category == InstalledUnitCategory.other for u in active),
@@ -503,5 +522,5 @@ def summary(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecu
                 "override": None if execution.dcr_override_at is None else {
                     "reason": execution.dcr_override_reason, "by": execution.dcr_override_by,
                     "at": execution.dcr_override_at.isoformat()}},
-        "flags": project_flags(db, onboarding, execution),
+        "flags": project_flags(db, onboarding, execution, staff),
     }}

@@ -414,3 +414,42 @@ class TestPaymentsAndReceipts:
             assert "payments" not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         finally:
             conn.close()
+
+
+class TestPhase4aFollowups:
+    def test_upgrade_backfills_voided_serials_and_downgrades(self, db_at_0025):
+        assert _run_alembic("upgrade", "0040_receipts", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            _insert(conn, "installed_units", id=1, project_id=1, onboarding_id=1, category="other",
+                    serial_number="  ｓｎ-77 a ", serial_normalized=None, status="voided")
+            _insert(conn, "installed_units", id=2, project_id=1, onboarding_id=1, category="other",
+                    serial_number="LIVE-1", serial_normalized="LIVE-1", status="entered")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("upgrade", "0041_phase4a_followups", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            # The raw text is untouched; the voided row remembers its normalised form.
+            rows = conn.execute("SELECT id, serial_number, serial_normalized, voided_serial_normalized "
+                                "FROM installed_units ORDER BY id").fetchall()
+            assert rows == [(1, "  ｓｎ-77 a ", None, "SN-77A"), (2, "LIVE-1", "LIVE-1", None)]
+            for table in ("payments", "payment_milestones"):
+                info = {r[1]: r for r in conn.execute(f"PRAGMA table_info({table})")}
+                assert info["onboarding_id"][3] == 0 and info["project_id"][3] == 1   # nullable / required
+            assert "previous_payment_id" in {r[1] for r in conn.execute("PRAGMA table_info(payments)")}
+            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'uq_payments_instrument'").fetchone()[0]
+            assert "dishonoured" in sql
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0040_receipts", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            info = {r[1]: r for r in conn.execute("PRAGMA table_info(payments)")}
+            assert info["onboarding_id"][3] == 1 and "previous_payment_id" not in info
+        finally:
+            conn.close()

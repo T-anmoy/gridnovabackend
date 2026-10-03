@@ -23,7 +23,8 @@ def check_payment_alerts(db: Session, now: datetime) -> dict:
     from app.notifications import notifier as notifier_module
 
     overdue, waiting = [], []
-    onboarding_ids = db.execute(select(PaymentMilestone.onboarding_id).distinct()).scalars().all()
+    onboarding_ids = db.execute(select(PaymentMilestone.onboarding_id).where(
+        PaymentMilestone.onboarding_id.is_not(None)).distinct()).scalars().all()
     for onboarding in (db.get(CustomerOnboarding, i) for i in onboarding_ids):
         customer = db.get(Customer, onboarding.customer_id)
         for m in payments.milestone_status(db, onboarding, now):

@@ -183,7 +183,8 @@ def _ledger_position(db: Session, payment: Payment) -> tuple[Decimal, Optional[D
     upto = db.execute(select(PaymentLedgerEntry.amount).where(
         PaymentLedgerEntry.project_id == payment.project_id, PaymentLedgerEntry.id <= credit.id)).scalars().all()
     total_paid = money(sum(upto, Decimal(0)))
-    total = accepted_total(db, db.get(CustomerOnboarding, payment.onboarding_id))
+    onboarding = db.get(CustomerOnboarding, payment.onboarding_id) if payment.onboarding_id is not None else None
+    total = accepted_total(db, onboarding) if onboarding is not None else None
     return total_paid, (total - total_paid if total is not None else None)
 
 
@@ -193,9 +194,8 @@ def receipt_html(db: Session, receipt: PaymentReceipt) -> str:
     cfg = config.payments()["receipt"]
     company, wording = cfg["company"], cfg["wording"]
     payment = db.get(Payment, receipt.payment_id)
-    onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
-    customer = db.get(Customer, onboarding.customer_id)
-    project = db.get(Project, onboarding.project_id)
+    project = db.get(Project, payment.project_id)
+    customer = db.get(Customer, project.customer_id)
     milestone = db.get(PaymentMilestone, payment.milestone_id) if payment.milestone_id else None
     total_paid, balance = _ledger_position(db, payment)
     e = lambda v: html.escape("" if v is None else str(v))  # noqa: E731
@@ -283,8 +283,7 @@ def deliver(db: Session, receipt: PaymentReceipt) -> None:
     from app.notifications import notifier as notifier_module
 
     payment = db.get(Payment, receipt.payment_id)
-    onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
-    customer = db.get(Customer, onboarding.customer_id)
+    customer = db.get(Customer, db.get(Project, payment.project_id).customer_id)
     reason = hold_reason(db)
     if reason:
         receipt.email_status, receipt.held_reason = ReceiptEmailStatus.held, reason

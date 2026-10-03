@@ -97,7 +97,9 @@ execution:
       bulk_max_rows: 200            # [PLACEHOLDER]
 
 payments:
-  # P1 — provided by Tanmoy on 28 Sep 2026 (20/60/20): real, still editable here.
+  # P1 — the 20/60/20 terms were given by Tanmoy on 28 Sep 2026, and are awaiting Grid
+  # Nova's written confirmation (so the pre-dispatch due trigger below is also still
+  # unconfirmed). Real working terms, editable here.
   # Each milestone falls due when its trigger stage is recorded. Percentages must sum
   # to 100; the last milestone takes any rounding remainder.
   schedule_template:

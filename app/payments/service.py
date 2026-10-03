@@ -270,6 +270,17 @@ def totals(db: Session, onboarding: CustomerOnboarding) -> dict:
 
 # ── Recording and moving a payment ───────────────────────────────────────────────
 
+def onboarding_of(db: Session, payment: Payment) -> Optional[CustomerOnboarding]:
+    """The associate-sourced customer record behind a payment, if it has one (the key
+    of a payment is its project; onboarding_id is NULL for any other kind of project)."""
+    return db.get(CustomerOnboarding, payment.onboarding_id) if payment.onboarding_id is not None else None
+
+
+def customer_of(db: Session, payment: Payment) -> Optional[Customer]:
+    project = db.get(Project, payment.project_id)
+    return db.get(Customer, project.customer_id) if project is not None else None
+
+
 def _payment_for_update(db: Session, payment_id: int) -> Optional[Payment]:
     return db.execute(select(Payment).where(Payment.id == payment_id).with_for_update()).scalar_one_or_none()
 
@@ -323,7 +334,9 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
         raise AssociateError("This payment would take the total received above the accepted proposal total.",
                              code="exceeds_project_total", status_code=409,
                              extra={"accepted_total": s(total), "already_recorded": s(counted)})
+    previous_id = _previous_dishonoured(db, onboarding.project_id, mode, ref_norm, normalize_bank(bank))
     payment = Payment(project_id=onboarding.project_id, onboarding_id=onboarding.id, milestone_id=milestone_id,
+                      previous_payment_id=previous_id,
                       amount=amount, mode=mode, reference=reference[:100], reference_normalized=ref_norm,
                       bank_name=bank, bank_name_normalized=normalize_bank(bank), instrument_date=instrument_date or None,
                       payer_name=((data.get("payer_name") or "").strip() or None), status=PaymentStatus.recorded,
@@ -337,9 +350,24 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
                              code="duplicate_payment_reference", status_code=409, field="reference")
     db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="recorded", performed_by=actor,
                     after_value={"onboarding_id": onboarding.id, "amount": s(amount), "mode": mode.value,
-                                 "by_associate": by_associate}))
-    _notify(db, "payment_recorded", payment, onboarding)
+                                 "by_associate": by_associate, "previous_payment_id": previous_id}))
+    _notify(db, "payment_recorded", payment)
     return payment
+
+
+def _previous_dishonoured(db: Session, project_id: int, mode: PaymentMode, ref_norm: str,
+                          bank_norm: str) -> Optional[int]:
+    """A dishonoured payment releases its reference, so the same cheque may be presented
+    again on the SAME project — linked to the bounce. One dishonoured on a different
+    project is refused (an instrument belongs to one project), and a live or verified
+    payment with the reference is refused by the unique index at insert."""
+    rows = list(db.execute(select(Payment).where(
+        Payment.mode == mode, Payment.reference_normalized == ref_norm, Payment.bank_name_normalized == bank_norm,
+        Payment.status == PaymentStatus.dishonoured).order_by(Payment.id.desc())).scalars())
+    if any(p.project_id != project_id for p in rows):
+        raise AssociateError("This payment (same mode, reference and bank) is already recorded on another project.",
+                             code="duplicate_payment_reference", status_code=409, field="reference")
+    return rows[0].id if rows else None
 
 
 def attach_proof(db: Session, payment: Payment, *, key: str, filename: str, content_type: str, actor: str) -> Payment:
@@ -378,12 +406,25 @@ def proof_missing(payment: Payment) -> bool:
             and not payment.proof_key)
 
 
-def verify(db: Session, payment_id: int, actor: str) -> Payment:
+def verify(db: Session, payment_id: int, actor: str, *, is_admin: bool = False,
+           reason: Optional[str] = None) -> Payment:
     """Funds confirmed in Grid Nova's bank: status verified + one ledger credit. The
     row lock and the ledger's unique (payment_id, kind) make a double verification
-    impossible even when two requests race."""
+    impossible even when two requests race.
+
+    Segregation of duties: nobody verifies a payment they recorded themselves. Only an
+    Admin may, and then with a reason, audited as `segregation_override`."""
     payment = _payment_for_update(db, payment_id)
     _move(payment, (PaymentStatus.recorded, PaymentStatus.deposited), "verified")
+    override = None
+    if payment.recorded_by == actor:
+        if not is_admin:
+            raise AssociateError("A payment must be verified by someone other than the person who recorded it.",
+                                 code="self_verification", status_code=409)
+        override = (reason or "").strip()
+        if not override:
+            raise AssociateError("Say why you are verifying a payment you recorded yourself.",
+                                 code="reason_required", status_code=422, field="reason")
     if proof_missing(payment):
         raise AssociateError("The associate has not attached proof of this payment yet.", code="proof_required",
                              status_code=409)
@@ -399,10 +440,13 @@ def verify(db: Session, payment_id: int, actor: str) -> Payment:
         raise AssociateError("This payment is already verified.", code="invalid_transition", status_code=409)
     db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="verified", performed_by=actor,
                     before_value={"status": before},
-                    after_value={"status": "verified", "ledger_entry_id": credit.id, "amount": s(payment.amount)}))
-    onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
+                    after_value={"status": "verified", "ledger_entry_id": credit.id, "amount": s(payment.amount),
+                                 "segregation_override": override}))
+    if override:
+        db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="segregation_override",
+                        performed_by=actor, after_value={"recorded_by": payment.recorded_by, "reason": override}))
     from app.payments import receipts
-    receipts.on_verified(db, payment, onboarding, actor)
+    receipts.on_verified(db, payment, onboarding_of(db, payment), actor)
     return payment
 
 
@@ -435,7 +479,7 @@ def dishonour(db: Session, payment_id: int, actor: str, reason: str) -> Payment:
                     after_value={"status": "dishonoured", "reason": reason,
                                  "reversal_entry_id": reversal.id if reversal else None}))
     db.flush()
-    _notify(db, "payment_dishonoured", payment, db.get(CustomerOnboarding, payment.onboarding_id))
+    _notify(db, "payment_dishonoured", payment)
     return payment
 
 
@@ -488,6 +532,7 @@ def payment_json(db: Session, payment: Payment, *, staff: bool = True) -> dict:
     receipt = receipts.for_payment(db, payment.id)
     body = {
         "payment_id": payment.id, "onboarding_id": payment.onboarding_id, "milestone_id": payment.milestone_id,
+        "previous_payment_id": payment.previous_payment_id,
         "amount": s(payment.amount), "mode": payment.mode.value, "reference": payment.reference,
         "bank_name": payment.bank_name,
         "instrument_date": payment.instrument_date.isoformat() if payment.instrument_date else None,
@@ -510,6 +555,21 @@ def payment_json(db: Session, payment: Payment, *, staff: bool = True) -> dict:
     return body
 
 
+def payment_project_summary(db: Session, payment: Payment) -> dict:
+    """The project summary for a payment — from its onboarding when it has one, else
+    from the project alone (no stage, no accepted total)."""
+    onboarding = onboarding_of(db, payment)
+    if onboarding is not None:
+        return project_summary(db, onboarding)
+    customer, project = customer_of(db, payment), db.get(Project, payment.project_id)
+    received = paid(db, payment.project_id)
+    return {"onboarding_id": None, "customer_name": customer.name if customer else None,
+            "customer_email": customer.email if customer else None,
+            "project_reference_id": project.reference_id if project else None, "current_stage": None,
+            "accepted_total": None, "paid_verified": s(received), "awaiting_verification": s(Decimal(0)),
+            "balance": None}
+
+
 def project_summary(db: Session, onboarding: CustomerOnboarding) -> dict:
     """What Accounts needs about the project — no execution detail."""
     from app.onboarding import progress
@@ -523,12 +583,12 @@ def project_summary(db: Session, onboarding: CustomerOnboarding) -> dict:
             "current_stage": timeline["current_stage"], **totals(db, onboarding)}
 
 
-def _notify(db: Session, event: str, payment: Payment, onboarding: CustomerOnboarding) -> None:
+def _notify(db: Session, event: str, payment: Payment) -> None:
     from app.memory.memory_manager import MemoryManager
     from app.notifications import notifier as notifier_module
 
-    customer = db.get(Customer, onboarding.customer_id)
-    payload = {"payment_id": payment.id, "onboarding_id": onboarding.id, "amount": s(payment.amount),
+    customer = customer_of(db, payment)
+    payload = {"payment_id": payment.id, "onboarding_id": payment.onboarding_id, "amount": s(payment.amount),
                "mode": payment.mode.value, "customer_name": customer.name if customer else None,
                "recorded_by": payment.recorded_by, "reason": payment.dishonour_reason}
     MemoryManager(db).notify_after_commit(lambda: notifier_module.notifier.notify(event, payload), event)

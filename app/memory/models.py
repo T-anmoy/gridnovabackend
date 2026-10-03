@@ -1469,6 +1469,9 @@ class InstalledUnit(Base):
     equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id"), nullable=True)
     serial_number: Mapped[str] = mapped_column(String(80), nullable=False)
     serial_normalized: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True)
+    # A voided unit gives up serial_normalized (so the uniqueness stays literal) but keeps
+    # it here, so the same serial turning up on another project can be flagged.
+    voided_serial_normalized: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
     rating_wp: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     rating_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 3), nullable=True)
     is_dcr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -1523,8 +1526,11 @@ class PaymentMilestone(Base):
                       CheckConstraint("amount_due >= 0", name="ck_payment_milestones_amount"))
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # project_id is the key; onboarding_id is set for associate-sourced projects (the only
+    # kind with payments today) and stays NULL for a project sold another way.
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
-    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True,
+                                                         index=True)
     proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     label: Mapped[str] = mapped_column(String, nullable=False)
@@ -1545,14 +1551,21 @@ class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
         CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
+        # One live instrument per (mode, reference, bank). A cancelled or dishonoured
+        # payment releases its reference: a bounced cheque may be presented again
+        # (recorded as a new payment with previous_payment_id pointing at the bounce).
         Index("uq_payments_instrument", "mode", "reference_normalized", "bank_name_normalized", unique=True,
-              sqlite_where=text("status != 'cancelled'"), postgresql_where=text("status != 'cancelled'")),
+              sqlite_where=text("status NOT IN ('cancelled', 'dishonoured')"),
+              postgresql_where=text("status NOT IN ('cancelled', 'dishonoured')")),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
-    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True,
+                                                         index=True)
     milestone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payment_milestones.id"), nullable=True)
+    # Set when this payment re-presents an instrument whose earlier payment was dishonoured.
+    previous_payment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payments.id"), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     mode: Mapped[PaymentMode] = mapped_column(SAEnum(PaymentMode), nullable=False)
     reference: Mapped[str] = mapped_column(String(100), nullable=False)

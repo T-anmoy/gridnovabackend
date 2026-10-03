@@ -455,9 +455,9 @@ entries:
   - id: P1
     area: payments
     location: {file: config/execution_payments.yaml, key: payments.schedule_template}
-    description: Payment terms 20/60/20 (provided 28 Sep 2026) — the pre-dispatch milestone's due trigger is unconfirmed.
-    dummy_value: "milestone 2 falls due when agreement_signed is recorded"
-    needed_from_grid_nova: Please confirm the 20/60/20 terms in writing, and exactly when each part falls due (in particular the 60% before dispatch).
+    description: Payment terms 20% on acceptance / 60% before dispatch / 20% after commissioning — confirmed by Tanmoy on 28 Sep 2026 and awaiting Grid Nova's written confirmation; the pre-dispatch milestone's due trigger is an assumption.
+    dummy_value: "20/60/20 as told by Tanmoy on 28 Sep 2026; milestone 2 falls due when agreement_signed is recorded"
+    needed_from_grid_nova: Please confirm the 20/60/20 terms in writing (they were given to us verbally on 28 Sep 2026), and exactly when each part falls due, in particular the 60% before dispatch.
     blocking: blocks_feature
     probe: yaml_contains_marker
   - id: P2

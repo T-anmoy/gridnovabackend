@@ -79,8 +79,8 @@ def payment_verified(db: Session, payment, receipt_url: Optional[str]) -> None:
     one the customer may see (not held for placeholder content)."""
     from app.payments.service import s
     try:
-        onboarding = db.get(CustomerOnboarding, payment.onboarding_id)
-        target = _target(db, onboarding)
+        onboarding = db.get(CustomerOnboarding, payment.onboarding_id) if payment.onboarding_id is not None else None
+        target = onboarding and _target(db, onboarding)
         if not target:
             return
         to, name = target

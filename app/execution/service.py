@@ -194,9 +194,11 @@ def stage_blockers(db: Session, onboarding: CustomerOnboarding, stage: ProjectSt
     return blockers + register.stage_blockers(db, onboarding, stage)
 
 
-def project_flags(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution) -> list[str]:
-    """Visible, non-blocking project-level flags (dcr_mismatch, capacity_mismatch)."""
-    return register.project_flags(db, onboarding, execution)
+def project_flags(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution,
+                  staff: bool = False) -> list[str]:
+    """Visible, non-blocking project-level flags (dcr_mismatch, capacity_mismatch; for
+    staff also previously_voided)."""
+    return register.project_flags(db, onboarding, execution, staff)
 
 
 def _raise_blockers(blockers: list[dict]) -> None:
@@ -333,16 +335,59 @@ def _after_reject_hooks(db: Session, onboarding: CustomerOnboarding, sub: StageS
 
 
 def record_direct(db: Session, onboarding: CustomerOnboarding, recorded_by: str, stage_value: str,
-                  text: Optional[dict], note: Optional[str] = None) -> ProjectStageEvent:
-    """Grid Nova's own team records a stage (grid_nova mode only), same evidence rules."""
+                  text: Optional[dict], note: Optional[str] = None, *, is_admin: bool = False,
+                  admin_override_reason: Optional[str] = None) -> ProjectStageEvent:
+    """Grid Nova's own team records a stage, same evidence rules.
+
+    On a grid_nova project that is ordinary. On an associate-mode project only an Admin
+    may, with a mandatory reason: the stage is recorded with `via: admin_override`,
+    audited as `admin_override`, and any submission the associate still has pending for
+    that stage is closed as superseded."""
     execution = require(db, onboarding)
+    override = None
     if execution.execution_mode != ExecutionMode.grid_nova:
-        raise AssociateError("The associate submits this project's stages; verify their submission instead.",
-                             code="execution_mode_associate", status_code=409)
+        if not is_admin:
+            raise AssociateError("The associate submits this project's stages; verify their submission instead.",
+                                 code="execution_mode_associate", status_code=409)
+        override = (admin_override_reason or "").strip()
+        if not override:
+            raise AssociateError("This project's stages are submitted by the associate. To record one yourself, "
+                                 "give admin_override_reason.", code="reason_required", status_code=422,
+                                 field="admin_override_reason")
     stage = _stage(stage_value)
     _check_can_move(db, onboarding, stage)
-    evidence = {**evidence_for(db, execution, stage, text), "via": "direct"}
-    return _record(db, onboarding, stage, recorded_by, evidence, note.strip() if note and note.strip() else None)
+    evidence = {**evidence_for(db, execution, stage, text), "via": "admin_override" if override else "direct"}
+    if override:
+        evidence["admin_override_reason"] = override
+    event = _record(db, onboarding, stage, recorded_by, evidence, note.strip() if note and note.strip() else None)
+    if override:
+        for sub in pending_for(db, onboarding.project_id, stage):
+            sub.status, sub.reviewed_by, sub.reviewed_at = StageSubmissionStatus.rejected, recorded_by, _now()
+            sub.review_note = f"Superseded: an admin recorded this stage directly ({override})"
+        db.add(AuditLog(entity_type="project_execution", entity_id=str(execution.id), action="admin_override",
+                        performed_by=recorded_by, after_value={"stage": stage.value, "reason": override,
+                                                               "execution_mode": execution.execution_mode.value}))
+        db.flush()
+    return event
+
+
+def switch_to_grid_nova(db: Session, onboarding: CustomerOnboarding, admin_id: str, reason: str) -> ProjectExecution:
+    """An Admin takes execution over from the associate (mandatory reason, audited with
+    before/after). Stages already recorded, and any pending submission, are untouched."""
+    execution = require(db, onboarding)
+    reason = (reason or "").strip()
+    if not reason:
+        raise AssociateError("Say why Grid Nova is taking over this project's execution.", code="reason_required",
+                             status_code=422, field="reason")
+    if execution.execution_mode == ExecutionMode.grid_nova:
+        raise AssociateError("Grid Nova already executes this project.", code="already_grid_nova", status_code=409)
+    before = execution.execution_mode.value
+    execution.execution_mode = ExecutionMode.grid_nova
+    db.add(AuditLog(entity_type="project_execution", entity_id=str(execution.id), action="mode_changed",
+                    performed_by=admin_id, before_value={"execution_mode": before},
+                    after_value={"execution_mode": "grid_nova", "reason": reason}))
+    db.flush()
+    return execution
 
 
 # ── Aging and status ─────────────────────────────────────────────────────────────
@@ -381,7 +426,7 @@ def submission_json(sub: StageSubmission) -> dict:
             else None, "review_note": sub.review_note}
 
 
-def status(db: Session, onboarding: CustomerOnboarding) -> dict:
+def status(db: Session, onboarding: CustomerOnboarding, staff: bool = False) -> dict:
     """The execution picture for one customer — identical for every audience allowed
     to see it (it carries no money). 409 execution_not_started before the agreement."""
     from app.onboarding import progress
@@ -414,7 +459,7 @@ def status(db: Session, onboarding: CustomerOnboarding) -> dict:
     files = execution.files or {}
     nxt = next((s for s in stages if s not in done), None)
     pending = [s for s in subs if s.status == StageSubmissionStatus.pending]
-    extras = register.summary(db, onboarding, execution)
+    extras = register.summary(db, onboarding, execution, staff)
     return {
         "onboarding_id": onboarding.id, "project_id": onboarding.project_id,
         "execution_mode": execution.execution_mode.value,

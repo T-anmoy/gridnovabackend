@@ -71,7 +71,7 @@ def customer_block(db: Session, onboarding: CustomerOnboarding, employee: Authen
 
 def _detail(db: Session, onboarding: CustomerOnboarding, employee: AuthenticatedEmployee) -> dict:
     try:
-        body = execution.status(db, onboarding)
+        body = execution.status(db, onboarding, staff=True)
     except AssociateError as exc:
         raise _error(exc)
     return {**body, "customer": customer_block(db, onboarding, employee),
@@ -108,7 +108,7 @@ def queue_rows(db: Session, employee: AuthenticatedEmployee) -> list[dict]:
         done = events[record.project_id]
         age = execution.aging(stages, done)
         subs = pending[record.project_id]
-        flags = execution.project_flags(db, onboarding, record)
+        flags = execution.project_flags(db, onboarding, record, staff=True)
         reasons = (["pending_verification"] if subs else []) + (["stuck"] if age["is_stuck"] else []) + flags
         customer = db.get(Customer, onboarding.customer_id)
         nxt = next((s for s in stages if s not in done), None)
@@ -270,21 +270,47 @@ def reject_submission(submission_id: int, body: ReviewRequest, db: Session = Dep
     return _detail(db, db.get(CustomerOnboarding, sub.onboarding_id), employee)
 
 
+class SwitchModeRequest(BaseModel):
+    execution_mode: Literal["grid_nova"]
+    reason: str = Field(max_length=2000)
+
+
+# Defined BEFORE .../execution/{stage}, which would otherwise take "mode" for a stage.
+@router.post("/onboardings/{onboarding_id}/execution/mode")
+def switch_execution_mode(onboarding_id: int, body: SwitchModeRequest, db: Session = Depends(get_db),
+                          employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Admin only: Grid Nova takes over this project's execution from the associate."""
+    if not employee.is_admin:
+        raise HTTPException(status_code=403, detail="Only Admin can change a project's execution mode.")
+    onboarding = _load(db, employee, onboarding_id)
+    try:
+        execution.switch_to_grid_nova(db, onboarding, employee.employee_id, body.reason)
+    except AssociateError as exc:
+        db.rollback()
+        raise _error(exc)
+    db.commit()
+    return _detail(db, onboarding, employee)
+
+
 class RecordExecutionStageRequest(BaseModel):
     text: dict[str, str] = Field(default_factory=dict)
     note: Optional[str] = Field(default=None, max_length=2000)
+    admin_override_reason: Optional[str] = Field(default=None, max_length=2000)
 
 
 @router.post("/onboardings/{onboarding_id}/execution/{stage}")
 def record_execution_stage(onboarding_id: int, stage: str, body: RecordExecutionStageRequest,
                            db: Session = Depends(get_db),
                            employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Record an execution stage directly — projects Grid Nova executes itself."""
+    """Record an execution stage directly — projects Grid Nova executes itself. On an
+    associate-mode project only an Admin may, and only with `admin_override_reason`
+    (recorded with via `admin_override`, audited)."""
     if not employee.can_record_execution():
         raise HTTPException(status_code=403, detail="Your role cannot record execution.")
     onboarding = _load(db, employee, onboarding_id)
     try:
-        execution.record_direct(db, onboarding, employee.employee_id, stage, body.text, body.note)
+        execution.record_direct(db, onboarding, employee.employee_id, stage, body.text, body.note,
+                                is_admin=employee.is_admin, admin_override_reason=body.admin_override_reason)
     except AssociateError as exc:
         db.rollback()
         raise _error(exc)
