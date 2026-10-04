@@ -93,6 +93,9 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/proposal/in-person-acceptance"):
         (ONBOARDING_ACTORS, {"json": {"proposal_id": 1, "delivered_on": "2026-09-01", "note": "x",
                                       "reference": "x"}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
+        (ONBOARDING_ACTORS, {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52",
+                                      "reason": "Confirmed on the call."}}),
     ("GET", "/api/v1/dashboard/placeholders"): ({"admin", "management"}, {}),
     ("POST", "/api/v1/dashboard/placeholders/{entry_id}/resolve"): (ADMIN_ONLY, {"json": {"note": "x"}}),
     ("GET", "/api/v1/dashboard/execution"): (EXECUTION_READERS, {}),
@@ -159,6 +162,9 @@ ASSOCIATE = {
         ("write", upload_form(kind="document", document_type="noc")),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/files/{file_ref}"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/submit"): ("write", {}),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location"):
+        ("write", {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52"}}),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location/confirm"): ("write", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/progress"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/request-formal-proposal"): ("write", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/estimates"): ("write", {"json": {}}),

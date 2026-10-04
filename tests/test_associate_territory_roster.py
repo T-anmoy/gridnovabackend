@@ -8,7 +8,7 @@ from app.memory.models import AssociateStatus, CustomerOnboarding, OnboardingSta
 from tests.associate_support import BHARGAMA, BR, WB
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, ALIPURDUAR_I, ALIPURDUAR_II, ARARIA, ARARIA_BLOCK, BASE, DASH, KOLKATA, headers, kyc_ready,
-    make_associate, onboarding_body, onboarding_ready, territories, upload_required_documents,
+    make_associate, onboarding_body, onboarding_ready, territories, upload_required_documents, confirm_site_location,
 )
 
 ROSTER = "/api/v1/associate/territory/members"
@@ -127,6 +127,7 @@ class TestPayload:
         _onboard(client, worker, 2)                      # stays draft
         closed = _onboard(client, worker, 3)
         upload_required_documents(client, worker, verified)
+        confirm_site_location(client, worker, verified)
         assert client.post(f"{BASE}/{verified}/submit", headers=headers(worker)).status_code == 200
         r = client.post(f"{DASH}/onboardings/{verified}/verification-call",
                         json={"verification_call_completed": True, "note": "Confirmed."}, headers=ADMIN)

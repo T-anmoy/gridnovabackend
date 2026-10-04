@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from app.memory.models import (
     CustomerTimeline, CustomerType, DiscomConsumerCategory, GovernmentScheme, OnboardingStatus, ProjectFamily,
     ProposalInputs, ShadingCondition, SiteType,
 )
-from app.onboarding import config, serialize, service
+from app.onboarding import config, serialize, service, site_location
 
 router = APIRouter(prefix="/api/v1/associate/onboardings")
 
@@ -189,6 +189,7 @@ def options(current: AuthenticatedAssociate = Depends(get_current_associate)):
         "photo_slots": list(INSTALLATION_PHOTO_SLOTS),
         "customer_timelines": [t.value for t in CustomerTimeline],
         "attribution_lock_days": cfg["attribution_lock_days"],
+        "site_location": site_location.options(),
     }
 
 
@@ -280,12 +281,15 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
                       captured_at: Optional[str] = Form(default=None, max_length=40),
                       capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
                       exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
+                      accuracy_m: Optional[float] = Form(default=None, gt=0, le=100_000),
                       db: Session = Depends(get_db),
                       current: AuthenticatedAssociate = Depends(get_current_associate)):
     """Upload one checklist document or one site photo. The server records when it
     received the file; GPS and the client's capture time are stored if supplied.
     Photos record their provenance (app/execution/photos.py): `capture_method` camera
-    (GPS + captured_at required) or gallery (phone gallery; location optional)."""
+    (GPS + captured_at required) or gallery (phone gallery; location optional).
+    `accuracy_m` (photos): the GPS fix's reported accuracy, stored and returned as-is —
+    a camera photo's fix can then become the site location (POST .../site-location)."""
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
     require_onboarding_edit(associate, onboarding)
@@ -336,6 +340,8 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
         metadata.update(latitude=latitude, longitude=longitude)
     if captured_at:
         metadata["client_captured_at"] = captured_at
+    if kind == "photo" and accuracy_m is not None:
+        metadata["accuracy_m"] = accuracy_m
     if provenance is not None:
         from app.execution import photos
         metadata.update(photos.flag_duplicate_and_record(db, provenance, project_id=onboarding.project_id,
@@ -387,6 +393,87 @@ def submit_onboarding(onboarding_id: int, db: Session = Depends(get_db),
         raise _error(exc)
     db.commit()
     return serialize.onboarding(db, onboarding, viewer_is_owner=True)
+
+
+class _DeviceGps(BaseModel):
+    source: Literal["device_gps"]
+    latitude: float
+    longitude: float
+    accuracy_m: float = Field(gt=0, le=100_000)
+    captured_at: datetime
+
+
+class _PhotoGps(BaseModel):
+    source: Literal["photo_gps"]
+    photo_slot: str = Field(max_length=100)
+
+
+class _MapsLink(BaseModel):
+    source: Literal["google_maps_link"]
+    link: str = Field(min_length=1, max_length=500)
+
+
+class _PastedCoordinates(BaseModel):
+    source: Literal["pasted_coordinates"]
+    text: str = Field(min_length=1, max_length=100)
+
+
+class SiteLocationRequest(RootModel):
+    root: Annotated[Union[_DeviceGps, _PhotoGps, _MapsLink, _PastedCoordinates], Field(discriminator="source")]
+
+
+def link_resolver(who: str):
+    """(link) -> (lat, lon, precision), raising AssociateError — shared with the staff route."""
+    from app.onboarding import maps_link
+
+    def resolve(link: str):
+        try:
+            return maps_link.coordinates_from_link(link, who=who)
+        except maps_link.LinkError as exc:
+            body = exc.body()
+            raise AssociateError(exc.message, code=exc.code, status_code=exc.status_code, field="link",
+                                 extra={k: v for k, v in body.items() if k not in ("code", "message", "field")})
+    return resolve
+
+
+@router.post("/{onboarding_id}/site-location")
+def set_site_location(onboarding_id: int, body: SiteLocationRequest, db: Session = Depends(get_db),
+                      current: AuthenticatedAssociate = Depends(get_current_associate)):
+    """Set the customer's site location (owner only; draft/submitted — a submitted
+    customer returns to draft, like any edit). One fix per call: phone GPS, a camera
+    photo's GPS fix (recommended), a Google Maps link, or pasted coordinates. The new
+    location is UNCONFIRMED until POST .../site-location/confirm."""
+    associate = _associate(db, current)
+    onboarding = _load(db, onboarding_id)
+    require_onboarding_edit(associate, onboarding)
+    who = service.actor(associate)
+    try:
+        location_warnings = site_location.set_location(db, onboarding, who, body.root.model_dump(),
+                                                       resolve_link=link_resolver(who))
+    except AssociateError as exc:
+        db.rollback()
+        raise _error(exc)
+    db.commit()
+    data = serialize.onboarding(db, onboarding, viewer_is_owner=True)
+    return {**data, "warnings": data["warnings"] + location_warnings}
+
+
+@router.post("/{onboarding_id}/site-location/confirm")
+def confirm_site_location(onboarding_id: int, db: Session = Depends(get_db),
+                          current: AuthenticatedAssociate = Depends(get_current_associate)):
+    """The associate confirms the location is the customer's house (required to submit,
+    even for a precise GPS fix). 409 site_location_not_set when there is none."""
+    associate = _associate(db, current)
+    onboarding = _load(db, onboarding_id)
+    require_onboarding_edit(associate, onboarding)
+    try:
+        site_location.confirm(db, onboarding, service.actor(associate))
+    except AssociateError as exc:
+        db.rollback()
+        raise _error(exc)
+    db.commit()
+    data = serialize.onboarding(db, onboarding, viewer_is_owner=True)
+    return {**data, "warnings": data["warnings"] + site_location.location_warnings(db, onboarding)}
 
 
 @router.get("/{onboarding_id}/progress")

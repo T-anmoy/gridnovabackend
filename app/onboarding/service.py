@@ -41,7 +41,7 @@ from app.memory.models import (
     ProposalInputs,
     TimelineEventType,
 )
-from app.onboarding import config, pincode
+from app.onboarding import config, pincode, site_location
 
 EDITABLE_STATUSES = (OnboardingStatus.draft, OnboardingStatus.submitted)
 
@@ -245,12 +245,16 @@ def create(db: Session, associate: Associate, data: dict) -> tuple[CustomerOnboa
         lead_id=lead.id, customer_id=customer.id, project_id=project.id, proposal_inputs_id=inputs.id,
         owner_associate_id=associate.id, status=OnboardingStatus.draft,
         state_id=place.state.id, district_id=place.district.id, block_id=place.block.id if place.block else None,
-        site_latitude=data.get("site_latitude"), site_longitude=data.get("site_longitude"),
         customer_mobile=data["customer_mobile"], consumer_number_key=key,
         notice_version=version, notice_acknowledged_at=_now(), notice_recorded_by=who,
         verification_call_completed=False, created_by=who,
         **{f: data.get(f) for f in ONBOARDING_FIELDS if f in data},
     )
+    legacy_location = data.get("site_latitude") is not None
+    if legacy_location:
+        # A raw pair from an older client: kept, but unknown_legacy, unverified and
+        # unconfirmed — the submit gate still applies (app/onboarding/site_location.py).
+        site_location.apply_legacy(db, onboarding, data["site_latitude"], data["site_longitude"], who)
     db.add(onboarding)
     db.flush()
     _audit(db, onboarding.id, "created", who, after={
@@ -260,6 +264,11 @@ def create(db: Session, associate: Associate, data: dict) -> tuple[CustomerOnboa
     })
     apply_lead_fields(memory, lead, _lead_fields(data["customer_name"], data["customer_mobile"], email, inputs),
                       performed_by=who, via="associate onboarding")
+    if legacy_location:
+        _audit(db, onboarding.id, "site_location_set", who, after=site_location._snapshot(onboarding))
+        memory.add_timeline_event(lead_id=lead.id, event_type=TimelineEventType.site_location_updated,
+                                  description="Site location entered directly (unverified) — awaiting the "
+                                              "associate's confirmation", created_by=who)
     flags = _flag_conflicts(db, memory, onboarding, matches, who)
     from app.memory.models import ProjectStage
     from app.onboarding import progress
@@ -317,10 +326,16 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
         if field in changes and getattr(inputs, field) != changes[field]:
             before[field], after[field] = getattr(inputs, field), changes[field]
             setattr(inputs, field, changes[field])
-    for field in ONBOARDING_FIELDS + ("site_latitude", "site_longitude"):
+    for field in ONBOARDING_FIELDS:
         if field in changes and getattr(onboarding, field) != changes[field]:
             before[field], after[field] = getattr(onboarding, field), changes[field]
             setattr(onboarding, field, changes[field])
+    location_before = None
+    if "site_latitude" in changes and (changes["site_latitude"], changes.get("site_longitude")) != (
+            onboarding.site_latitude, onboarding.site_longitude):
+        location_before, location_after = site_location.apply_legacy(
+            db, onboarding, changes["site_latitude"], changes.get("site_longitude"), who)
+        before["site_location"], after["site_location"] = location_before, location_after
     if identity_changed:
         before.update(customer_mobile=onboarding.customer_mobile, consumer_number_key=onboarding.consumer_number_key)
         after.update(customer_mobile=mobile, consumer_number_key=key)
@@ -343,6 +358,10 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
             onboarding.submitted_at = None
         db.flush()
         _audit(db, onboarding.id, "updated", who, before=_jsonable(before), after=_jsonable(after))
+        if location_before is not None:
+            site_location._after_change(db, onboarding, location_before, who,
+                                        "Site location entered directly (unverified) — awaiting the "
+                                        "associate's confirmation")
         lead = memory.get_lead(onboarding.lead_id)
         email = None if is_placeholder_email(customer.email) else customer.email
         apply_lead_fields(memory, lead, _lead_fields(customer.name, customer.phone or mobile, email, inputs),
@@ -385,9 +404,17 @@ def submit(db: Session, onboarding: CustomerOnboarding, associate: Associate) ->
         raise AssociateError(f"Only a draft can be submitted (this one is {onboarding.status.value}).",
                              code="invalid_transition", status_code=409)
     missing = checklist(db, onboarding)["missing"]
-    if missing:
-        raise AssociateError("Upload every required document before submitting: " + ", ".join(missing) + ".",
-                             code="incomplete", status_code=422, extra={"missing_documents": missing})
+    gaps = site_location.submit_gaps(onboarding)
+    if missing or any(gaps.values()):
+        problems = []
+        if missing:
+            problems.append("upload every required document (" + ", ".join(missing) + ")")
+        if gaps["missing_site_location"]:
+            problems.append("set the customer's site location")
+        elif gaps["site_location_unconfirmed"]:
+            problems.append("confirm the site location is the customer's house")
+        raise AssociateError("Before submitting, " + "; ".join(problems) + ".", code="incomplete",
+                             status_code=422, extra={"missing_documents": missing, **gaps})
     who = actor(associate)
     onboarding.status = OnboardingStatus.submitted
     onboarding.submitted_at = _now()

@@ -14,7 +14,7 @@ from app.memory.models import (
 from app.onboarding import progress
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
-    territories, upload_required_documents,
+    territories, upload_required_documents, confirm_site_location,
 )
 
 PDF = b"%PDF-1.4\n" + b"%" * 64
@@ -32,6 +32,7 @@ def _assessed(client, db_session, **kw):
     gna, o = _new(client, db_session, **kw)
     oid = o["onboarding_id"]
     upload_required_documents(client, gna, oid)
+    confirm_site_location(client, gna, oid)
     client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
     assert client.post(f"{DASH}/onboardings/{oid}/verification-call",
                        json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN).status_code == 200
@@ -122,6 +123,7 @@ class TestFormalProposal:
         gna, o = _new(client, db_session)
         oid = o["onboarding_id"]
         upload_required_documents(client, gna, oid)
+        confirm_site_location(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         client.post(f"{DASH}/onboardings/{oid}/verification-call",
                     json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)

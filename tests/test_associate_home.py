@@ -12,7 +12,7 @@ from tests.execution_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, BASE, DASH, OPS, SALES, advance_to, associate_in_execution, days_ago, exec_url, headers,
     kyc_ready, make_associate, new_customer, notifications, onboarding_ready, territories,
 )
-from tests.onboarding_support import upload_required_documents
+from tests.onboarding_support import confirm_site_location, upload_required_documents
 from tests.payments_support import ACCOUNTS, PAY, accepted_customer, neft, record, stub_pdf  # noqa: F401
 
 HOME = "/api/v1/associate/home"
@@ -33,6 +33,7 @@ class TestFeed:
         assert item["params"]["missing_documents"] == ["electricity_bill", "id_proof", "ownership_proof", "photo"]
         assert body["totals"] == {"customers": 1, "awaiting_grid_nova": 0, "needing_action": 1}
         upload_required_documents(client, gna, oid)
+        confirm_site_location(client, gna, oid)
         _, items = _feed(client, gna)
         assert set(items) == {(oid, "ready_to_submit")}
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
@@ -111,8 +112,10 @@ class TestProgressSummary:
         assert item["progress_summary"] == {
             "current_stage": "agreement_signed", "stage_label": "Agreement signed",
             "next_stage": "feasibility_submitted", "next_stage_label": "DISCOM feasibility submitted",
-            # The test shortcut leaves the record a draft, so its documents are still due too.
-            "needs_action": True, "action_kinds": ["documents_missing", "execution_next_step"], "blocked": None}
+            # The test shortcut leaves the record a draft, so its documents and site location
+            # are still due too.
+            "needs_action": True, "action_kinds": ["documents_missing", "execution_next_step", "site_location_missing"],
+            "blocked": None, "site_location": {"present": False, "confirmed": False}}
         staff_item = client.get(f"{DASH}/onboardings", headers=ADMIN).json()["items"][0]
         assert staff_item["progress_summary"]["next_stage"] == "feasibility_submitted"
 

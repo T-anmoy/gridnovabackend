@@ -308,6 +308,15 @@ entries:
     blocking: blocks_feature
     probe: constant_equals
 
+  - id: PRC-16
+    area: pricing
+    location: {file: config/price_list.yaml, key: effective_from}
+    description: The date from which the pricing and equipment master data (price list version 1) applies — not stated in the source document.
+    dummy_value: null
+    needed_from_grid_nova: From what date does this price list apply?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+
   # ── Associates ─────────────────────────────────────────────────────────────────
   - id: ASC-1
     area: associates
@@ -374,6 +383,80 @@ entries:
     dummy_value: 100
     needed_from_grid_nova: How much blank space (in mm) does the top of the stamp paper Grid Nova uses need?
     blocking: blocks_feature
+    probe: yaml_contains_marker
+
+  # ── Site location (Phase 3C) ───────────────────────────────────────────────────
+  - id: L1
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.accuracy_good_m}
+    description: "GPS accuracy thresholds for the site location: at or under accuracy_good_m a phone/photo fix is verified; above accuracy_warn_m the associate is warned; above accuracy_reject_m it is refused (also accuracy_warn_m and accuracy_reject_m)."
+    dummy_value: {accuracy_good_m: 50, accuracy_warn_m: 150, accuracy_reject_m: 300}
+    needed_from_grid_nova: How precise must a site GPS fix be — when is it good enough to trust, when should the associate be warned, and when refused?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L1b
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.accuracy_warn_m}
+    description: GPS accuracy above which the associate is warned to retry (part of L1).
+    dummy_value: 150
+    needed_from_grid_nova: See L1 — at what accuracy should the associate be warned to take the fix again?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L1c
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.accuracy_reject_m}
+    description: GPS accuracy above which a site fix is refused (part of L1).
+    dummy_value: 300
+    needed_from_grid_nova: See L1 — at what accuracy should a site GPS fix be refused outright?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L2
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.photo_mismatch_m}
+    description: Distance between the site pin and the median of the camera photos' GPS fixes above which the location is flagged far_from_photos.
+    dummy_value: 200
+    needed_from_grid_nova: How far apart may the site pin and the site photos' positions be before staff should double-check the address?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L3
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.india_bbox}
+    description: Sanity box for "inside India" (lat 6.0–37.5, lon 68.0–97.5); a site outside it is refused.
+    dummy_value: {lat_min: 6.0, lat_max: 37.5, lon_min: 68.0, lon_max: 97.5}
+    needed_from_grid_nova: Nothing needed — a sanity check chosen by the developer; listed so every location setting is visible. Tell us if sites outside India will ever be onboarded.
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L4
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.link_hosts_allowlist}
+    description: The only hosts a pasted Google Maps link, and every redirect it follows, may be on (security list).
+    dummy_value: [maps.app.goo.gl, goo.gl, google.com, www.google.com, maps.google.com, google.co.in, www.google.co.in]
+    needed_from_grid_nova: Nothing needed — a security list chosen by the developer; listed so it is reviewed rather than forgotten.
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L5
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: scoring.site_location_fractions}
+    description: "Scoring weight of a confirmed site location (scoring.weights.site_location: 5, taken from site_readiness 10 → 5); verified = 1.0, confirmed but unverified = 0.5, else 0."
+    dummy_value: {weights: {site_location: 5, site_readiness: 5}, site_location_fractions: {confirmed_verified: 1.0, confirmed_unverified: 0.5}}
+    needed_from_grid_nova: How much should a confirmed site location count when ranking customers, compared with the site photos?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L6
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.link_resolve_rate_limit}
+    description: Google Maps short links each associate may have expanded per hour (outbound requests).
+    dummy_value: 20
+    needed_from_grid_nova: Nothing needed — an abuse limit chosen by the developer; listed so it is visible.
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: L7
+    area: onboarding
+    location: {file: config/associate_onboarding.yaml, key: location.sample_seconds}
+    description: How long the app samples the phone's GPS for one site fix (served to the app via /options).
+    dummy_value: 10
+    needed_from_grid_nova: Nothing needed — a working default; listed so it is visible.
+    blocking: tunable
     probe: yaml_contains_marker
 
   # ── Execution (Phase 4A) ───────────────────────────────────────────────────────

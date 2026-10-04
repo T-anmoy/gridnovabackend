@@ -8,7 +8,7 @@ from app.memory.models import AuditLog, Customer, CustomerOnboarding, Lead, Prop
 from app.notifications.notifier import LogNotifier
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
-    territories, upload_required_documents,
+    territories, upload_required_documents, confirm_site_location,
 )
 
 
@@ -32,6 +32,7 @@ def _assessed(client, db_session, n=1, **kw):
     o = client.post(BASE, json=onboarding_body(n=n, **kw), headers=headers(gna)).json()
     oid = o["onboarding_id"]
     upload_required_documents(client, gna, oid)
+    confirm_site_location(client, gna, oid)
     client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
     client.post(f"{DASH}/onboardings/{oid}/verification-call",
                 json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)

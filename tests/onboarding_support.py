@@ -146,6 +146,20 @@ def upload_required_documents(client, associate_id, onboarding_id) -> None:
         assert upload(client, associate_id, onboarding_id, document_type=doc).status_code == 201
 
 
+SITE_TEXT = "26.4900, 89.5200"   # in Alipurduar district, where the default test customer is
+
+
+def confirm_site_location(client, associate_id, onboarding_id, text: str = SITE_TEXT) -> dict:
+    """Set the site location (pasted coordinates) and confirm it — what submitting needs
+    besides the documents (Phase 3C)."""
+    r = client.post(f"{BASE}/{onboarding_id}/site-location", json={"source": "pasted_coordinates", "text": text},
+                    headers=headers(associate_id))
+    assert r.status_code == 200, r.text
+    r = client.post(f"{BASE}/{onboarding_id}/site-location/confirm", headers=headers(associate_id))
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 @pytest.fixture
 def onboarding_ready(kyc_ready, db_session):
     """Storage, encryption key and the territory subset — plus the staff rows used."""

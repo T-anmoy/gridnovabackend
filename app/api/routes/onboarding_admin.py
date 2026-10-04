@@ -3,10 +3,10 @@ verification call, and Admin decisions on attribution conflicts. Lead visibility
 follows app/auth/scoping.py (Sales: own + unassigned) exactly as for any other lead."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -105,6 +105,44 @@ def verification_call(onboarding_id: int, body: VerificationCallRequest, db: Ses
         raise _error(exc)
     db.commit()
     return serialize.onboarding(db, onboarding, staff=True)
+
+
+class StaffSiteLocationRequest(BaseModel):
+    source: Literal["google_maps_link", "pasted_coordinates"]
+    link: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    text: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    reason: str = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def _input(self):
+        if self.source == "google_maps_link" and not self.link:
+            raise ValueError("link is required for google_maps_link")
+        if self.source == "pasted_coordinates" and not self.text:
+            raise ValueError("text is required for pasted_coordinates")
+        return self
+
+
+@router.post("/onboardings/{onboarding_id}/site-location")
+def correct_site_location(onboarding_id: int, body: StaffSiteLocationRequest, db: Session = Depends(get_db),
+                          employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Correct the customer's site location during the verification call (Admin, Sales).
+    Stored as `staff_entered`, unverified, confirmed by this staff member; a reason is
+    required and the change is audited with before/after. The status does not change."""
+    from app.api.routes.associate_onboarding import link_resolver
+    from app.onboarding import site_location
+
+    if not employee.can_verify_onboarding():
+        raise HTTPException(status_code=403, detail="Your role cannot correct a customer's site location.")
+    onboarding = _load(db, employee, onboarding_id)
+    try:
+        location_warnings = site_location.staff_correct(db, onboarding, employee.employee_id, body.model_dump(),
+                                                        resolve_link=link_resolver(f"staff:{employee.employee_id}"))
+    except AssociateError as exc:
+        db.rollback()
+        raise _error(exc)
+    db.commit()
+    data = serialize.onboarding(db, onboarding, staff=True)
+    return {**data, "warnings": data["warnings"] + location_warnings}
 
 
 @router.get("/attribution-flags")

@@ -9,7 +9,7 @@ from app.memory.models import CustomerOnboarding, Lead, LeadScore, ScoreBand
 from app.notifications.notifier import LogNotifier
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, ALIPURDUAR_I, BASE, DASH, SALES, headers, kyc_ready, make_associate, onboarding_body,
-    onboarding_ready, territories, upload, upload_required_documents,
+    onboarding_ready, territories, upload, upload_required_documents, confirm_site_location,
 )
 
 
@@ -43,10 +43,12 @@ class TestScore:
         body = _create(client, make_associate(db_session))
         f = _factors(body)
         # 3 kW asked, 5 kW sanctioned, 400 kWh/month: 3 × 120 = 360 ≤ 400 × 1.5 → no capacity warning.
+        # The worked example in app/onboarding/scoring.py's docstring.
         assert {k: v["points"] for k, v in f.items()} == {
             "verification_call": 0, "documents_complete": 0, "subsidy_eligibility": 20, "system_fit": 15,
-            "customer_timeline": 7, "site_readiness": 0, "associate_track_record": 5,
+            "customer_timeline": 7, "site_readiness": 0, "site_location": 0, "associate_track_record": 5,
         }
+        assert f["site_location"]["detail"] == "no site location yet"
         assert body["score"]["score"] == 47 and body["score"]["band"] == "warm"
         assert sum(v["weight"] for v in f.values()) == 100
         assert "fewer than 3" in f["associate_track_record"]["detail"]
@@ -59,14 +61,33 @@ class TestScore:
         upload_required_documents(client, gna, oid)
         for slot in ("panel_installation_area", "wiring_path"):
             upload(client, gna, oid, photo_slot=slot)
+        confirm_site_location(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         r = client.post(f"{DASH}/onboardings/{oid}/verification-call",
                         json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)
         f = _factors(r.json())
         assert f["documents_complete"]["points"] == 15 and f["verification_call"]["points"] == 20
-        assert f["site_readiness"]["points"] == round(10 * 2 / 7, 2)
-        assert r.json()["score"]["score"] == 85 and r.json()["score"]["band"] == "hot"
+        assert f["site_readiness"]["points"] == round(5 * 2 / 7, 2)
+        # Pasted coordinates, confirmed: unverified → half of the site_location weight.
+        assert f["site_location"]["points"] == 2.5 and f["site_location"]["detail"] == "site location confirmed (unverified)"
+        # 20 + 15 + 20 + 15 + 7 + 1.43 + 2.5 + 5 = 85.93 → 86
+        assert r.json()["score"]["score"] == 86 and r.json()["score"]["band"] == "hot"
         assert db_session.get(Lead, r.json()["lead_id"]).lead_score == LeadScore.high
+
+    def test_site_location_factor(self, client, db_session, onboarding_ready):
+        gna = make_associate(db_session)
+        oid = _create(client, gna)["onboarding_id"]
+        url = f"{BASE}/{oid}/site-location"
+        gps = {"source": "device_gps", "latitude": 26.49, "longitude": 89.52, "accuracy_m": 12,
+               "captured_at": "2026-10-04T10:00:00+05:30"}
+        f = _factors(client.post(url, json=gps, headers=headers(gna)).json())
+        assert f["site_location"]["points"] == 0 and f["site_location"]["detail"] == "site location set but not confirmed"
+        body = client.post(f"{url}/confirm", headers=headers(gna)).json()
+        assert _factors(body)["site_location"]["points"] == 5 and body["score"]["score"] == 52
+        body = client.post(url, json={**gps, "accuracy_m": 120}, headers=headers(gna)).json()   # cleared again
+        assert _factors(body)["site_location"]["points"] == 0
+        body = client.post(f"{url}/confirm", headers=headers(gna)).json()
+        assert _factors(body)["site_location"]["points"] == 2.5
 
     def test_subsidy_eligibility_counts_dcr_only_for_pm_surya_ghar(self, client, db_session, onboarding_ready):
         gna = make_associate(db_session)
@@ -95,6 +116,7 @@ class TestScore:
         for n in (1, 2, 3):
             oid = _create(client, gna, n=n)["onboarding_id"]
             upload_required_documents(client, gna, oid)
+            confirm_site_location(client, gna, oid)
             client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
             if n < 3:
                 client.post(f"{DASH}/onboardings/{oid}/verification-call",
@@ -108,6 +130,7 @@ class TestScore:
         oid = _create(client, gna)["onboarding_id"]
         assert client.get(f"{BASE}/{oid}", headers=headers(gna)).json()["score"]["response_due_at"] is None
         upload_required_documents(client, gna, oid)
+        confirm_site_location(client, gna, oid)
         body = client.post(f"{BASE}/{oid}/submit", headers=headers(gna)).json()
         due = datetime.fromisoformat(body["score"]["response_due_at"])
         submitted = datetime.fromisoformat(body["submitted_at"])
@@ -129,6 +152,7 @@ class TestEscalation:
     def _submitted(self, client, db_session, gna, n=1, **kw):
         oid = _create(client, gna, n=n, **kw)["onboarding_id"]
         upload_required_documents(client, gna, oid)
+        confirm_site_location(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         o = db_session.get(CustomerOnboarding, oid)
         db_session.refresh(o)

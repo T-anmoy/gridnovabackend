@@ -8,7 +8,9 @@ into English, Hindi or Bengali.
     stage_rejected            todo.stage_rejected                 1  (params: stage, stage_label, review_note)
     payment_due (overdue)     todo.payment_overdue                1  (params: milestone_number, label, outstanding)
     documents_missing         todo.documents_missing              1  (params: missing_documents)
-    ready_to_submit           todo.ready_to_submit                1
+    site_location_missing     todo.site_location_missing          1  (draft only)
+    site_location_unconfirmed todo.site_location_unconfirmed      1  (draft only)
+    ready_to_submit           todo.ready_to_submit                1  (documents AND confirmed location)
     upload_signed_agreement   todo.upload_signed_agreement        2
     formal_proposal_ready     todo.formal_proposal_ready          2
     execution_next_step       todo.execution_next_step            2  (params: stage, stage_label)
@@ -59,9 +61,17 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
     name = customer.name if customer else None
     items = []
     if onboarding.status == OnboardingStatus.draft:
+        from app.onboarding import site_location
         missing = service.checklist(db, onboarding)["missing"]
-        items.append(_item(onboarding, name, "documents_missing", 1, {"missing_documents": missing}) if missing
-                     else _item(onboarding, name, "ready_to_submit", 1))
+        gaps = site_location.submit_gaps(onboarding)
+        if missing:
+            items.append(_item(onboarding, name, "documents_missing", 1, {"missing_documents": missing}))
+        if gaps["missing_site_location"]:
+            items.append(_item(onboarding, name, "site_location_missing", 1))
+        elif gaps["site_location_unconfirmed"]:
+            items.append(_item(onboarding, name, "site_location_unconfirmed", 1))
+        if not missing and not any(gaps.values()):
+            items.append(_item(onboarding, name, "ready_to_submit", 1))
     done = progress.recorded(db, onboarding.project_id)
     if ProjectStage.proposal_prepared in done and ProjectStage.accepted not in done:
         items.append(_item(onboarding, name, "formal_proposal_ready", 2))
@@ -123,12 +133,16 @@ def progress_summary(db: Session, onboarding: CustomerOnboarding, items: Optiona
         found = execution.stage_blockers(db, onboarding, nxt)
         if found:
             blocked = {"reason": found[0]["code"]}
+    from app.onboarding import site_location
     return {"current_stage": current.value if current else None,
             "stage_label": progress.LABELS[current] if current else None,
             "next_stage": nxt.value if nxt else None,
             "next_stage_label": progress.LABELS[nxt] if nxt else None,
             "needs_action": bool(items), "action_kinds": sorted({i["kind"] for i in items}),
-            "blocked": blocked}
+            "blocked": blocked,
+            # Safe for every viewer (no coordinates).
+            "site_location": {"present": site_location.is_present(onboarding),
+                              "confirmed": site_location.is_confirmed(onboarding)}}
 
 
 def home(db: Session, associate) -> dict:

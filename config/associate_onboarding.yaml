@@ -82,7 +82,8 @@ scoring:
     subsidy_eligibility: 20
     system_fit: 15
     customer_timeline: 10
-    site_readiness: 10
+    site_readiness: 5        # L5 — was 10; 5 moved to site_location
+    site_location: 5         # L5 [PLACEHOLDER]
     associate_track_record: 10
   bands:
     hot_min: 70        # score ≥ 70 → Hot
@@ -104,6 +105,47 @@ scoring:
   unknown_fraction: 0.5          # system fit when there is nothing to compare
   track_record_min_history: 3    # earlier submitted customers before track record counts
   new_associate_fraction: 0.5    # track record until then
+  # L5 — the site_location factor: a confirmed location from a precise phone fix
+  # (verified) earns 1.0, a confirmed but unverified one 0.5, an unconfirmed or missing
+  # one 0.
+  site_location_fractions:       # [PLACEHOLDER]
+    confirmed_verified: 1.0
+    confirmed_unverified: 0.5
+
+# The customer's site location (app/onboarding/site_location.py, app/geo.py). Required
+# and confirmed by the associate before a customer can be submitted. Every value here
+# is a working default registered in config/placeholder_registry.yaml (L1–L7).
+location:
+  required_to_submit: true
+  # L1 — accuracy (metres, as the phone reports it) of a GPS fix. At or under
+  # accuracy_good_m a device/photo fix counts as verified; above accuracy_warn_m the
+  # associate is warned to try again outdoors; above accuracy_reject_m it is refused.
+  accuracy_good_m: 50            # [PLACEHOLDER]
+  accuracy_warn_m: 150           # [PLACEHOLDER]
+  accuracy_reject_m: 300         # [PLACEHOLDER]
+  # L2 — flag the site pin when it is further than this from the median of the
+  # in-app camera photos' GPS fixes.
+  photo_mismatch_m: 200          # [PLACEHOLDER]
+  # L3 — sanity box for "inside India" (it also covers parts of neighbouring countries).
+  india_bbox:                    # [PLACEHOLDER]
+    lat_min: 6.0
+    lat_max: 37.5
+    lon_min: 68.0
+    lon_max: 97.5
+  # L4 — the only hosts a pasted Google Maps link (and every redirect it follows) may
+  # be on. Exact match; nothing else is ever requested.
+  link_hosts_allowlist:          # [PLACEHOLDER]
+    - maps.app.goo.gl
+    - goo.gl
+    - google.com
+    - www.google.com
+    - maps.google.com
+    - google.co.in
+    - www.google.co.in
+  # L6 — short links expanded (outbound requests) per associate per hour.
+  link_resolve_rate_limit: 20    # [PLACEHOLDER]
+  # L7 — how long the app samples the phone's GPS for one fix (served via /options).
+  sample_seconds: 10             # [PLACEHOLDER]
 
 # The customer agreement, printed on ₹10 non-judicial stamp paper (app/onboarding/agreement.py).
 # The generated PDF carries the parties and project details; the agreement's own

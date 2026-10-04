@@ -14,7 +14,8 @@ requests sends the parsed form in `request.data` — the full Aadhaar number inc
    variables — the raw form/record lives there.
 3. before_send scrubs whatever still reaches an event: the sensitive keys wherever
    they appear, and any Aadhaar-shaped (12 digits passing the Verhoeff check) or
-   PAN-shaped value inside any string.
+   PAN-shaped value, Google Maps link, or precise "lat, lon" pair inside any string
+   (a customer's site location identifies their home).
 
 Each layer is independently sufficient for request data; together they also cover a
 value that ends up somewhere unexpected (an exception message, a breadcrumb).
@@ -33,17 +34,26 @@ SENSITIVE_KEYS = frozenset({
     "bank_account_encrypted",
     # Payments (Phase 4A)
     "cheque_number", "utr", "payment_reference", "payer_account_number", "reference", "reference_normalized",
+    # Site location (Phase 3C) — where the customer lives.
+    "site_latitude", "site_longitude", "latitude", "longitude", "site_location_raw_input",
 })
 _NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app.onboarding",
                       "app.api.routes.associate_onboarding", "app.api.routes.onboarding_admin",
                       "app.execution", "app.api.routes.associate_execution", "app.api.routes.execution_admin",
                       "app.api.routes.execution_register_admin", "app.payments", "app.jobs.payment_alerts",
                       "app.api.routes.associate_payments", "app.api.routes.payments_admin",
-                      "app.api.routes.public_receipts")
+                      "app.api.routes.public_receipts", "app.geo", "app.onboarding.maps_link",
+                      "app.onboarding.site_location")
 
 # 12 digits, optionally grouped 4-4-4 by spaces or hyphens as printed on the card.
 _AADHAAR_RE = re.compile(r"(?<!\d)(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")
 _PAN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{5}\d{4}[A-Za-z](?![A-Za-z0-9])")
+# Any Google Maps link (short or full), up to the next whitespace or quote.
+_MAPS_URL_RE = re.compile(
+    r"(?i)(?:https?://)?(?:maps\.app\.goo\.gl|goo\.gl/maps|(?:www\.|maps\.)?google\.[a-z.]{2,6}/maps)[^\s\"'<>]*")
+# A precise coordinate pair (3+ decimals each, e.g. "22.5726, 88.3639"); money and
+# measurements in this codebase carry at most two decimals.
+_LATLON_RE = re.compile(r"(?<![\d.])-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}(?![\d.])")
 
 
 def _scrub_text(value: str) -> str:
@@ -53,6 +63,7 @@ def _scrub_text(value: str) -> str:
         digits = "".join(m.groups())
         return REDACTED if verhoeff_valid(digits) else m.group(0)
 
+    value = _LATLON_RE.sub(REDACTED, _MAPS_URL_RE.sub(REDACTED, value))
     return _PAN_RE.sub(REDACTED, _AADHAAR_RE.sub(_aadhaar, value))
 
 

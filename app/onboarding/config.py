@@ -12,7 +12,7 @@ _PATH = Path(__file__).resolve().parents[2] / "config" / "associate_onboarding.y
 PLACEHOLDER_MARKER = "[PLACEHOLDER"
 REQUIRED_WHEN = ("always", "scheme_linked", "not_in_customer_name")
 SCORE_FACTORS = ("verification_call", "documents_complete", "subsidy_eligibility", "system_fit",
-                 "customer_timeline", "site_readiness", "associate_track_record")
+                 "customer_timeline", "site_readiness", "site_location", "associate_track_record")
 TIMELINES = ("within_1_month", "within_3_months", "within_6_months", "later", "unsure")
 
 
@@ -60,6 +60,11 @@ def _validate(data: dict) -> dict:
         need(isinstance(scoring.get(key), (int, float)) and 0 <= scoring[key] <= 1, f"scoring.{key} must be 0..1")
     need(isinstance(scoring.get("track_record_min_history"), int) and scoring["track_record_min_history"] >= 1,
          "scoring.track_record_min_history must be a whole number >= 1")
+    fractions = scoring.get("site_location_fractions") or {}
+    need(set(fractions) == {"confirmed_verified", "confirmed_unverified"}
+         and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in fractions.values()),
+         "scoring.site_location_fractions needs 0..1 confirmed_verified and confirmed_unverified")
+    _validate_location(data.get("location") or {}, need)
     agreement = data.get("agreement") or {}
     need(isinstance(agreement.get("body"), str) and agreement["body"].strip(), "agreement.body must be text")
     margin = agreement.get("stamp_paper_top_margin_mm")
@@ -70,6 +75,26 @@ def _validate(data: dict) -> dict:
         need(p.get("equipment_tier") in {t.value for t in EquipmentTier},
              f"equipment_packages.{name}.equipment_tier must be one of {[t.value for t in EquipmentTier]}")
     return data
+
+
+def _validate_location(loc: dict, need) -> None:
+    need(isinstance(loc.get("required_to_submit"), bool), "location.required_to_submit must be true/false")
+    acc = [loc.get(k) for k in ("accuracy_good_m", "accuracy_warn_m", "accuracy_reject_m")]
+    need(all(isinstance(v, (int, float)) and v > 0 for v in acc) and acc[0] <= acc[1] <= acc[2],
+         "location needs positive accuracy_good_m <= accuracy_warn_m <= accuracy_reject_m")
+    need(isinstance(loc.get("photo_mismatch_m"), (int, float)) and loc["photo_mismatch_m"] > 0,
+         "location.photo_mismatch_m must be a positive number")
+    box = loc.get("india_bbox") or {}
+    need(set(box) == {"lat_min", "lat_max", "lon_min", "lon_max"}
+         and all(isinstance(v, (int, float)) for v in box.values())
+         and -90 <= box["lat_min"] < box["lat_max"] <= 90 and -180 <= box["lon_min"] < box["lon_max"] <= 180,
+         "location.india_bbox needs lat_min < lat_max and lon_min < lon_max")
+    hosts = loc.get("link_hosts_allowlist") or []
+    need(hosts and all(isinstance(h, str) and h == h.strip().lower() and h and "/" not in h and ":" not in h
+                       for h in hosts),
+         "location.link_hosts_allowlist must list lower-case host names (no scheme, port or path)")
+    for key in ("link_resolve_rate_limit", "sample_seconds"):
+        need(isinstance(loc.get(key), int) and loc[key] > 0, f"location.{key} must be a positive whole number")
 
 
 @lru_cache(maxsize=1)
@@ -99,3 +124,7 @@ def document_keys() -> list[str]:
 
 def agreement_is_placeholder() -> bool:
     return PLACEHOLDER_MARKER in load()["agreement"]["body"]
+
+
+def location() -> dict:
+    return load()["location"]

@@ -96,3 +96,26 @@ def test_every_new_mutation_is_audited(client, db_session, onboarding_ready, stu
 
     seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
     assert EXPECTED <= seen, f"not audited: {sorted(EXPECTED - seen)}"
+
+
+SITE_LOCATION_EXPECTED = {
+    ("customer_onboarding", "site_location_set"), ("customer_onboarding", "site_location_confirmed"),
+    ("customer_onboarding", "site_location_confirmation_cleared"), ("customer_onboarding", "site_location_corrected"),
+}
+
+
+def test_every_site_location_mutation_is_audited(client, db_session, onboarding_ready):
+    """Phase 3C — set, confirm, the confirmation reset, and the staff correction."""
+    gna = make_associate(db_session)
+    from tests.execution_support import new_customer
+    oid = new_customer(client, gna)
+    url = f"/api/v1/associate/onboardings/{oid}/site-location"
+    assert client.post(url, json={"source": "pasted_coordinates", "text": "26.49, 89.52"},
+                       headers=headers(gna)).status_code == 200
+    assert client.post(f"{url}/confirm", headers=headers(gna)).status_code == 200
+    assert client.post(url, json={"source": "pasted_coordinates", "text": "26.50, 89.52"},
+                       headers=headers(gna)).status_code == 200
+    assert client.post(f"{DASH}/onboardings/{oid}/site-location", headers=ADMIN, json={
+        "source": "pasted_coordinates", "text": "26.49, 89.52", "reason": "Confirmed on the call."}).status_code == 200
+    seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
+    assert SITE_LOCATION_EXPECTED <= seen, f"not audited: {sorted(SITE_LOCATION_EXPECTED - seen)}"

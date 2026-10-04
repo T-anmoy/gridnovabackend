@@ -453,3 +453,40 @@ class TestPhase4aFollowups:
             assert info["onboarding_id"][3] == 1 and "previous_payment_id" not in info
         finally:
             conn.close()
+
+
+class TestSiteLocation:
+    def test_upgrade_backfills_legacy_rows_and_downgrades(self, db_at_0025):
+        assert _run_alembic("upgrade", "0041_phase4a_followups", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            _insert(conn, "customer_onboardings", id=1, lead_id=1, customer_id=1, project_id=1, proposal_inputs_id=1,
+                    owner_associate_id=1, status="submitted", state_id=1, district_id=1, customer_mobile="9830000001",
+                    site_latitude=26.49, site_longitude=89.52)
+            _insert(conn, "customer_onboardings", id=2, lead_id=2, customer_id=1, project_id=1, proposal_inputs_id=2,
+                    owner_associate_id=1, status="draft", state_id=1, district_id=1, customer_mobile="9830000002")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("upgrade", "0042_site_location", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            rows = conn.execute("SELECT id, site_location_source, site_location_verified, site_location_confirmed_at "
+                                "FROM customer_onboardings ORDER BY id").fetchall()
+            assert rows == [(1, "unknown_legacy", 0, None), (2, None, 0, None)]
+            # Coordinates without a source are refused by the database.
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE customer_onboardings SET site_latitude = 26.5, site_longitude = 89.5 WHERE id = 2")
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0041_phase4a_followups", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(customer_onboardings)")}
+            assert "site_location_source" not in cols and "site_latitude" in cols
+            assert conn.execute("SELECT site_latitude FROM customer_onboardings WHERE id = 1").fetchone() == (26.49,)
+        finally:
+            conn.close()

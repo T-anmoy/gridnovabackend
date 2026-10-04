@@ -10,7 +10,7 @@ from app.memory.models import (
     Associate, Customer, CustomerOnboarding, Project, ProposalInputs, TerritoryBlock, TerritoryDistrict,
     TerritoryState,
 )
-from app.onboarding import formal, scoring, service
+from app.onboarding import formal, scoring, service, site_location
 
 _INPUT_FIELDS = tuple(f for f in service.INPUT_FIELDS)
 
@@ -33,7 +33,7 @@ def _territory(db: Session, o: CustomerOnboarding) -> dict:
             "block": one(TerritoryBlock, o.block_id)}
 
 
-def _files(inputs: ProposalInputs) -> tuple[list, list]:
+def _files(inputs: ProposalInputs, *, show_coordinates: bool = True) -> tuple[list, list]:
     from app.api.routes.proposal_inputs import uploaded_files
 
     documents, photos = [], []
@@ -42,13 +42,15 @@ def _files(inputs: ProposalInputs) -> tuple[list, list]:
                     and r.get("storage_key") == f["storage_key"]), None) \
             or (inputs.installation_photo_refs or {}).get(f.get("photo_slot") or "", {})
         item = {"file_ref": f["file_ref"], "filename": f["filename"], "received_at": ref.get("received_at"),
-                "latitude": ref.get("latitude"), "longitude": ref.get("longitude"),
+                "latitude": ref.get("latitude") if show_coordinates else None,
+                "longitude": ref.get("longitude") if show_coordinates else None,
                 "client_captured_at": ref.get("client_captured_at")}
         if f["target"] == "document":
             documents.append({"document_type": f.get("document_type"), **item})
         elif f["target"] == "installation_photo":
             from app.execution.photos import public_fields
-            photos.append({"photo_slot": f.get("photo_slot"), **item, **public_fields(ref)})
+            photos.append({"photo_slot": f.get("photo_slot"), **item, **public_fields(ref),
+                           "accuracy_m": ref.get("accuracy_m") if show_coordinates else None})
     return documents, photos
 
 
@@ -57,7 +59,10 @@ def onboarding(db: Session, o: CustomerOnboarding, *, viewer_is_owner: Optional[
     inputs = db.get(ProposalInputs, o.proposal_inputs_id)
     customer = db.get(Customer, o.customer_id)
     owner = db.get(Associate, o.owner_associate_id)
-    documents, photos = _files(inputs)
+    # Exact coordinates: the owner and staff only. A Preferred Associate viewing a
+    # downline customer sees whether a location is present and confirmed — never where.
+    full_location = staff or bool(viewer_is_owner)
+    documents, photos = _files(inputs, show_coordinates=full_location)
     flags = service.open_flags(db, o.id)
     data = {
         "onboarding_id": o.id,
@@ -69,8 +74,9 @@ def onboarding(db: Session, o: CustomerOnboarding, *, viewer_is_owner: Optional[
         "customer": {"name": customer.name, "mobile": o.customer_mobile,
                      "email": None if is_placeholder_email(customer.email) else customer.email},
         "territory": _territory(db, o),
-        "site_latitude": o.site_latitude,
-        "site_longitude": o.site_longitude,
+        "site_latitude": o.site_latitude if full_location else None,
+        "site_longitude": o.site_longitude if full_location else None,
+        "site_location": site_location.summary(o, inputs, full=full_location, staff=staff),
         "connection_in_customer_name": o.connection_in_customer_name,
         "property_in_customer_name": o.property_in_customer_name,
         "customer_timeline": _val(o.customer_timeline),

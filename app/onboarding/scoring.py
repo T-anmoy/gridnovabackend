@@ -18,9 +18,21 @@ Factors
                          load nor a consumption figure to compare it with
   customer_timeline      per-answer fraction from config (unsure / not given → its value)
   site_readiness         installation photo slots filled ÷ 7
+  site_location          site location confirmed by the associate: `confirmed_verified`
+                         (a precise phone/photo fix) or `confirmed_unverified` (link,
+                         pasted, staff, legacy, or a poorer fix) from
+                         scoring.site_location_fractions; unconfirmed or missing → 0
   associate_track_record of the owner's OTHER onboardings that were submitted, the share
                          that went on to be verified; `new_associate_fraction` until they
                          have `track_record_min_history` such onboardings
+
+Worked example (config defaults; tests/test_onboarding_scoring.py checks it): a fresh
+customer — 3 kW asked, 5 kW sanctioned, 400 kWh/month, within 3 months, property and
+connection in their name, no documents, photos or location yet, owner with no history:
+    verification_call 0 + documents_complete 0 + subsidy_eligibility 20 + system_fit 15
+    + customer_timeline 7 (10 × 0.7) + site_readiness 0 + site_location 0
+    + associate_track_record 5 (10 × 0.5) = 47 → Warm.
+Confirming a precise GPS site location adds 5 (→ 52); an unverified one 2.5 (→ 50).
 
 Bands (config): Hot ≥ hot_min, Warm ≥ warm_min, else Cold. Each band has a response-time
 target: the staff verification call is due that long after the associate submits.
@@ -112,6 +124,18 @@ def compute(db: Session, onboarding: CustomerOnboarding) -> dict:
     photos = [s for s in INSTALLATION_PHOTO_SLOTS if counts_as_evidence((inputs.installation_photo_refs or {}).get(s, {}))]
     factors.append(_factor("site_readiness", len(photos) / len(INSTALLATION_PHOTO_SLOTS),
                            f"{len(photos)} of {len(INSTALLATION_PHOTO_SLOTS)} site photos uploaded", weights))
+
+    from app.onboarding import site_location
+    if site_location.is_confirmed(onboarding):
+        verified = bool(onboarding.site_location_verified)
+        key = "confirmed_verified" if verified else "confirmed_unverified"
+        factors.append(_factor("site_location", cfg["site_location_fractions"][key],
+                               "site location confirmed" + (" (precise GPS fix)" if verified else " (unverified)"),
+                               weights))
+    else:
+        detail = ("site location set but not confirmed" if site_location.is_present(onboarding)
+                  else "no site location yet")
+        factors.append(_factor("site_location", 0.0, detail, weights))
 
     fraction, detail = _track_record(db, onboarding, cfg)
     factors.append(_factor("associate_track_record", fraction, detail, weights))

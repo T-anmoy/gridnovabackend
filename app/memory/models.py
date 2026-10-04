@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import (
     String, Float, Boolean, Text, JSON, ForeignKey,
     Enum as SAEnum, DateTime, Date, Integer, UniqueConstraint, CheckConstraint,
-    Index, text, DDL, event, Numeric,
+    Index, text, DDL, event, Numeric, false,
 )
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship, validates
 from sqlalchemy.types import TypeDecorator
@@ -111,6 +111,7 @@ class TimelineEventType(str, enum.Enum):
     indicative_estimate_created = "indicative_estimate_created"
     execution_stage_submitted = "execution_stage_submitted"
     execution_stage_rejected = "execution_stage_rejected"
+    site_location_updated = "site_location_updated"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -1141,6 +1142,21 @@ class ScoreBand(str, enum.Enum):
     cold = "cold"
 
 
+class SiteLocationSource(str, enum.Enum):
+    """Where an onboarding's site coordinates came from (app/onboarding/site_location.py)."""
+    device_gps = "device_gps"                    # one fix from the phone, at the press of a button
+    photo_gps = "photo_gps"                      # copied from an in-app camera photo's stored GPS fix
+    google_maps_link = "google_maps_link"        # parsed from a pasted Google Maps link
+    pasted_coordinates = "pasted_coordinates"    # parsed from pasted "lat, lon" text
+    staff_entered = "staff_entered"              # corrected by staff during the verification call
+    unknown_legacy = "unknown_legacy"            # a raw latitude/longitude pair (before Phase 3C, or an old client)
+
+
+class SiteLocationPrecision(str, enum.Enum):
+    exact = "exact"                              # a pin / explicit coordinates
+    viewport_center = "viewport_center"          # the centre of a map view (an "@lat,lon" link) — approximate
+
+
 class AttributionFlagStatus(str, enum.Enum):
     open = "open"
     resolved = "resolved"
@@ -1168,6 +1184,8 @@ class CustomerOnboarding(Base):
             "(site_latitude BETWEEN -90 AND 90 AND site_longitude BETWEEN -180 AND 180)",
             name="ck_customer_onboardings_gps",
         ),
+        CheckConstraint("site_latitude IS NULL OR site_location_source IS NOT NULL",
+                        name="ck_customer_onboardings_location_source"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1187,6 +1205,20 @@ class CustomerOnboarding(Base):
     block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
     site_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     site_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # How the site coordinates were obtained, and whether the associate confirmed them as
+    # the customer's house (required to submit). Changing the coordinates clears the
+    # confirmation. app/onboarding/site_location.py.
+    site_location_source: Mapped[Optional[SiteLocationSource]] = mapped_column(SAEnum(SiteLocationSource),
+                                                                               nullable=True)
+    site_location_accuracy_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    site_location_captured_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    site_location_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                         server_default=false())
+    site_location_confirmed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    site_location_confirmed_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    site_location_raw_input: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    site_location_precision: Mapped[Optional[SiteLocationPrecision]] = mapped_column(
+        SAEnum(SiteLocationPrecision), nullable=True)
 
     # Duplicate detection across associates (normalised copies of what is on the
     # Customer / site assessment).
