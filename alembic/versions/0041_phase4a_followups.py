@@ -60,8 +60,13 @@ def downgrade() -> None:
     op.drop_index("ix_installed_units_voided_serial_normalized", table_name="installed_units")
     op.drop_column("installed_units", "voided_serial_normalized")
     op.drop_index("uq_payments_instrument", table_name="payments")
+    # The FK is named when this migration created it, but a database built by
+    # scripts/bootstrap_db.py (create_all) on SQLite has it unnamed — so look it up.
+    fk_names = [fk["name"] for fk in sa.inspect(op.get_bind()).get_foreign_keys("payments")
+                if fk["constrained_columns"] == ["previous_payment_id"] and fk["name"]]
     with op.batch_alter_table("payments") as batch:
-        batch.drop_constraint("payments_previous_payment_id_fkey", type_="foreignkey")
+        for name in fk_names:
+            batch.drop_constraint(name, type_="foreignkey")
         batch.drop_column("previous_payment_id")
         batch.alter_column("onboarding_id", existing_type=sa.Integer(), nullable=False)
     with op.batch_alter_table("payment_milestones") as batch:

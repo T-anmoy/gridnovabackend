@@ -54,8 +54,9 @@ def _schema_state(current: list[str]) -> str:
 
 @router.get("/api/v1/health/ready")
 def ready(db: Session = Depends(get_db)):
-    """Readiness: the database answers and its schema is at this build's Alembic
-    head. 503 names the failing check; nothing about the connection is disclosed."""
+    """Readiness: the database answers, its schema is at this build's Alembic head and —
+    in production — the territory master is loaded. 503 names the failing check;
+    nothing about the connection is disclosed. `territories` reports what is loaded."""
     try:
         db.execute(text("SELECT 1"))
     except Exception:
@@ -76,4 +77,16 @@ def ready(db: Session = Depends(get_db)):
 
     if schema != "at_head":
         return JSONResponse(status_code=503, content={"status": "not_ready", "db": "ok", "schema": schema})
-    return {"status": "ready", "db": "ok", "schema": "at_head"}
+
+    from app.associates.territory_seed import territory_counts
+    try:
+        territories = territory_counts(db)
+    except Exception:
+        logger.exception("Readiness check: could not count the territory master")
+        territories = {"seeded": False, "states": 0, "districts": 0, "blocks": 0}
+    body = {"status": "ready", "db": "ok", "schema": "at_head", "territories": territories}
+    if settings.is_production and not territories["seeded"]:
+        # A deploy must not go live with empty registration forms. Development stays
+        # ready (and says seeded: false) so a half-set-up machine still starts.
+        return JSONResponse(status_code=503, content={**body, "status": "not_ready"})
+    return body

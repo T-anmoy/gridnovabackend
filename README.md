@@ -2,17 +2,43 @@
 
 AI-powered lead qualification and proposal management for Grid Nova Energy.
 
-## Quick start (local development)
+## Local development
+
+Three commands, run from this folder:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in credentials
-uvicorn app.main:app --reload
+# 1. Once: environment and dependencies
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && cp .env.example .env
+
+# 2. Database: schema + the territory lists (safe to re-run; add --dummy-data for the DUMMY equipment catalogue)
+python scripts/dev_setup.py
+
+# 3. Run the API
+uvicorn app.main:app --reload --port 8000
 ```
 
-Open `http://localhost:8000/api/v1/health` to confirm the server is running.
+`dev_setup.py` builds a new database (or upgrades one that is behind), loads the State → District → Block lists, and ends by printing the schema revision, the territory counts, the `uvicorn` command and the one line the frontend needs in `.env.local`:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+It never deletes a database and refuses to run when `ENVIRONMENT=production`. If it cannot continue (for example the database was created by an earlier `uvicorn` start and has no recorded schema revision), it stops and prints exactly what to do by hand.
+
+Check it worked: `http://localhost:8000/api/v1/health` (the process is up) and `http://localhost:8000/api/v1/health/ready` (database, schema revision and `territories: {seeded, states, districts, blocks}`).
+
+### When something looks wrong
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The State dropdown on the Apply form is empty and `GET /api/v1/public/territories/states` answers **503 `territories_not_seeded`** | The database has no territory data | `python scripts/dev_setup.py` (or just `python scripts/seed_territories.py`) |
+| The dropdown is empty and the browser console shows a **CORS error** or "Failed to fetch" | The API is not running, or the page's origin is not in `ALLOWED_ORIGINS`. Only `http://localhost:3000` (and the production site) are allowed by default — `http://127.0.0.1:3000` or another port is a different origin | Start `uvicorn` on port 8000; set `NEXT_PUBLIC_API_URL=http://localhost:8000` and open the frontend at `http://localhost:3000`; or add the origin to `ALLOWED_ORIGINS` in `.env` (a JSON array, e.g. `["http://localhost:3000","http://127.0.0.1:3000"]`) and restart |
+| The territory lists fail with **HTTP 500** | The tables are not there yet, or the schema is behind this code | `python scripts/dev_setup.py`; `GET /api/v1/health/ready` names the schema state (`not_initialized`, `behind`) |
+| **429** on `/api/v1/public/territories/...` | More than 60 lookups a minute from one IP (public form lookups are rate-limited; the counter is in memory) | Wait a minute, or restart `uvicorn`; look for a page or dev tool that refetches in a loop |
+| `dev_setup.py` stops with "no recorded schema revision" | `uvicorn` created the tables itself on an earlier start, so the revision is unknown | Follow the printed steps: back the file up, then **move** it aside (not delete) and run `dev_setup.py` again |
+| The app refuses to start with "ALLOWED_ORIGINS contains a localhost origin" | `ENVIRONMENT=production` with the default origins | Production must set `ALLOWED_ORIGINS` explicitly, e.g. `["https://www.gridnova.in"]` |
+
+Production is not set up with `dev_setup.py`: it runs `scripts/bootstrap_db.py` and `scripts/seed_territories.py` (see "Database schema" below), and `GET /api/v1/health/ready` returns **503** there until the territory lists are loaded.
 
 ## Running tests
 
@@ -34,7 +60,13 @@ job, with the same `DATABASE_URL`) **before** the service's first boot.
 
 ```bash
 DATABASE_URL=postgresql://... python scripts/bootstrap_db.py
+DATABASE_URL=postgresql://... python scripts/seed_territories.py   # the State → District → Block lists; idempotent
 ```
+
+The territory lists are reference data the public Apply forms cannot work without. In
+production `GET /api/v1/health/ready` returns **503** (with `territories.seeded: false`)
+until they are loaded, so an empty deploy cannot go live; the public lookups answer
+503 `territories_not_seeded` in the meantime.
 
 On a database with no application tables it runs `Base.metadata.create_all()` and then
 `alembic stamp head`. The historical chain (0001–0022) has no baseline and cannot be

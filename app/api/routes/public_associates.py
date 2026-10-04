@@ -396,8 +396,18 @@ def verify_associate(associate_id: str, request: Request, db: Session = Depends(
 
 # ── Reference data for the forms ─────────────────────────────────────────────────
 
+def _require_territories(db: Session) -> None:
+    """With no active state at all the master has not been loaded (or not migrated
+    yet): say so, rather than answer 200 with an empty list the form shows as a blank
+    dropdown, or 404 "unknown state" for every code."""
+    if db.execute(select(TerritoryState.id).where(TerritoryState.is_active.is_(True)).limit(1)).first() is None:
+        raise HTTPException(status_code=503, detail={"code": "territories_not_seeded",
+                                                     "message": "Territory data has not been loaded yet."})
+
+
 @router.get("/territories/states", dependencies=[Depends(_lookup_limit)])
 def list_states(db: Session = Depends(get_db)):
+    _require_territories(db)
     rows = db.execute(select(TerritoryState).where(TerritoryState.is_active.is_(True))
                       .order_by(TerritoryState.name)).scalars()
     return {"items": [{"lgd_code": s.lgd_code, "iso_code": s.iso_code, "name": s.name} for s in rows]}
@@ -405,6 +415,7 @@ def list_states(db: Session = Depends(get_db)):
 
 @router.get("/territories/states/{state_lgd_code}/districts", dependencies=[Depends(_lookup_limit)])
 def list_districts(state_lgd_code: int, db: Session = Depends(get_db)):
+    _require_territories(db)
     state = db.execute(select(TerritoryState).where(
         TerritoryState.lgd_code == state_lgd_code, TerritoryState.is_active.is_(True))).scalar_one_or_none()
     if state is None:
@@ -420,6 +431,7 @@ def list_districts(state_lgd_code: int, db: Session = Depends(get_db)):
 
 @router.get("/territories/districts/{district_lgd_code}/blocks", dependencies=[Depends(_lookup_limit)])
 def list_blocks(district_lgd_code: int, db: Session = Depends(get_db)):
+    _require_territories(db)
     district = db.execute(select(TerritoryDistrict).where(
         TerritoryDistrict.lgd_code == district_lgd_code, TerritoryDistrict.is_active.is_(True))).scalar_one_or_none()
     if district is None:

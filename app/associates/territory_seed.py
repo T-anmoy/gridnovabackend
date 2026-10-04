@@ -133,3 +133,19 @@ def seed_territories(db: Session, data_dir: Path = DATA_DIR, performed_by: str =
         db.add(AuditLog(entity_type="territory_master", entity_id=str(data_dir.name), action="seeded",
                         performed_by=performed_by, after_value={"inserted": result.inserted}))
     return result
+
+
+def territory_counts(db) -> dict:
+    """What is loaded, as readiness and the setup script report it: the number of ACTIVE
+    states, districts and blocks, and `seeded` (at least one active state — without one
+    the registration forms have nothing to offer)."""
+    from sqlalchemy import func, select
+
+    from app.memory.models import TerritoryBlock, TerritoryDistrict, TerritoryState
+
+    def active(model) -> int:
+        return db.execute(select(func.count()).select_from(model).where(model.is_active.is_(True))).scalar_one()
+
+    states = active(TerritoryState)
+    return {"seeded": states > 0, "states": states, "districts": active(TerritoryDistrict),
+            "blocks": active(TerritoryBlock)}
