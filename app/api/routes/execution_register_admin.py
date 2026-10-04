@@ -10,7 +10,7 @@ register, Admin only, with a reason. DCR override: Admin only.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -142,3 +142,31 @@ def dcr_override(onboarding_id: int, body: OverrideIn, db: Session = Depends(get
     onboarding, record, _ = _target(db, employee, onboarding_id, change=False)
     _write(db, lambda: register.record_dcr_override(db, record, employee.employee_id, body.reason))
     return _detail(db, onboarding, employee)
+
+
+class CatalogueIn(BaseModel):
+    category: Literal["module", "inverter", "structure", "bos_component"]
+    brand: str = Field(min_length=1, max_length=100)
+    model_name: str = Field(min_length=1, max_length=100)        # exactly as printed on the nameplate
+    specification: Optional[str] = Field(default=None, max_length=2000)
+    is_dcr_compliant: bool                                          # as the OEM declaration states
+    equivalent_reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/catalogue", status_code=201)
+def catalogue_from_nameplate(onboarding_id: int, body: CatalogueIn, db: Session = Depends(get_db),
+                             employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Operations/Admin add the installed equipment to the catalogue from its nameplate
+    (model as printed, DCR from the OEM declaration). The brand must be an approved make
+    for the project's package and component (Grid Nova's master data); otherwise
+    `equivalent_reason` is required (422 make_not_approved). Returns the catalogue item;
+    units then reference it by `equipment_id`."""
+    onboarding, _, viewer = _target(db, employee, onboarding_id, change=True)
+    item = _write(db, lambda: register.catalogue_from_nameplate(db, onboarding, viewer, body.model_dump()))
+    package = register.project_package(db, onboarding)
+    component = register.COMPONENT_FOR_CATEGORY.get(body.category)
+    return {"equipment": {"id": item.id, "category": item.category.value, "brand": item.brand,
+                          "model_name": item.model_name, "specification": item.specification,
+                          "is_dcr_compliant": item.is_dcr_compliant, "is_active": item.is_active},
+            "package": package, "approved_makes": register.approved_makes(package, component),
+            "in_package": register.make_in_package(package, component, item.brand)}

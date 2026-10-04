@@ -67,13 +67,18 @@ def _proposals(db_session):
 
 class TestIndicativeEstimate:
     def test_prices_the_requested_size_and_keeps_it(self, client, db_session, onboarding_ready):
-        gna, o = _new(client, db_session)
+        gna, o = _new(client, db_session, connection_phase="single_phase")
         r = client.post(f"{BASE}/{o['onboarding_id']}/estimates", json={}, headers=headers(gna))
         assert r.status_code == 201, r.text
         body = r.json()
         assert body["indicative"] is True and body["inputs"]["sizing_method"] == "requested_size"
         assert body["inputs"]["segment"] == "residential"  # from rooftop_residential
         assert body["result"]["recommended_size_kw"] == 3 and body["result"]["net_cost"] > 0
+        # The price-list snapshot (PM-A): both packages, the version and the chosen package(s).
+        assert (body["price_status"], body["priced_kw"], body["price_list_version"]) == ("list_price", 3, 1)
+        assert body["result"]["packages"]["NOVA_ASSURED"]["final"] == "201465.00"
+        assert body["result"]["packages"]["NOVA_SIGNATURE"]["final"] == "225640.80"
+        assert body["chosen_packages"] == ["NOVA_ASSURED", "NOVA_SIGNATURE"]   # no package chosen
         assert db_session.execute(select(IndicativeEstimate)).scalar_one().created_by == f"associate:{gna}"
         assert db_session.execute(select(AuditLog).where(AuditLog.entity_type == "indicative_estimate")).scalar_one()
         # Not a proposal, and not a progress stage.
@@ -82,14 +87,50 @@ class TestIndicativeEstimate:
         assert stages == {ProjectStage.registered}
 
     def test_same_numbers_as_the_public_solar_calculator(self, client, db_session, onboarding_ready):
-        gna, o = _new(client, db_session, desired_output_kw=None, avg_monthly_units_kwh=400)
+        gna, o = _new(client, db_session, desired_output_kw=None, avg_monthly_units_kwh=400,
+                      connection_phase="single_phase")
         mine = client.post(f"{BASE}/{o['onboarding_id']}/estimates", json={}, headers=headers(gna)).json()
         public = client.post("/api/v1/pricing/instant-estimate", json={
             "segment": "residential", "state": "WEST BENGAL", "sizing_method": "by_units",
-            "monthly_units_kwh": 400}).json()
+            "monthly_units_kwh": 400, "connection_phase": "single_phase"}).json()
         assert mine["inputs"]["sizing_method"] == "by_units"
         assert mine["result"]["recommended_size_kw"] == public["recommended_size_kw"]
-        assert mine["result"]["net_cost"] == public["net_cost"]
+        assert mine["result"]["net_cost"] == public["net_cost"] is not None
+        assert mine["result"]["packages"] == public["packages"]
+
+    @pytest.mark.parametrize("phase,kw,reason", [("single_phase", 3.5, "non_integer_size"),
+                                                 ("single_phase", 11, "size_above_max"),
+                                                 ("three_phase", 2, "three_phase_below_min")])
+    def test_requested_size_must_be_in_the_price_list(self, client, db_session, onboarding_ready, phase, kw, reason):
+        gna, o = _new(client, db_session, connection_phase=phase, desired_output_kw=kw, sanctioned_load_kw=20)
+        r = client.post(f"{BASE}/{o['onboarding_id']}/estimates", json={}, headers=headers(gna))
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "unsupported_size"
+        assert r.json()["detail"]["reason"] == reason
+
+    def test_requested_size_outside_the_price_list_scope_is_a_custom_quote(self, client, db_session, onboarding_ready):
+        gna, o = _new(client, db_session, connection_phase="single_phase", desired_output_kw=15,
+                      sanctioned_load_kw=20, connection_type="hybrid", battery_storage=True)
+        body = client.post(f"{BASE}/{o['onboarding_id']}/estimates", json={}, headers=headers(gna)).json()
+        assert body["price_status"] == "custom_quote" and "battery_or_off_grid" in body["result"]["custom_quote_reasons"]
+
+    @pytest.mark.parametrize("package,expected", [("nova_assured", ["NOVA_ASSURED"]),
+                                                  ("nova_signature", ["NOVA_SIGNATURE"]),
+                                                  ("as_recommended", ["NOVA_ASSURED", "NOVA_SIGNATURE"])])
+    def test_chosen_package_comes_from_the_onboarding(self, client, db_session, onboarding_ready, package, expected):
+        gna, o = _new(client, db_session, connection_phase="single_phase", equipment_package=package)
+        body = client.post(f"{BASE}/{o['onboarding_id']}/estimates", json={}, headers=headers(gna)).json()
+        assert body["chosen_packages"] == expected and set(body["result"]["packages"]) == {"NOVA_ASSURED",
+                                                                                          "NOVA_SIGNATURE"}
+
+    def test_an_estimate_from_before_the_price_list_stays_readable(self, client, db_session, onboarding_ready):
+        gna, o = _new(client, db_session)
+        old = IndicativeEstimate(onboarding_id=o["onboarding_id"], inputs={"segment": "residential"},
+                                 result={"recommended_size_kw": 3.0, "net_cost": 123456.0}, created_by="x")
+        db_session.add(old)
+        db_session.commit()
+        [item] = client.get(f"{BASE}/{o['onboarding_id']}/estimates", headers=headers(gna)).json()["items"]
+        assert item["result"] == {"recommended_size_kw": 3.0, "net_cost": 123456.0}
+        assert item["price_status"] is None and item["price_list_version"] is None
 
     def test_segment_must_be_chosen_when_the_site_type_does_not_say(self, client, db_session, onboarding_ready):
         gna, o = _new(client, db_session, site_type="ground_mounted")

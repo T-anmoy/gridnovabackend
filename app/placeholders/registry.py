@@ -27,6 +27,12 @@ _PATH = REPO_ROOT / "config" / "placeholder_registry.yaml"
 AREAS = ("proposals", "pricing", "onboarding", "associates", "execution", "payments", "company", "policies")
 BLOCKING = ("blocks_launch", "blocks_feature", "tunable")
 PROBES = ("yaml_contains_marker", "yaml_equals", "constant_equals", "setting_equals", "count_query", "manual")
+# An entry's recorded standing, on top of its probe. `resolved` / `superseded` (by a
+# later source — e.g. Grid Nova's price list replacing a placeholder engine for every
+# list-priced path) count as resolved even where the old value is still in the code;
+# `partially_resolved` keeps probing and explains what is still missing. Each needs a
+# status_note saying what decided it.
+STATUSES = ("open", "resolved", "superseded", "partially_resolved")
 
 # What counts as a marker. Text dummies begin with DUMMY_TEXT_PREFIX.
 MARKERS = re.compile(r"\[PLACEHOLDER|\[UNCONFIRMED|DUMMY")
@@ -51,6 +57,8 @@ class Entry:
     blocking: str
     probe: str
     query: Optional[str] = None
+    status: str = "open"
+    status_note: Optional[str] = None
 
     @property
     def file(self) -> Optional[str]:
@@ -107,9 +115,14 @@ def _validate(data: dict) -> Registry:
                  f"{eid}: setting_equals needs a dummy_value for exactly each env setting")
         if raw["probe"] == "count_query":
             need(raw.get("query") in QUERIES, f"{eid}: query must be one of {sorted(QUERIES)}")
+        status = raw.get("status", "open")
+        need(status in STATUSES, f"{eid}: status must be one of {STATUSES}")
+        need(status == "open" or (isinstance(raw.get("status_note"), str) and raw["status_note"].strip()),
+             f"{eid}: a {status} entry needs a status_note")
         entries.append(Entry(id=eid, area=raw["area"], location=loc, description=raw["description"],
                              dummy_value=raw["dummy_value"], needed_from_grid_nova=raw["needed_from_grid_nova"],
-                             blocking=raw["blocking"], probe=raw["probe"], query=raw.get("query")))
+                             blocking=raw["blocking"], probe=raw["probe"], query=raw.get("query"),
+                             status=status, status_note=raw.get("status_note")))
     ids = [e.id for e in entries]
     need(len(set(ids)) == len(ids), "entry ids must be unique")
     exemptions = []
@@ -374,7 +387,11 @@ def _resolutions(db) -> dict:
 
 def evaluate(entry: Entry, db=None, resolutions: Optional[dict] = None) -> dict:
     """{"resolved": True/False/None, "error": str|None, "resolution": {...}|None}.
-    None = cannot tell without a database (count_query/manual with no session)."""
+    None = cannot tell without a database (count_query/manual with no session).
+    A `resolved` or `superseded` status is resolved whatever the probe says."""
+    if entry.status in ("resolved", "superseded"):
+        return {"resolved": True, "error": None,
+                "resolution": {"status": entry.status, "note": entry.status_note}}
     try:
         if entry.probe == "yaml_contains_marker":
             return {"resolved": not _probe_yaml_marker(entry), "error": None, "resolution": None}

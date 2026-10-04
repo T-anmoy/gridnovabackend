@@ -1,12 +1,13 @@
-"""Tests for the Pricing API (/api/v1/pricing) — the public /estimate endpoint
-and the Admin/Sales-only /breakdown endpoint over the same calculation
-framework (app/pricing/engine.py).
+"""Tests for the Pricing API (/api/v1/pricing) — the public /estimate endpoint (priced
+from Grid Nova's price list since PM-A) and the Admin/Sales-only /breakdown endpoint
+(the layered placeholder engine, internal only).
 """
 from tests.conftest import admin_headers, engineer_headers, management_headers, sales_headers
 
 
 def _payload(**overrides) -> dict:
-    payload = {"segment": "residential", "size_kw": 5, "state": "West Bengal", "roof_type": "RCC"}
+    payload = {"segment": "residential", "size_kw": 5, "state": "West Bengal", "roof_type": "RCC",
+               "connection_phase": "single_phase"}
     payload.update(overrides)
     return payload
 
@@ -21,13 +22,22 @@ class TestPublicEstimate:
         assert r.status_code == 200
         body = r.json()
         assert body["indicative_estimate"] is True
-        assert body["total_inr"] > 0
-        assert set(body["categories"].keys()) == {"Equipment", "Installation", "Other"}
+        # Nova Assured's final list price for 5 kW single phase.
+        assert body["total_inr"] == 312543.0 and body["categories"] is None
+        assert body["price_status"] == "list_price" and body["priced_kw"] == 5
+        assert body["packages"]["NOVA_SIGNATURE"]["final"] == "350048.16"
 
-    def test_categories_sum_to_the_total(self, client):
-        r = client.post("/api/v1/pricing/estimate", json=_payload())
-        body = r.json()
-        assert sum(body["categories"].values()) == body["total_inr"]
+    def test_size_is_rounded_up_to_a_whole_kw(self, client):
+        body = client.post("/api/v1/pricing/estimate", json=_payload(size_kw=4.2)).json()
+        assert (body["priced_kw"], body["priced_kw_differs"]) == (5, True)
+
+    def test_outside_the_price_list_is_a_custom_quote(self, client):
+        for overrides in ({"state": "Bihar"}, {"segment": "commercial"}, {"connection_phase": None},
+                          {"size_kw": 12}):
+            body = client.post("/api/v1/pricing/estimate",
+                               json={k: v for k, v in _payload(**overrides).items() if v is not None}).json()
+            assert body["total_inr"] is None and body["price_status"] == "custom_quote", overrides
+            assert body["custom_quote_reasons"]
 
     def test_never_returns_the_itemized_breakdown(self, client):
         r = client.post("/api/v1/pricing/estimate", json=_payload())
@@ -41,10 +51,11 @@ class TestPublicEstimate:
     def test_sizing_by_monthly_bill_instead_of_size_kw(self, client):
         r = client.post(
             "/api/v1/pricing/estimate",
-            json={"segment": "residential", "monthly_bill_inr": 4000, "state": "West Bengal"},
+            json={"segment": "residential", "monthly_bill_inr": 4000, "state": "West Bengal",
+                  "connection_phase": "single_phase"},
         )
         assert r.status_code == 200
-        assert r.json()["total_inr"] > 0
+        assert r.json()["total_inr"] > 0 and r.json()["price_status"] == "list_price"
 
     def test_missing_both_sizing_inputs_is_422(self, client):
         r = client.post(

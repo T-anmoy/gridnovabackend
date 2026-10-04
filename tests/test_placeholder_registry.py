@@ -170,11 +170,37 @@ class TestProbes:
         assert registry.evaluate(entry)["resolved"] is True   # the old version keeps its marker, as history
 
     def test_constant_probe(self, monkeypatch):
-        entry = registry.load().by_id["PRC-8"]
+        entry = registry.load().by_id["PRC-9"]
         assert registry.evaluate(entry)["resolved"] is False
         import app.pricing.engine as engine
-        monkeypatch.setattr(engine, "PLACEHOLDER_GST_RATE_PERCENT", 12.0)
+        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT", 7.5)
+        assert registry.evaluate(entry)["resolved"] is False      # every symbol must change
+        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW", 1350.0)
         assert registry.evaluate(entry)["resolved"] is True
+
+    def test_resolved_and_superseded_statuses(self):
+        """PM-A: the price list resolved ONB-3, PRC-8 and P1 (percent/labels), superseded
+        the placeholder engine for list-priced paths, and partly resolved D1."""
+        reg = registry.load()
+        for eid in ("ONB-3", "PRC-8", "P1"):
+            state = registry.evaluate(reg.by_id[eid])
+            assert state["resolved"] is True and reg.by_id[eid].status == "resolved", eid
+        for eid in ("PRC-1", "PRC-2", "PRC-3", "PRC-4", "PRC-5", "PRC-6", "PRC-7", "PRC-12", "PRC-13", "PRO-13",
+                    "PRO-14"):
+            state = registry.evaluate(reg.by_id[eid])
+            assert state["resolved"] is True and state["resolution"]["status"] == "superseded", eid
+        assert reg.by_id["D1"].status == "partially_resolved" and "DCR" in reg.by_id["D1"].status_note
+        # The triggers are still open even though P1's percentages are resolved.
+        assert registry.evaluate(reg.by_id["P9"])["resolved"] is False
+        for eid in ("PRC-16", "PRC-17", "PRC-18", "PRC-19", "PRC-20", "PRC-21", "PRC-22", "P10", "D2", "D3",
+                    "D4", "D5", "A2"):
+            assert eid in reg.by_id and reg.by_id[eid].status == "open", eid
+
+    def test_status_needs_a_note(self):
+        with pytest.raises(registry.RegistryError, match="needs a status_note"):
+            registry._validate({"entries": [{
+                "id": "X", "area": "pricing", "location": {"env": ["A"]}, "description": "d", "dummy_value": 1,
+                "needed_from_grid_nova": "q?", "blocking": "tunable", "probe": "manual", "status": "superseded"}]})
 
     def test_setting_probe(self, monkeypatch):
         from app.config import settings

@@ -1,17 +1,19 @@
 """
-Pricing API — two endpoints, two audiences, over the same calculation
-framework (app/pricing/engine.py).
+Pricing API.
 
-/estimate is public and unauthenticated (the customer-facing configurator).
-Its response is deliberately thin: a total and three broad category totals,
-never the itemized breakdown, and never anything procurement-cost-derived —
-see the security note on calculate_equipment_cost() in engine.py, and
-TestPublicEstimateNeverLeaksProcurementCost in tests/test_pricing_api.py,
-which checks this against a real, distinctive cost value, not just by reading
-the code.
+Customer-facing prices come ONLY from Grid Nova's price list (app/pricing/price_list.py,
+applied by app/pricing/list_pricing.py):
 
-/breakdown is Admin/Sales only and returns the full itemized PricingBreakdown,
-for internal use.
+  /estimate          public — the list price (Nova Assured final as total_inr, both
+                     packages) or a custom quote with reasons
+  /instant-estimate  public — the /solar-calculator flow (app/pricing/instant_estimate.py)
+  /packages          public — packages, makes, technology, terms, phase ranges and
+                     (when policy public_price_display is `exact`) the price table
+
+/breakdown is Admin/Sales only and still returns the layered placeholder engine's
+itemized PricingBreakdown (app/pricing/engine.py, PRC-1…7) for internal use — it is
+never shown to a customer and is superseded by the price list for every list-priced
+configuration. Nothing here returns a procurement-cost-derived figure.
 """
 from __future__ import annotations
 
@@ -57,7 +59,10 @@ class _BaseEstimateRequest(BaseModel):
 
 
 class PublicEstimateRequest(_BaseEstimateRequest):
-    pass
+    connection_phase: Optional[str] = None
+    connection_type: Optional[str] = None
+    battery_storage: bool = False
+    is_housing_society: bool = False
 
 
 class BreakdownRequest(_BaseEstimateRequest):
@@ -92,22 +97,33 @@ def public_estimate(
     body: PublicEstimateRequest,
     db: Session = Depends(get_db),
 ):
-    """Public, unauthenticated. Indicative only — a total and three broad
-    category totals, never the itemized breakdown."""
-    memory = MemoryManager(db)
-    try:
-        result = pricing_engine.calculate_full_estimate(memory, _pricing_inputs(body))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    """Public, unauthenticated. The list price for the size given (or the size the
+    monthly bill implies, rounded up to a whole kW): `total_inr` is Nova Assured's
+    final (GST-inclusive) price and `packages` has both packages; outside the price
+    list `total_inr` is null with `price_status: custom_quote`. `categories` is null —
+    a list price has no category breakdown."""
+    from app.pricing import list_pricing, price_list
 
+    if body.segment.strip().lower() not in pricing_engine.KNOWN_SEGMENTS:
+        raise HTTPException(status_code=422, detail=f"Unknown segment: {body.segment!r}.")
+    lp = list_pricing.evaluate(state=body.state, segment=body.segment, is_housing_society=body.is_housing_society,
+                               connection_type=body.connection_type, battery_storage=body.battery_storage,
+                               connection_phase=body.connection_phase, exact_kw=body.resolved_size_kw())
+    assured = lp.packages.get("NOVA_ASSURED")
     return {
         "indicative_estimate": True,
-        "total_inr": result.total,
-        "categories": {
-            "Equipment": result.category_totals["equipment"],
-            "Installation": result.category_totals["installation"],
-            "Other": result.category_totals["other"],
-        },
+        "total_inr": float(assured.final) if assured else None,
+        "categories": None,
+        "price_status": lp.price_status,
+        "custom_quote_reasons": lp.custom_quote_reasons,
+        "recommended_kw_exact": lp.recommended_kw_exact,
+        "priced_kw": lp.priced_kw,
+        "priced_kw_differs": lp.priced_kw_differs,
+        "phase": lp.phase,
+        "packages": {p: {**q.amounts(), "display_name": price_list.display_name(p)} for p, q in lp.packages.items()},
+        "gst_rule": price_list.gst_rule(),
+        "price_list_version": price_list.version(),
+        "destination": price_list.destination(),
     }
 
 
@@ -187,6 +203,9 @@ class InstantEstimateRequest(BaseModel):
     access_difficulty: Optional[str] = None
     is_remote: bool = False
     is_housing_society: bool = False
+    # Grid-connected without battery unless said otherwise (the price list covers only that).
+    connection_type: Optional[str] = None
+    battery_storage: bool = False
 
     @model_validator(mode="after")
     def _at_least_one_sizing_value(self):
@@ -208,15 +227,11 @@ def instant_estimate(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Public, unauthenticated — the expanded /solar-calculator flow: real
-    sizing (consumption and/or roof-area based, phase-capped), fixed
-    best-tier and access-difficulty pricing, and the real PM Surya Ghar
-    subsidy. Always prices at the top tier — tier is not a customer-supplied
-    choice on this path (see instant_estimate.py's FIXED_PUBLIC_TIER). An
-    extra `tier` field in the request body, if a caller sends one, is simply
-    ignored. Returns a complete, itemized breakdown, or an indicative range
-    (never a false confident number) when shading was reported as
-    significant."""
+    """Public, unauthenticated — the /solar-calculator flow: sizing (consumption
+    and/or roof-area based), Grid Nova's list prices for both packages at the priced
+    size, and the PM Surya Ghar subsidy shown separately with its conditions. Outside
+    the price list: no price, `price_status: custom_quote` with reasons. See
+    app/pricing/instant_estimate.py for every field."""
     _check_instant_estimate_rate_limit(request)
 
     memory = MemoryManager(db)
@@ -237,27 +252,56 @@ def instant_estimate(
                 access_difficulty=body.access_difficulty,
                 is_remote=body.is_remote,
                 is_housing_society=body.is_housing_society,
+                connection_type=body.connection_type,
+                battery_storage=body.battery_storage,
             ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return {
-        "recommended_size_kw": result.recommended_size_kw,
-        "sizing_detail": {
-            "consumption_based_kw": result.consumption_based_kw,
-            "area_based_kw": result.area_based_kw,
-            "phase_capped": result.phase_capped,
-        },
-        "base_cost": result.base_cost,
-        "adders": result.adders,
-        "component_breakdown": result.component_breakdown,
-        "subtotal_before_tax": result.subtotal_before_tax,
-        "gst_amount": result.gst_amount,
-        "subsidy_inr": result.subsidy_inr,
-        "net_cost": result.net_cost,
-        "is_indicative_range": result.is_indicative_range,
-        "net_cost_range_min": result.net_cost_range_min,
-        "net_cost_range_max": result.net_cost_range_max,
-        "note": result.note,
+    return instant_estimate_module.response(result)
+
+
+@router.get("/packages")
+def packages():
+    """Public — the two packages as Grid Nova's master data describes them: makes
+    ("or equivalent", never models), panel technology, commercial terms, phase ranges
+    and the price-list version. The price table is included only when the pricing
+    policy's `public_price_display` is `exact`."""
+    from app.pricing import policy, price_list
+
+    data = price_list.load()
+    terms = data["commercial_terms"]
+    items = []
+    for package in price_list.PACKAGES:
+        eq = data["equipment"][package]
+        items.append({
+            "package": package,
+            "display_name": price_list.display_name(package),
+            "equipment_tier": data["packages"][package]["equipment_tier"],
+            "equipment": {component: {"makes": list(spec.get("makes") or []),
+                                      "or_equivalent": bool(spec.get("or_equivalent")),
+                                      **({"technology": list(spec["technology"])} if spec.get("technology") else {})}
+                          for component, spec in eq.items()},
+        })
+    body = {
+        "price_list_version": data["version"],
+        "destination": data["destination"],
+        "currency": data["currency"],
+        "packages": items,
+        "phase_ranges": {phase: dict(r) for phase, r in data["phase_ranges"].items()},
+        "gst_rule": price_list.gst_rule(),
+        "terms": {"payment_schedule": [{"number": m["number"], "percent": str(m["percent"]), "label": m["label"]}
+                                       for m in terms["payment_schedule"]],
+                  "standard_warranty": terms["standard_warranty"],
+                  "solar_panel_life_span": terms["solar_panel_life_span"],
+                  "o_and_m": terms["o_and_m"],
+                  "price_change_clause": data["price_change_clause"]},
+        "price_display": policy.load()["public_price_display"],
     }
+    if body["price_display"] == "exact":
+        body["prices"] = [
+            {"package": p, "phase": phase, "kw": kw, **price_list.quote(p, phase, kw).amounts()}
+            for p in price_list.PACKAGES for phase, r in data["phase_ranges"].items()
+            for kw in range(r["min_kw"], r["max_kw"] + 1)]
+    return body

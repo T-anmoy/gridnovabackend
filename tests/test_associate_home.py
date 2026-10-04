@@ -57,7 +57,7 @@ class TestFeed:
         db_session.commit()
         _, items = _feed(client, gna)
         assert (oid, "formal_proposal_ready") not in items and (oid, "upload_signed_agreement") in items
-        assert items[(oid, "payment_due")]["params"] == {"milestone_number": 1, "label": "On acceptance",
+        assert items[(oid, "payment_due")]["params"] == {"milestone_number": 1, "label": "On Order",
                                                          "outstanding": "20000.00", "overdue": False}
 
     def test_execution_rejected_and_next_step(self, client, db_session, onboarding_ready):

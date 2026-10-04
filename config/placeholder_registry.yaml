@@ -140,6 +140,8 @@ entries:
     needed_from_grid_nova: What is the price per kW (INR) for rooftop 0–10 kW, rooftop 10–100 kW, and ground-mounted projects?
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "For list-priced proposals the price comes from Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the per-kW tiers apply only to configurations outside the price list."
   - id: PRO-14
     area: proposals
     location: {file: config/proposal_content.yaml, key: pricing.segment_modifiers}
@@ -148,6 +150,8 @@ entries:
     needed_from_grid_nova: Do government customers get a different price per kW, and if so by what percentage?
     blocking: tunable
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "For list-priced proposals the price comes from Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); segment modifiers apply only outside the price list."
 
   # ── Pricing engine (instant estimate / Solar Calculator) ───────────────────────
   # These live in Python, not config: resolving one is a code edit until they move
@@ -162,6 +166,8 @@ entries:
     needed_from_grid_nova: What is the base price per kW for residential, commercial, industrial and government customers, by system size?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-2
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_EQUIPMENT_MARKUP_PERCENT, PLACEHOLDER_TIER_MULTIPLIER]}
@@ -172,6 +178,8 @@ entries:
     needed_from_grid_nova: What markup does Grid Nova apply to equipment, and how much more do the premium equipment tiers cost?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-3
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_ROOF_TYPE_MODIFIER, PLACEHOLDER_DEFAULT_ROOF_TYPE_MODIFIER, PLACEHOLDER_PER_EXTRA_FLOOR_MODIFIER, PLACEHOLDER_MAX_EXTRA_FLOORS_COUNTED, PLACEHOLDER_SHADING_MODIFIER, PLACEHOLDER_DEFAULT_SHADING_MODIFIER, PLACEHOLDER_ACCESS_DIFFICULTY_MODIFIER, PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER]}
@@ -188,6 +196,8 @@ entries:
     needed_from_grid_nova: How much does the price change for tin/metal/asbestos roofs, each extra floor, shading, and difficult site access?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-4
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_STATE_MODIFIER, PLACEHOLDER_DEFAULT_STATE_MODIFIER, PLACEHOLDER_REMOTE_SITE_MODIFIER]}
@@ -199,6 +209,8 @@ entries:
     needed_from_grid_nova: Does the price differ by state or for remote sites, and by how much?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-5
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_BOS_RATE_PER_KW, PLACEHOLDER_CIVIL_ADDITION_BY_SITE_TYPE, PLACEHOLDER_DEFAULT_CIVIL_ADDITION]}
@@ -210,6 +222,8 @@ entries:
     needed_from_grid_nova: What are the balance-of-system cost per kW and the civil-work cost for each type of site?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-6
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_REGULATORY_BASE_BY_STATE, PLACEHOLDER_DEFAULT_REGULATORY_BASE, PLACEHOLDER_NET_METERING_ADDITION]}
@@ -221,6 +235,8 @@ entries:
     needed_from_grid_nova: What do the DISCOM/regulatory filings and the net-metering application cost in each state?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-7
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_OPTIONAL_SERVICE_PRICES]}
@@ -230,6 +246,8 @@ entries:
     needed_from_grid_nova: Which optional services does Grid Nova sell, and at what price?
     blocking: blocks_launch
     probe: constant_equals
+    status: superseded
+    status_note: "Superseded for every list-priced configuration by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the placeholder engine now feeds only the staff-only /pricing/breakdown, never a customer-facing price."
   - id: PRC-8
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_GST_RATE_PERCENT]}
@@ -239,6 +257,8 @@ entries:
     needed_from_grid_nova: What GST treatment applies to Grid Nova's solar systems (rate, and any split between goods and services)?
     blocking: blocks_launch
     probe: constant_equals
+    status: resolved
+    status_note: "Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…): GST 8.9% effective (5% on 70% of the basic price, 18% on 30%), implemented in app/pricing/price_list.py. The engine constant is used only by the staff-only /pricing/breakdown."
   - id: PRC-9
     area: pricing
     location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT, PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW]}
@@ -277,6 +297,8 @@ entries:
     needed_from_grid_nova: What is the largest system allowed on a single-phase and on a three-phase connection (per DISCOM if they differ)?
     blocking: tunable
     probe: constant_equals
+    status: superseded
+    status_note: "For pricing, replaced by the price list's phase ranges (single phase 1–10 kW, three phase 3–10 kW, Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…)). Sanctioned-load warnings in onboarding are unchanged."
   - id: PRC-13
     area: pricing
     location: {file: app/pricing/instant_estimate.py, symbols: [SIGNIFICANT_SHADING_RANGE_PERCENT]}
@@ -286,6 +308,8 @@ entries:
     needed_from_grid_nova: When a site has significant shading, how wide should the indicative price range be (plus/minus %)?
     blocking: tunable
     probe: constant_equals
+    status: superseded
+    status_note: "List prices are fixed: a significantly shaded site gets the list price and a site-visit note, never a price range."
   - id: PRC-14
     area: pricing
     location: {file: app/pricing/margin.py, symbols: [MARGIN_WARNING_PERCENT, MARGIN_FLOOR_PERCENT]}
@@ -360,6 +384,8 @@ entries:
     needed_from_grid_nova: Are "Nova Assured" and "Nova Signature" Grid Nova's package names, and which equipment tier does each mean?
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: resolved
+    status_note: "Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…): Nova Assured = equipment_tier standard, Nova Signature = premium."
   - id: ONB-4
     area: onboarding
     location: {file: config/associate_onboarding.yaml, key: scoring}
@@ -533,6 +559,8 @@ entries:
     blocking: blocks_feature
     probe: count_query
     query: equipment_catalogue_not_real
+    status: partially_resolved
+    status_note: "Makes per package supplied by Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…) (config/price_list.yaml equipment). Model numbers and DCR status per make/model are not supplied (D2, D3); the catalogue is created from nameplates as equipment is installed."
 
   # ── Payments (Phase 4A) ────────────────────────────────────────────────────────
   - id: P1
@@ -543,6 +571,8 @@ entries:
     needed_from_grid_nova: Please confirm the 20/60/20 terms in writing (they were given to us verbally on 28 Sep 2026), and exactly when each part falls due, in particular the 60% before dispatch.
     blocking: blocks_feature
     probe: yaml_contains_marker
+    status: resolved
+    status_note: "Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…): percentages and labels — 20% On Order, 60% Against Material Bill, 20% Before Commissioning. The due triggers and gates are still open (P9, P10)."
   - id: P2
     area: payments
     location: {file: config/execution_payments.yaml, key: payments.enabled_modes}
@@ -609,6 +639,112 @@ entries:
     needed_from_grid_nova: May Grid Nova email associates about their customers' progress, and from which sender name?
     blocking: blocks_feature
     probe: manual
+
+  # ── Price list (PM-A) ──────────────────────────────────────────────────────────
+  - id: PRC-17
+    area: pricing
+    location: {file: config/pricing_policy.yaml, key: size_rounding}
+    description: How a calculated system size becomes a priced size — rounded up to the next whole kW within the phase range.
+    dummy_value: ceil
+    needed_from_grid_nova: When the calculator works out a size between two price-list sizes (e.g. 3.2 kW), should the customer be shown the next size up, the nearest size, or something else?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: PRC-18
+    area: pricing
+    location: {file: config/pricing_policy.yaml, key: applicability}
+    description: When the list price applies — West Bengal, residential (housing society allowed), grid-connected without battery, known connection phase; anything else is a custom quote.
+    dummy_value: {states: [West Bengal], segments: [residential], housing_society_allowed: true, connection_types: [on_grid], battery_allowed: false, require_known_phase: true}
+    needed_from_grid_nova: Do the price-list prices apply to housing-society rooftops, commercial rooftops, hybrid or battery systems — or only to grid-connected homes without a battery?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: PRC-19
+    area: pricing
+    location: {file: config/pricing_policy.yaml, key: applicability.states}
+    description: Prices are for destination within West Bengal only; outside it (e.g. Bihar) the calculator shows a custom quote.
+    dummy_value: [West Bengal]
+    needed_from_grid_nova: What are the prices for sites outside West Bengal, starting with Bihar?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: PRC-20
+    area: pricing
+    location: {file: config/pricing_policy.yaml, key: public_price_display}
+    description: Whether the public packages endpoint shows the full price table.
+    dummy_value: exact
+    needed_from_grid_nova: May the website show the full price table publicly, or only a customer's own estimate?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: PRC-21
+    area: pricing
+    location: {file: config/price_list.yaml, key: currency_label_in_documents}
+    description: Generated documents (proposal PDF, agreement, receipts) print amounts as "Rs 1,23,456.78" per the source; the website keeps ₹.
+    dummy_value: Rs
+    needed_from_grid_nova: Should documents keep "Rs" as in the price list, or use the ₹ symbol?
+    blocking: tunable
+    probe: manual
+  - id: PRC-22
+    area: pricing
+    location: {file: config/pricing_policy.yaml, key: as_recommended_package_in_proposal}
+    description: A formal proposal for a customer whose package is "as recommended by Grid Nova" (or none) keeps the price "to be confirmed" until staff set it.
+    dummy_value: none
+    needed_from_grid_nova: When a customer has not chosen Nova Assured or Nova Signature, which package should the formal proposal quote?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: P9
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.schedule_template}
+    description: "When each milestone falls due: On Order at acceptance, Against Material Bill at material dispatch, Before Commissioning at the stage before commissioning (net-meter inspection where applicable, else installation)."
+    dummy_value: {1: accepted, 2: material_dispatched, 3: [inspection_net_meter, installed]}
+    needed_from_grid_nova: Exactly when should each payment be requested — on order, when the material bill is raised (at dispatch?), and how long before commissioning?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: P10
+    area: payments
+    location: {file: config/execution_payments.yaml, key: execution.gates.commissioned}
+    description: Optional gate (off) — commissioning cannot be recorded until the "Before Commissioning" payment is verified.
+    dummy_value: {enabled: false, through_milestone: 3}
+    needed_from_grid_nova: Must the "Before Commissioning" payment be received before Grid Nova commissions a system?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: D2
+    area: execution
+    location: {file: config/price_list.yaml, key: equipment.dcr_status}
+    description: DCR (domestic content) status per make/model is not in the master data — needed for PM Surya Ghar; the calculator shows the subsidy with the condition dcr_modules_required, and Nova never claims DCR compliance.
+    dummy_value: null
+    needed_from_grid_nova: Which panel makes/models in each package are DCR compliant for PM Surya Ghar?
+    blocking: blocks_feature
+    probe: manual
+  - id: D3
+    area: execution
+    location: {file: config/price_list.yaml, key: equipment}
+    description: No model numbers are supplied for any package; models are recorded from nameplates at installation and never stated by Nova.
+    dummy_value: {models: null}
+    needed_from_grid_nova: Which panel and inverter models (wattage, warranty) does each package use?
+    blocking: tunable
+    probe: manual
+  - id: D4
+    area: execution
+    location: {file: config/price_list.yaml, key: electrical_spec_up_to_5kw}
+    description: The common electrical specification is supplied only up to 5 kW; proposals above 5 kW omit the section.
+    dummy_value: not supplied for 6–10 kW
+    needed_from_grid_nova: What cable sizes, conduit and makes apply to 6–10 kW systems?
+    blocking: tunable
+    probe: manual
+  - id: D5
+    area: execution
+    location: {file: config/price_list.yaml, key: source_inconsistencies_to_confirm}
+    description: The cable maker is written "RR cable" in the Signature list and "RR KABEL" in the electrical specification, and the Signature cable list differs from the common specification list; both are kept as supplied.
+    dummy_value: ["RR cable vs RR KABEL", "Finolex/Havells/RR cable/Mescab vs Polycab/Mescab/Finolex/KEI/RR KABEL"]
+    needed_from_grid_nova: Which spelling of the RR cable maker is correct, and which cable list applies to Nova Signature?
+    blocking: tunable
+    probe: manual
+  - id: A2
+    area: policies
+    location: {file: config/pricing_policy.yaml, key: nova_may_quote_list_prices}
+    description: Nova (the website assistant) never quotes package prices; it sends customers to the calculator or their associate.
+    dummy_value: false
+    needed_from_grid_nova: May Nova quote price-list figures to customers in chat, or should it always point them to the calculator or their associate?
+    blocking: tunable
+    probe: yaml_contains_marker
 
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,

@@ -55,13 +55,15 @@ OVERLONG = "overlong_reply"
 MULTIPLE_QUESTIONS = "multiple_questions"
 UNAPPROVED_EQUIPMENT = "unapproved_equipment_claim"
 WARRANTY_TERM = "unverified_warranty_term"
+MODEL_NUMBER = "equipment_model_number"
+DCR_CLAIM = "unverified_dcr_claim"
 SUBSIDY_CLAIM = "subsidy_eligibility_claim"
 
 # Blocking codes replace the reply. The rest are recorded and let through: a reply
 # that stacks two questions is a quality problem, not a commercial risk, and
 # silently swapping it for a fallback would make the conversation worse.
 _BLOCKING = {NEW_MONEY, UNOFFERED_TIME, FALSE_CLAIM, INTERNAL_LEAK, EMPTY_REPLY,
-             UNAPPROVED_EQUIPMENT, WARRANTY_TERM, SUBSIDY_CLAIM,
+             UNAPPROVED_EQUIPMENT, WARRANTY_TERM, SUBSIDY_CLAIM, MODEL_NUMBER, DCR_CLAIM,
              nemo_guard.INTERNAL_DISCLOSURE}
 
 
@@ -335,10 +337,32 @@ _RE_DURATION_ON_PART = re.compile(
 )
 
 
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                 "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
+                 "twenty five": 25, "twenty-five": 25, "thirty": 30}
+# A part of the system: Grid Nova's supplied warranty is the STANDARD warranty from
+# handover — a term tied to one part (panels, inverter, workmanship…) is a different claim.
+_RE_SPECIFIC_PART = re.compile(r"\b(?:panels?|modules?|inverters?|batter(?:y|ies)|cables?|structure|workmanship|"
+                               r"installation|performance|output)\b", re.I)
+
+
+def _duration_key(text: str) -> tuple:
+    m = re.match(r"\s*(\d+(?:\.\d+)?|[a-z]+(?:[- ][a-z]+)?)\s*[- ]?\s*(year|yr|month)", text.lower())
+    if not m:
+        return (text.lower(),)
+    raw = m.group(1).replace("-", " ")
+    value = float(raw) if raw[0].isdigit() else _NUMBER_WORDS.get(raw, raw)
+    return (value, "month" if m.group(2) == "month" else "year")
+
+
 def check_warranty(reply: str, facts_text: str = "") -> Optional[dict]:
-    """Block a specific warranty duration or term ("25-year warranty", "10 years on
-    the inverter") unless company facts state that exact term. "Warranty terms are
-    in your proposal" names no term and is fine."""
+    """Block a warranty duration or term ("25-year warranty", "10 years on the
+    inverter") unless company facts state that duration as a warranty — and then only
+    as the standard warranty, not tied to one part of the system. "5-year", "5 years"
+    and "five years" are the same duration. "Warranty terms are in your proposal" names
+    no term and is fine."""
+    stated = {_duration_key(m.group(0)) for s in _sentences(facts_text) if _RE_WARRANTY_WORD.search(s)
+              for m in _RE_DURATION.finditer(s)}
     for sentence in _sentences(reply):
         durations = [m.group(0) for m in _RE_DURATION.finditer(sentence)]
         if not durations:
@@ -346,12 +370,60 @@ def check_warranty(reply: str, facts_text: str = "") -> Optional[dict]:
         if not (_RE_WARRANTY_WORD.search(sentence) or _RE_DURATION_ON_PART.search(sentence)):
             continue
         for duration in durations:
-            stated = [s for s in _sentences(facts_text)
-                      if _mentions(duration, s) and _RE_WARRANTY_WORD.search(s)]
-            if not stated:
+            if _duration_key(duration) not in stated or _RE_SPECIFIC_PART.search(sentence):
                 return {"code": WARRANTY_TERM,
                         "detail": f"reply stated a warranty term company facts do not: {sentence.strip()!r}"}
     return None
+
+
+# A model number: a token mixing letters and digits ("WS-540", "SG5.0RS", "M10") in a
+# sentence about equipment. Units and ordinals ("5kW", "10 kWh", "4 sqmm", "1st") are not.
+_RE_ALNUM_TOKEN = re.compile(r"(?<![\w-])(?=[\w.\-/]*\d)(?=[\w.\-/]*[A-Za-z])[A-Za-z0-9][\w.\-/]*[A-Za-z0-9](?![\w-])")
+_RE_UNIT = re.compile(r"^\d+(?:\.\d+)?(?:kw|kwp|kwh|w|wp|v|a|mw|mwp|sqmm|mm|yrs?|years?|months?|st|nd|rd|th|"
+                      r"x|kv|kva|hrs?|hours?|am|pm|lakh|cr)$", re.I)
+_RE_EQUIPMENT_WORD = re.compile(r"\b(?:panels?|modules?|inverters?|batter(?:y|ies)|cables?|models?)\b", re.I)
+
+
+def check_model_numbers(reply: str, makes=()) -> Optional[dict]:
+    """Nova never states an equipment model number (Grid Nova's master data supplies
+    none; what is installed is recorded from the nameplate later)."""
+    for sentence in _sentences(reply):
+        about_equipment = _RE_EQUIPMENT_WORD.search(sentence) or any(_mentions(m, sentence) for m in makes if m)
+        if not about_equipment:
+            continue
+        for token in _RE_ALNUM_TOKEN.findall(sentence):
+            if _RE_UNIT.match(token) or token.upper().startswith(("PM-", "COVID")):
+                continue
+            return {"code": MODEL_NUMBER, "detail": f"reply stated an equipment model number: {token!r}"}
+    return None
+
+
+_RE_DCR_CLAIM = re.compile(
+    r"\bDCR[- ]?(?:compliant|certified|approved|eligible|listed|registered)\b"
+    r"|\b(?:is|are)\s+(?:all\s+|fully\s+|also\s+)?DCR\b"
+    r"|\bDCR\s+(?:panels?|modules?)\s+(?:from|by)\b", re.I)
+_RE_DCR_HEDGE = re.compile(r"\b(?:not|whether|if|confirm|check|verify|need|needs|required|requires|must)\b", re.I)
+
+
+def check_dcr_claims(reply: str) -> Optional[dict]:
+    """Nova never asserts that a make or package is DCR compliant — DCR status per
+    make/model is not in Grid Nova's master data. Saying PM Surya Ghar needs DCR
+    modules (general scheme information) stays allowed."""
+    for sentence in _sentences(reply):
+        if _RE_DCR_CLAIM.search(sentence) and not _RE_DCR_HEDGE.search(sentence):
+            return {"code": DCR_CLAIM, "detail": f"reply asserted DCR compliance: {sentence.strip()!r}"}
+    return None
+
+
+def price_list_makes() -> list[str]:
+    """Approved makes from Grid Nova's master data (every package, every component,
+    and the common electrical specification) — part of Nova's brand allow-list."""
+    from app.pricing import price_list
+    data = price_list.load()
+    makes = {m for package in price_list.PACKAGES for spec in data["equipment"][package].values()
+             for m in (spec.get("makes") or [])}
+    makes |= {m for item in data["electrical_spec_up_to_5kw"].values() for m in (item.get("makes") or [])}
+    return sorted(makes)
 
 
 _RE_MONEY_OR_SUBSIDY = r"(?:₹|\brs\.?|\binr\b|subsid|\bcfa\b|\blakh|\b\d{1,3}(?:,\d{2,3})+\b|\b\d{4,}\b)"
@@ -526,14 +598,18 @@ def enforce(
     may be named back, not endorsed).
     """
     from app.llm.company_facts import COMPANY_FACTS
+    makes = price_list_makes()
+    approved = list(approved_equipment) + makes
     violations = []
     for check in (
         lambda: check_money(reply, allowed_text),
         lambda: check_times(reply, allowed_text),
         lambda: check_claims(reply),
         lambda: check_leaks(reply, memory_context),
-        lambda: check_equipment(reply, approved_equipment, customer_text or user_message, COMPANY_FACTS),
+        lambda: check_equipment(reply, approved, customer_text or user_message, COMPANY_FACTS),
         lambda: check_warranty(reply, COMPANY_FACTS),
+        lambda: check_model_numbers(reply, makes),
+        lambda: check_dcr_claims(reply),
         lambda: check_subsidy(reply),
     ):
         found = check()

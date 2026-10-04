@@ -55,7 +55,8 @@ def agreement_html(db: Session, onboarding: CustomerOnboarding, proposal: Propos
     customer = db.get(Customer, onboarding.customer_id)
     inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
     project = db.get(Project, onboarding.project_id)
-    value = f"INR {proposal.total_value:,.2f}" if proposal.total_value else "As per the accepted proposal"
+    from app.pricing.price_list import document_amount
+    value = document_amount(proposal.total_value) if proposal.total_value else "As per the accepted proposal"
     rows = [
         ("Date", today.isoformat()),
         ("Customer", customer.name),

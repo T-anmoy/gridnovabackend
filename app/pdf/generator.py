@@ -33,7 +33,7 @@ _PROPOSAL_HTML_TEMPLATE = """
   .value-box {{ background: {primary}; color: white; padding: 16px 24px; border-radius: 8px; margin: 24px 0; display: inline-block; }}
   .value-label {{ font-size: 12px; opacity: 0.8; }}
   .value-amount {{ font-size: 26px; font-weight: bold; color: {accent}; }}
-  .section {{ margin-bottom: 20px; line-height: 1.6; }}
+  .section {{ margin-bottom: 20px; line-height: 1.6; white-space: pre-line; }}
   .footer {{ margin-top: 48px; border-top: 1px solid #ddd; padding-top: 16px; color: #888; font-size: 11px; }}
   .signoff-flag {{ background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 4px; margin: 16px 0; }}
 </style>
@@ -81,6 +81,11 @@ _SECTION_TITLES = {
     "pm_kusum_note": "PM-KUSUM Subsidy",
     "government_compliance_note": "Compliance",
     "pricing": "Pricing",
+    "equipment_makes": "Equipment",
+    "electrical_specification": "Electrical Specification",
+    "payment_terms": "Payment Terms",
+    "warranty_and_service": "Warranty and Service",
+    "price_terms": "Price Terms",
     "standard_terms": "Terms & Conditions",
     "closing": "Closing",
 }
@@ -125,7 +130,9 @@ def _build_html(proposal_data: dict, content_config: dict) -> str:
     primary = letterhead.get("primary_color", "#0e2a63")
 
     total_value = proposal_data.get("total_value")
-    value_str = f"INR {total_value:,.0f}" if total_value else "[PLACEHOLDER]"
+    # Documents print amounts as the price list says: "Rs 1,23,456.78".
+    from app.pricing.price_list import document_amount
+    value_str = document_amount(total_value) if total_value else "[PLACEHOLDER]"
 
     notes = []
     if proposal_data.get("requires_manager_signoff", False):

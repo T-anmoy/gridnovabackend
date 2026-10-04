@@ -95,13 +95,10 @@ def amount_in_words(amount: Decimal) -> str:
 
 
 def indian_figures(amount: Decimal) -> str:
-    """₹12,34,567.89 — Indian digit grouping."""
-    whole, _, frac = f"{Decimal(amount):.2f}".partition(".")
-    if len(whole) > 3:
-        head, tail = whole[:-3], whole[-3:]
-        head = ",".join(re.findall(r"\d{1,2}", head[::-1]))[::-1] if head else ""
-        whole = f"{head},{tail}"
-    return f"₹{whole}.{frac}"
+    """Rs 12,34,567.89 — the price list's currency label for documents, Indian digit
+    grouping (app/pricing/price_list.document_amount)."""
+    from app.pricing.price_list import document_amount
+    return document_amount(Decimal(amount))
 
 
 def format_number(template: str, year: int, seq: int) -> str:

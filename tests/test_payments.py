@@ -277,9 +277,37 @@ class TestMilestoneStatus:
         assert len(notifications.of("payments_attention")) == 1
 
     def test_second_milestone_falls_due_at_its_trigger(self, client, db_session, onboarding_ready):
+        # Grid Nova's terms (price list): On Order 20 · Against Material Bill 60 ·
+        # Before Commissioning 20; M2 falls due at material_dispatched (P9).
         gna, oid = accepted_customer(client, db_session, stage=ProjectStage.agreement_signed)
+        body = client.get(pay_url(oid), headers=headers(gna)).json()["milestones"]
+        assert [(m["label"], m["percent"], m["trigger"]) for m in body] == [
+            ("On Order", "20.00", "accepted"), ("Against Material Bill", "60.00", "material_dispatched"),
+            ("Before Commissioning", "20.00", "inspection_net_meter")]
+        assert [m["due_status"] for m in body] == ["due", "not_due", "not_due"]
+        advance_to(db_session, oid, ProjectStage.material_dispatched)
         statuses = [m["due_status"] for m in client.get(pay_url(oid), headers=headers(gna)).json()["milestones"]]
         assert statuses == ["due", "due", "not_due"]
+
+    def test_third_milestone_is_due_at_the_stage_before_commissioning(self, client, db_session, onboarding_ready):
+        # Off-grid: no net-meter inspection, so "before commissioning" is `installed`.
+        gna, oid = accepted_customer(client, db_session, connection_type="off_grid")
+        triggers = [m["trigger"] for m in client.get(pay_url(oid), headers=headers(gna)).json()["milestones"]]
+        assert triggers == ["accepted", "material_dispatched", "installed"]
+
+    def test_commissioning_gate(self, client, db_session, onboarding_ready, stub_pdf, monkeypatch):
+        from app.execution import service as execution
+        from app.memory.models import CustomerOnboarding
+        gna, oid = accepted_customer(client, db_session, stage=ProjectStage.inspection_net_meter)
+        client.get(pay_url(oid), headers=headers(gna))          # creates the schedule
+        onboarding = db_session.get(CustomerOnboarding, oid)
+        assert execution.stage_blockers(db_session, onboarding, ProjectStage.commissioned) == []   # off by default
+        monkeypatch.setitem(config.execution()["gates"]["commissioned"], "enabled", True)
+        [blocker] = execution.stage_blockers(db_session, onboarding, ProjectStage.commissioned)
+        assert blocker["code"] == "commissioning_payment_gate"
+        pid = record(client, ACCOUNTS, oid, neft("100000.00"), staff=True).json()["payment_id"]
+        client.post(f"{PAY}/{pid}/verify", headers=ACCOUNTS)
+        assert execution.stage_blockers(db_session, onboarding, ProjectStage.commissioned) == []
 
     def test_dispatch_gate_counts_verified_money(self, client, db_session, onboarding_ready, stub_pdf, monkeypatch):
         monkeypatch.setitem(config.execution()["gates"]["material_dispatched"], "enabled", True)

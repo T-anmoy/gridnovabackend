@@ -440,6 +440,83 @@ def previously_voided(db: Session, unit: InstalledUnit) -> bool:
         InstalledUnit.project_id != unit.project_id)).first() is not None
 
 
+# ── Approved makes (Grid Nova's master data, config/price_list.yaml) ───────────
+
+COMPONENT_FOR_CATEGORY = {"module": "solar_panel", "inverter": "inverter", "bos_component": "cables"}
+
+
+def project_package(db: Session, onboarding: CustomerOnboarding) -> Optional[str]:
+    """NOVA_ASSURED / NOVA_SIGNATURE: the accepted proposal's list-priced package, else
+    the onboarding's equipment package; None when neither says."""
+    from app.payments.service import accepted_proposal
+    from app.pricing.price_list import PACKAGE_FOR_TIER
+    proposal = accepted_proposal(db, onboarding)
+    package = (((proposal.content or {}).get("pricing") or {}).get("package") if proposal else None)
+    if package:
+        return package
+    inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
+    tier = inputs.equipment_tier.value if inputs and inputs.equipment_tier else None
+    return PACKAGE_FOR_TIER.get(tier)
+
+
+def approved_makes(package: Optional[str], component: Optional[str]) -> Optional[list[str]]:
+    """The makes Grid Nova lists for this package and component, or None when it lists
+    none (unknown package, or a component the package does not name)."""
+    from app.pricing import price_list
+    if package is None or component is None:
+        return None
+    spec = price_list.equipment(package).get(component)
+    return list(spec.get("makes") or []) if spec else None
+
+
+def make_in_package(package: Optional[str], component: Optional[str], brand: Optional[str]) -> Optional[bool]:
+    makes = approved_makes(package, component)
+    if makes is None or not brand:
+        return None
+    return brand.strip().casefold() in {m.casefold() for m in makes}
+
+
+def _unit_make_not_in_package(db: Session, unit: InstalledUnit, package: Optional[str]) -> bool:
+    equipment = db.get(Equipment, unit.equipment_id) if unit.equipment_id else None
+    if equipment is None or unit.status == InstalledUnitStatus.voided:
+        return False
+    return make_in_package(package, COMPONENT_FOR_CATEGORY.get(unit.category.value), equipment.brand) is False
+
+
+def catalogue_from_nameplate(db: Session, onboarding: CustomerOnboarding, viewer: "Viewer", data: dict) -> Equipment:
+    """Operations/Admin add a catalogue item from the installed equipment's nameplate:
+    the model as printed, DCR as the OEM declaration states. The brand must be an
+    approved make for the project's package and component; otherwise (or when the
+    project's package is not known) an `equivalent_reason` is required and recorded."""
+    from app.memory.memory_manager import MemoryManager
+    from app.memory.models import EquipmentCategory
+    category = EquipmentCategory(data["category"])
+    package = project_package(db, onboarding)
+    component = COMPONENT_FOR_CATEGORY.get(category.value)
+    in_package = make_in_package(package, component, data["brand"])
+    needs_reason = in_package is False or (package is None and component is not None)
+    reason = (data.get("equivalent_reason") or "").strip()
+    if needs_reason and len(reason) < 5:
+        makes = approved_makes(package, component)
+        raise AssociateError(
+            f"{data['brand']} is not an approved make for this project's package"
+            + (f" ({', '.join(makes)})" if makes else " (the package is not known)")
+            + ". Say why it is an equivalent (equivalent_reason).",
+            code="make_not_approved", status_code=422, field="equivalent_reason",
+            extra={"approved_makes": makes, "package": package})
+    item = MemoryManager(db).create_equipment(
+        category=category, brand=data["brand"].strip(), model_name=data["model_name"].strip(),
+        performed_by=viewer.actor, specification=data.get("specification"),
+        is_dcr_compliant=bool(data["is_dcr_compliant"]))
+    db.add(AuditLog(entity_type="equipment", entity_id=str(item.id), action="catalogued_from_nameplate",
+                    performed_by=viewer.actor,
+                    after_value={"onboarding_id": onboarding.id, "project_id": onboarding.project_id,
+                                 "package": package, "component": component, "in_package": in_package,
+                                 "equivalent_reason": reason or None,
+                                 "is_dcr_compliant": bool(data["is_dcr_compliant"])}))
+    return item
+
+
 def project_flags(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution,
                   staff: bool = False) -> list[str]:
     flags = []
@@ -449,6 +526,10 @@ def project_flags(db: Session, onboarding: CustomerOnboarding, execution: Projec
         flags.append("capacity_mismatch")
     if staff and any(previously_voided(db, u) for u in _active_units(db, onboarding.project_id)):
         flags.append("previously_voided")
+    if staff:
+        package = project_package(db, onboarding)
+        if any(_unit_make_not_in_package(db, u, package) for u in _active_units(db, onboarding.project_id)):
+            flags.append("make_not_in_package")
     return flags
 
 
@@ -480,7 +561,7 @@ def _after_change(db: Session, onboarding: CustomerOnboarding, execution: Projec
                                           "dcr_mismatch")
 
 
-def unit_json(db: Session, unit: InstalledUnit, staff: bool = False) -> dict:
+def unit_json(db: Session, unit: InstalledUnit, staff: bool = False, package: Optional[str] = "?") -> dict:
     equipment = db.get(Equipment, unit.equipment_id) if unit.equipment_id else None
     body = {
         "unit_id": unit.id, "category": unit.category.value, "serial_number": unit.serial_number,
@@ -499,6 +580,11 @@ def unit_json(db: Session, unit: InstalledUnit, staff: bool = False) -> dict:
     }
     if staff:   # never shown to an associate
         body["previously_voided"] = previously_voided(db, unit)
+        if package == "?":
+            onboarding = db.get(CustomerOnboarding, unit.onboarding_id)
+            package = project_package(db, onboarding) if onboarding else None
+        # Non-blocking: the unit's make is not one Grid Nova lists for the project's package.
+        body["make_not_in_package"] = _unit_make_not_in_package(db, unit, package)
     return body
 
 
@@ -512,7 +598,7 @@ def summary(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecu
     return {"register": {
         "verified_at": execution.register_verified_at.isoformat() if execution.register_verified_at else None,
         "verified_by": execution.register_verified_by,
-        "units": [unit_json(db, u, staff) for u in units],
+        "units": [unit_json(db, u, staff, project_package(db, onboarding) if staff else None) for u in units],
         "totals": {"modules": sum(u.category == InstalledUnitCategory.module for u in active),
                    "inverters": sum(u.category == InstalledUnitCategory.inverter for u in active),
                    "other": sum(u.category == InstalledUnitCategory.other for u in active),

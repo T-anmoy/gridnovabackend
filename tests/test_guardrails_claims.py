@@ -21,12 +21,12 @@ def _codes(result):
 
 class TestEquipment:
     @pytest.mark.parametrize("reply", [
-        "We use Waaree panels on most residential rooftops.",
-        "For a 5kW system we'd pair the panels with a Sungrow inverter.",
-        "Our installs typically use Adani modules.",
+        "We use Longi panels on most residential rooftops.",
+        "For a 5kW system we'd pair the panels with a Fronius inverter.",
+        "Our installs typically use Jinko modules.",
         "The battery would be an Exide unit.",
         "We can fit LG panels for you.",
-        "I'd suggest panels from Vikram Solar for this roof.",
+        "I'd suggest panels from Loom Solar for this roof.",
         "Most customers here go for a Growatt hybrid inverter and Luminous batteries.",
         "A good option is Novasun panels with a Fronius inverter.",
     ])
@@ -47,24 +47,75 @@ class TestEquipment:
     def test_generic_equipment_talk_is_allowed(self, reply):
         assert not _enforce(reply).blocked
 
-    def test_active_sku_record_approves_the_make(self, db_session, memory):
-        db_session.add(Equipment(category=EquipmentCategory.module, brand="Waaree", model_name="WSM-540",
+    def test_active_sku_record_approves_the_make_but_never_a_model_number(self, db_session, memory):
+        db_session.add(Equipment(category=EquipmentCategory.module, brand="Rayzon", model_name="RZ-540",
                                  is_active=True))
-        db_session.add(Equipment(category=EquipmentCategory.inverter, brand="Sungrow", model_name="SG5K",
+        db_session.add(Equipment(category=EquipmentCategory.inverter, brand="Solis", model_name="S5K",
                                  is_active=False))
         db_session.commit()
         terms = memory.active_equipment_terms()
-        assert not _enforce("We usually install Waaree WSM-540 panels.", approved=terms).blocked
-        assert _enforce("We'd pair them with a Sungrow inverter.", approved=terms).blocked  # inactive SKU
+        assert not _enforce("We usually install Rayzon panels.", approved=terms).blocked
+        result = _enforce("We usually install Rayzon RZ-540 panels.", approved=terms)
+        assert result.blocked and g.MODEL_NUMBER in _codes(result)            # PM-A: never a model number
+        assert _enforce("We'd pair them with a Solis inverter.", approved=terms).blocked  # inactive SKU
 
     def test_customer_named_make_may_be_named_back_but_not_endorsed(self):
-        customer = "My neighbour got Tata panels, are those any good?"
-        allowed = "I can't comment on Tata panels specifically — our team will recommend equipment in your proposal."
+        customer = "My neighbour got Loom Solar panels, are those any good?"
+        allowed = ("I can't comment on Loom Solar panels specifically — our team will recommend equipment in "
+                   "your proposal.")
         assert not _enforce(allowed, customer=customer).blocked
-        for endorsed in ("Yes, Tata panels are what we install too.",
-                         "We use Tata panels for most homes.",
-                         "Our Tata panels come with great output."):
+        for endorsed in ("Yes, Loom Solar panels are what we install too.",
+                         "We use Loom Solar panels for most homes.",
+                         "Our Loom Solar panels come with great output."):
             assert _enforce(endorsed, customer=customer).blocked, endorsed
+
+
+class TestPackages:
+    """PM-A — Grid Nova's master data: the package makes, the standard warranty, O&M and
+    the panel life span may be stated; models, DCR claims, other makes, other warranty
+    terms and package prices may not."""
+
+    @pytest.mark.parametrize("reply", [
+        "Nova Signature uses TATA, Waaree, Adani or Vikram panels, or equivalent.",
+        "We use Waaree panels on most Nova Signature rooftops.",
+        "Nova Assured pairs Sova Solar panels with a Deye inverter, or equivalent.",
+        "For a 5kW system we'd pair the panels with a Sungrow inverter.",
+        "I'd suggest panels from Vikram Solar for this roof.",
+        "The Nova Signature package uses Mono PERC or TOPCon panels.",
+        "Every system carries a standard warranty of 5 years from handover.",
+        "You get a 5-year standard warranty, starting at handover.",
+        "There is a five year warranty from handover, and the first year of O&M is free.",
+        "Solar panels typically have a life span of 20–25 years.",
+        "For prices, please use the Solar Calculator on our website or ask your associate.",
+        "PM Surya Ghar requires DCR modules, and our team will confirm which apply to you.",
+    ])
+    def test_allowed(self, reply):
+        result = _enforce(reply)
+        assert not result.blocked, result.violations
+
+    @pytest.mark.parametrize("reply,code", [
+        ("We install Waaree WS-540 panels.", "equipment_model_number"),
+        ("The inverter is a Sungrow SG5.0RS.", "equipment_model_number"),
+        ("Our Nova Signature panels are DCR compliant.", "unverified_dcr_claim"),
+        ("Adani modules are DCR certified, so you get the subsidy.", "unverified_dcr_claim"),
+        ("All our panels are DCR.", "unverified_dcr_claim"),
+        ("We use Longi panels in Nova Signature.", "unapproved_equipment_claim"),
+        ("The panels come with a 25-year warranty.", "unverified_warranty_term"),
+        ("Panels have a 20–25 year warranty.", "unverified_warranty_term"),
+        ("You get a 5-year warranty on the inverter.", "unverified_warranty_term"),
+        ("There's a 10 year warranty from handover.", "unverified_warranty_term"),
+        ("Nova Assured for 3 kW costs ₹2,01,465.", "new_money_figure"),
+    ])
+    def test_blocked(self, reply, code):
+        result = _enforce(reply)
+        assert result.blocked and code in _codes(result), result.violations
+
+    def test_facts_carry_the_packages_without_prices_or_models(self):
+        assert "Nova Assured" in COMPANY_FACTS and "Nova Signature" in COMPANY_FACTS
+        assert "Standard warranty: 5 years from handover." in COMPANY_FACTS
+        assert "201465" not in COMPANY_FACTS and "2,01,465" not in COMPANY_FACTS
+        life = next(line for line in COMPANY_FACTS.splitlines() if "life span" in line.lower())
+        assert "warrant" not in life.lower() and "guarantee" not in life.lower()
 
 
 class TestWarranty:
@@ -167,7 +218,7 @@ class TestNegativeEligibility:
 class TestPipeline:
     def test_block_uses_the_fallback_and_is_logged(self, caplog):
         with caplog.at_level("WARNING", logger="app.agents.guardrails"):
-            result = _enforce("We use Waaree panels and you are eligible for the subsidy.")
+            result = _enforce("We use Longi panels and you are eligible for the subsidy.")
         assert result.reply == FALLBACK and result.blocked
         assert {g.UNAPPROVED_EQUIPMENT, g.SUBSIDY_CLAIM} <= _codes(result)
         assert any("Guardrail blocked" in r.getMessage() for r in caplog.records)

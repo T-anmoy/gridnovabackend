@@ -48,7 +48,7 @@ class TestProjectKey:
         db_session.expire_all()   # the API verified it in another session
         receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
         html = receipts.receipt_html(db_session, receipt)
-        assert "₹1,500.00" in html
+        assert "Rs 1,500.00" in html
         rows = list(csv.DictReader(io.StringIO(client.get(f"{DASH}/exports/payments.csv",
                                                           headers=ACCOUNTS).content.decode()[1:])))
         assert [r["amount_inr"] for r in rows] == ["1500.00"] and rows[0]["customer_name"]

@@ -105,7 +105,7 @@ class TestWithRealContent:
         assert r.status_code == 200
         after = _detail(client, pid)
         pricing = next(s for s in after["content"]["sections"] if s["id"] == "pricing")
-        assert pricing["body"] == "Proposed project value: INR 180,000."
+        assert pricing["body"] == "Proposed project value: Rs 1,80,000.00."
         assert pricing["total_value"] == 180_000 and after["content"]["pricing"]["total_value"] == 180_000
         assert after["has_placeholder_content"] is False
 

@@ -120,6 +120,17 @@ def milestones(db: Session, project_id: int) -> list[PaymentMilestone]:
                            .order_by(PaymentMilestone.number)).scalars())
 
 
+def resolve_trigger(db: Session, onboarding: CustomerOnboarding, trigger) -> str:
+    """A template trigger as the stage it means for THIS project: a list is "the first
+    of these stages that applies" (e.g. inspection_net_meter where the project has it,
+    else installed); the last is used when none applies."""
+    if not isinstance(trigger, list):
+        return trigger
+    from app.onboarding import progress
+    applies = {s.value for s in progress.applicable(db, onboarding)}
+    return next((t for t in trigger if t in applies), trigger[-1])
+
+
 def ensure_schedule(db: Session, onboarding: CustomerOnboarding, actor: str) -> list[PaymentMilestone]:
     """Create the schedule from the template the first time it is needed after
     acceptance. Idempotent; nothing (and no error) without an accepted total."""
@@ -130,7 +141,7 @@ def ensure_schedule(db: Session, onboarding: CustomerOnboarding, actor: str) -> 
     if proposal is None or not proposal.total_value:
         return []
     total = money(proposal.total_value)
-    template = _cfg()["schedule_template"]
+    template = [{**m, "trigger": resolve_trigger(db, onboarding, m["trigger"])} for m in _cfg()["schedule_template"]]
     amounts = split(total, [Decimal(str(m["percent"])) for m in template])
     rows = []
     for m, amount in zip(template, amounts):

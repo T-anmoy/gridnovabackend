@@ -24,9 +24,12 @@ def _rows(db) -> list[dict]:
     rows = []
     for entry, state in registry.evaluate_all(db):
         status = "resolved" if state["resolved"] is True else ("unknown" if state["resolved"] is None else "OPEN")
+        if entry.status in ("superseded", "partially_resolved"):
+            status = entry.status.replace("partially_resolved", "partial")
         rows.append({"id": entry.id, "area": entry.area, "blocking": entry.blocking, "status": status,
                      "location": entry.location_label(), "dummy_value": entry.dummy_value,
-                     "needed_from_grid_nova": entry.needed_from_grid_nova, "probe_error": state["error"]})
+                     "needed_from_grid_nova": entry.needed_from_grid_nova, "probe_error": state["error"],
+                     "status_note": entry.status_note})
     return rows
 
 
@@ -39,7 +42,7 @@ def main(argv: list[str]) -> int:
     except Exception:
         rows = _rows(None)
     if "--open" in argv:
-        rows = [r for r in rows if r["status"] != "resolved"]
+        rows = [r for r in rows if r["status"] not in ("resolved", "superseded")]
     if "--json" in argv:
         print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
         return 0
@@ -48,7 +51,8 @@ def main(argv: list[str]) -> int:
         print(f"        {r['needed_from_grid_nova']}")
         if r["probe_error"]:
             print(f"        probe error: {r['probe_error']}")
-    open_launch = sum(1 for r in rows if r["status"] != "resolved" and r["blocking"] == "blocks_launch")
+    open_launch = sum(1 for r in rows if r["status"] not in ("resolved", "superseded")
+                      and r["blocking"] == "blocks_launch")
     print(f"\n{len(rows)} entries; {open_launch} launch-blocking still open.")
     return 0
 

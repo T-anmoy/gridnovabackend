@@ -49,6 +49,41 @@ def _business_hours_phrase() -> str:
     return f"{_fmt(settings.business_hours_start_ist)} – {_fmt(settings.business_hours_end_ist)} IST"
 
 
+def _packages_block() -> str:
+    """Packages, makes and terms from Grid Nova's Pricing & Equipment Master Data
+    (config/price_list.yaml) — makes "or equivalent" as supplied, never models, never
+    prices, never DCR status (not supplied). The panel life span line deliberately
+    carries no warranty wording, so app/agents/guardrails.py's warranty check cannot
+    read it as a 20–25 year warranty."""
+    from app.pricing import price_list
+
+    data = price_list.load()
+    labels = {"solar_panel": "solar panels", "inverter": "inverter", "cables": "cables"}
+    lines = ["Rooftop solar packages (Grid Nova's master data):"]
+    for package in price_list.PACKAGES:
+        parts = []
+        for component, spec in data["equipment"][package].items():
+            makes = ", ".join(spec.get("makes") or [])
+            text = f"{labels.get(component, component)}: {makes}" + (", or equivalent" if spec.get("or_equivalent") else "")
+            if spec.get("technology"):
+                text += f" ({' or '.join(spec['technology'])})"
+            parts.append(text)
+        lines.append(f"- {price_list.display_name(package)} — " + "; ".join(parts))
+    spec_makes = sorted({m for item in data["electrical_spec_up_to_5kw"].values() for m in (item.get("makes") or [])})
+    lines.append(f"- Electrical items for systems up to 5 kW use makes such as: {', '.join(spec_makes)}")
+    terms = data["commercial_terms"]
+    lines += [
+        f"Standard warranty: {terms['standard_warranty']}.",
+        f"Operation and maintenance: {terms['o_and_m']}.",
+        f"Solar panel life span: {terms['solar_panel_life_span']} — how long panels are expected to last, "
+        "not a cover period.",
+        "Package prices are not stated here: send customers to the Solar Calculator on the website or to "
+        "their Grid Nova associate for prices. Never state a model number, or that any make is DCR "
+        "compliant — DCR status per make is not confirmed.",
+    ]
+    return "\n".join(lines)
+
+
 COMPANY_FACTS = f"""GRID NOVA ENERGY — VERIFIED FACTS
 
 Company: Grid Nova Energy Pvt. Ltd. — "Eco-Energy Initiative"
@@ -78,6 +113,8 @@ PM Surya Ghar residential rooftop subsidy (Central Financial Assistance):
 capped at ₹{MAX_SUBSIDY_INR:,.0f} for any system of {SUBSIDY_ELIGIBLE_UP_TO_KW:.0f}kW or more.
 Applies to genuine individual residential rooftop only — never Housing
 Society/RWA or any commercial/industrial/government segment.
+
+{_packages_block()}
 
 Leadership: Michael Gomes (Managing Partner), Shouvik Biswas (Partner),
 Raju Paul (Partner), Srinjay Das (VP Business), Moloy Das (GM Projects),

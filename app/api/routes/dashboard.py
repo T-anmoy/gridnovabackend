@@ -897,12 +897,16 @@ def adjust_pricing(
         )
     db.commit()
 
+    pricing = (updated.content or {}).get("pricing") or {}
     return {
         "status": "pricing_adjusted",
         "proposal_id": proposal_id,
         "total_value": updated.total_value,
         "requires_manager_signoff": updated.requires_manager_signoff,
         "reason": body.reason,
+        # Set when the proposal was list-priced: the list Final and new − list.
+        "list_price_final": pricing.get("list_price_final"),
+        "variance": pricing.get("variance"),
     }
 
 

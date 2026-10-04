@@ -251,13 +251,21 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
                 "matched this lead's collected fields.",
                 extra={"lead_id": lead.id, "project_type": project_type, "segment": segment},
             )
-    rate_per_kw = select_pricing(project_type, capacity_kw, segment, cfg)
+    # Grid Nova's price list (PM-A) decides the price whenever the lead's site
+    # assessment is list-priceable (app/proposals/price_list_content.py); the
+    # capacity-tiered rates below (PRO-13/14) are superseded for those and only
+    # apply otherwise.
+    list_ctx = lead_ctx.get("list_pricing")
+    quote = list_ctx["quote"] if list_ctx and list_ctx["status"] == "list_price" else None
+    rate_per_kw = None if quote else select_pricing(project_type, capacity_kw, segment, cfg)
 
     # total_value only when a tier matched with a real (>0) rate — placeholders (0)
     # and unmatched tiers leave it unset rather than inventing a number.
     capacity_num = _coerce_capacity(capacity_kw)
     total_value: Optional[float] = None
-    if rate_per_kw is not None and rate_per_kw > 0 and capacity_num is not None:
+    if quote is not None:
+        total_value = float(quote.final)      # GST-inclusive Final
+    elif rate_per_kw is not None and rate_per_kw > 0 and capacity_num is not None:
         total_value = rate_per_kw * capacity_num
 
     segment_modifier = 1.0
@@ -276,7 +284,15 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
             "body": library.get(section_id, "[PLACEHOLDER]"),
         })
 
-    pricing_body = _format_pricing_body(rate_per_kw, capacity_num, total_value)
+    from app.proposals import price_list_content
+    if quote is not None:
+        pricing_body = price_list_content.pricing_body(quote)
+    elif list_ctx is not None and total_value is None:
+        # Outside the price list and no configured rate: staff set the price
+        # (adjust-pricing, with a reason); the send-guard blocks until then.
+        pricing_body = "[PLACEHOLDER: Price to be confirmed by Grid Nova.]"
+    else:
+        pricing_body = _format_pricing_body(rate_per_kw, capacity_num, total_value)
     sections.append({
         "id": "pricing",
         "category": "pricing",
@@ -284,6 +300,11 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
         "rate_per_kw": rate_per_kw,
         "total_value": total_value,
     })
+    # Deterministic sections from Grid Nova's master data (equipment, electrical spec
+    # up to 5 kW, payment terms, warranty/O&M/life span, destination + price change).
+    sections.extend(price_list_content.sections(
+        package=(list_ctx or {}).get("package"), kw=(list_ctx or {}).get("kw") if list_ctx else None,
+        list_priced=quote is not None))
 
     sections.append({"id": "standard_terms", "category": "terms",
                      "body": base.get("standard_terms", "[PLACEHOLDER]")})
@@ -318,7 +339,12 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
             "rate_per_kw": rate_per_kw,
             "segment_modifier": segment_modifier,
             "total_value": total_value,
+            **(price_list_content.pricing_fields(quote) if quote is not None else
+               {"price_status": "custom_quote", "custom_quote_reasons": list_ctx["reasons"],
+                "package": list_ctx["package"], "kw": list_ctx["kw"], "phase": list_ctx["phase"]}
+               if list_ctx is not None else {}),
         },
+        "price_list": {"version": price_list_version(), "source_sha256": price_list_sha256()},
         "used_fallback_template": used_fallback,
     }
 
@@ -341,20 +367,45 @@ def has_placeholder_content(content: Optional[dict], total_value: Optional[float
     return bool(placeholder_sections(content)) or not total_value
 
 
+def price_list_version() -> int:
+    from app.pricing import price_list
+    return price_list.version()
+
+
+def price_list_sha256() -> str:
+    from app.pricing import price_list
+    return price_list.source_sha256()
+
+
+def list_price_variance(content: Optional[dict], total_value: float) -> tuple[Optional[str], Optional[str]]:
+    """(list_price_final, variance) as decimal strings when the proposal was list-priced,
+    so staff see any deviation of a hand-set price from Grid Nova's list."""
+    from decimal import Decimal
+    final = ((content or {}).get("pricing") or {}).get("final")
+    if not final:
+        return None, None
+    return str(final), str((Decimal(str(total_value)) - Decimal(str(final))).quantize(Decimal("0.01")))
+
+
 def with_adjusted_price(content: Optional[dict], total_value: float) -> Optional[dict]:
     """A copy of stored proposal content whose pricing section states a price staff
-    set by hand (adjust-pricing), so the section, the PDF and total_value agree. The
-    sentence is the engine's own ("Proposed project value: INR …"), without a per-kW
-    rate, because a hand-set price has none."""
+    set by hand (adjust-pricing), so the section, the PDF and total_value agree —
+    "Proposed project value: Rs …" (documents print amounts as Rs), without a per-kW
+    rate, because a hand-set price has none. A list-priced proposal also records the
+    list price and the variance."""
     if not content or not isinstance(content.get("sections"), list):
         return content
+    from app.pricing.price_list import document_amount
     updated = copy.deepcopy(content)
     for section in updated["sections"]:
         if isinstance(section, dict) and section.get("id") == "pricing":
-            section["body"] = f"Proposed project value: INR {total_value:,.0f}."
+            section["body"] = f"Proposed project value: {document_amount(total_value)}."
             section["total_value"] = total_value
     if isinstance(updated.get("pricing"), dict):
         updated["pricing"]["total_value"] = total_value
+        list_final, variance = list_price_variance(content, total_value)
+        if list_final is not None:
+            updated["pricing"].update(adjusted=True, list_price_final=list_final, variance=variance)
     return updated
 
 

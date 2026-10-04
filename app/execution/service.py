@@ -185,12 +185,26 @@ def payment_gate_blocked(db: Session, onboarding: CustomerOnboarding) -> bool:
     return not payments.milestones_verified_through(db, onboarding.project_id, gate["through_milestone"])
 
 
+def commissioning_gate_blocked(db: Session, onboarding: CustomerOnboarding) -> bool:
+    """P10: commissioned waits for every milestone up to `through_milestone` ("Before
+    Commissioning") to be fully verified — when enabled (off by default)."""
+    gate = config.execution()["gates"]["commissioned"]
+    if not gate["enabled"]:
+        return False
+    from app.payments import service as payments
+    return not payments.milestones_verified_through(db, onboarding.project_id, gate["through_milestone"])
+
+
 def stage_blockers(db: Session, onboarding: CustomerOnboarding, stage: ProjectStage) -> list[dict]:
     blockers = []
     if stage == ProjectStage.material_dispatched and payment_gate_blocked(db, onboarding):
         blockers.append({"code": "payment_gate",
                          "message": "Material cannot be dispatched until the customer's pre-dispatch payment is "
                                     "confirmed by Accounts."})
+    if stage == ProjectStage.commissioned and commissioning_gate_blocked(db, onboarding):
+        blockers.append({"code": "commissioning_payment_gate",
+                         "message": "The system cannot be commissioned until the customer's \"Before "
+                                    "Commissioning\" payment is confirmed by Accounts."})
     return blockers + register.stage_blockers(db, onboarding, stage)
 
 

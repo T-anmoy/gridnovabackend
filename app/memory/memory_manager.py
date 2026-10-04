@@ -938,7 +938,8 @@ class MemoryManager:
         proposal.requires_manager_signoff = requires_manager_signoff
         # Keep the stored pricing section in step with the price, or the PDF would
         # print "INR X" above a pricing section still saying "to be confirmed".
-        from app.proposals.content_engine import with_adjusted_price
+        from app.proposals.content_engine import list_price_variance, with_adjusted_price
+        list_final, variance = list_price_variance(proposal.content, new_value)
         proposal.content = with_adjusted_price(proposal.content, new_value)
         self._db.flush()
         self._audit(
@@ -948,6 +949,9 @@ class MemoryManager:
                 "total_value": new_value,
                 "requires_manager_signoff": requires_manager_signoff,
                 "reason": reason,
+                # Deviation from Grid Nova's list price, when the proposal was list-priced.
+                "list_price_final": list_final,
+                "variance": variance,
             },
         )
         return proposal

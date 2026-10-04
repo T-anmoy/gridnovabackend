@@ -57,7 +57,10 @@ class ProposalAgent:
         collected = dict(lead.collected_fields or {})
 
         # Compose content first — this also resolves the deterministic pricing that
-        # feeds the manager-signoff rule.
+        # feeds the manager-signoff rule. Grid Nova's price list prices it when the
+        # lead's site assessment is list-priceable (app/proposals/price_list_content.py).
+        from app.proposals import price_list_content
+        ctx = {**ctx, "list_pricing": price_list_content.context_for_lead(memory._db, lead)}
         content = content_engine.compose_content(ctx, cfg)
         total_value = content["pricing"]["total_value"]
         used_fallback = content["used_fallback_template"]

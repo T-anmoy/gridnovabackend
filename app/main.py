@@ -55,6 +55,12 @@ async def lifespan(app: FastAPI):
     # And execution/payments (config/execution_payments.yaml).
     from app.execution.config import load as load_execution_config
     load_execution_config()
+    # And Grid Nova's price list + pricing policy (config/price_list.yaml,
+    # config/pricing_policy.yaml) — a tampered table must stop the boot.
+    from app.pricing.price_list import load as load_price_list
+    from app.pricing.policy import load as load_pricing_policy
+    load_price_list()
+    load_pricing_policy()
     # And the placeholder registry (config/placeholder_registry.yaml).
     from app.placeholders.registry import load as load_placeholder_registry
     load_placeholder_registry()

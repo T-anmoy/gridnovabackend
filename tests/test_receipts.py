@@ -33,8 +33,8 @@ class TestWords:
         assert receipts.amount_in_words(Decimal("0.05")) == "Rupees Zero and Five Paise Only"
 
     @pytest.mark.parametrize("amount, figures", [
-        ("999", "₹999.00"), ("1000", "₹1,000.00"), ("100000", "₹1,00,000.00"), ("1234567.89", "₹12,34,567.89"),
-        ("123456789", "₹12,34,56,789.00"),
+        ("999", "Rs 999.00"), ("1000", "Rs 1,000.00"), ("100000", "Rs 1,00,000.00"), ("1234567.89", "Rs 12,34,567.89"),
+        ("123456789", "Rs 12,34,56,789.00"),
     ])
     def test_figures(self, amount, figures):
         assert receipts.indian_figures(Decimal(amount)) == figures
@@ -129,7 +129,7 @@ class TestIssue:
     def test_receipt_content(self, client, db_session, onboarding_ready, stub_pdf, real_receipt_text):
         _verified(client, db_session, customer_email="asha@example.test")
         html = receipts.receipt_html(db_session, db_session.execute(select(PaymentReceipt)).scalar_one())
-        for expected in ("₹20,000.00", "Rupees Twenty Thousand Only", "NEFT", "UTR-0001", "₹80,000.00",
+        for expected in ("Rs 20,000.00", "Rupees Twenty Thousand Only", "NEFT", "UTR-0001", "Rs 80,000.00",
                          "19ABCDE1234F1Z5", "not a GST tax invoice"):
             assert expected in html
 

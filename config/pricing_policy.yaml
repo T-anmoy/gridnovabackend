@@ -1,0 +1,37 @@
+# Grid Nova Energy — how the price list (config/price_list.yaml) is applied.
+#
+# config/price_list.yaml holds Grid Nova's SOURCE values only. The choices below are
+# the developer's defaults for how those prices are used; every one carries an
+# [UNCONFIRMED] marker and an entry in config/placeholder_registry.yaml until Grid
+# Nova confirms it. Read by app/pricing/policy.py and validated at startup.
+
+# When the list price applies. Anything else gets no price (price_status
+# "custom_quote") with reason codes; sizing, generation and subsidy still return.
+applicability:
+  # The source prices are "for destination within West Bengal".
+  states: [West Bengal]                     # [UNCONFIRMED] — pricing outside West Bengal (Bihar) not supplied
+  # Residential rooftop, including a housing society's rooftop.
+  segments: [residential]                   # [UNCONFIRMED]
+  housing_society_allowed: true             # [UNCONFIRMED]
+  # Grid-connected without battery storage.
+  connection_types: [on_grid]               # [UNCONFIRMED]
+  battery_allowed: false                    # [UNCONFIRMED]
+  # The connection phase must be known to pick the single- or three-phase table;
+  # unknown → custom quote (reason phase_unknown), never an assumed phase.
+  require_known_phase: true                 # [UNCONFIRMED]
+
+# How a calculated size becomes a priced size: ceil = the next whole kW within the
+# phase range (e.g. 3.2 kW → 4 kW). Only `ceil` is implemented.
+size_rounding: ceil                         # [UNCONFIRMED]
+
+# GET /api/v1/pricing/packages: `exact` includes the price table; `hidden` omits it.
+public_price_display: exact                 # [UNCONFIRMED]
+
+# A formal proposal needs ONE package. When the onboarding says "as recommended by
+# Grid Nova" (or nothing), the proposal's price stays "to be confirmed" until staff
+# set it (adjust-pricing) — the system does not choose a package.
+as_recommended_package_in_proposal: none    # [UNCONFIRMED]
+
+# Nova (the website assistant) never quotes package prices; it points customers to
+# the calculator or their associate.
+nova_may_quote_list_prices: false           # [UNCONFIRMED]

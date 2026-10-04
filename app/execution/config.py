@@ -56,9 +56,12 @@ def _validate(data: dict) -> dict:
         need(set(rule.get("photos") or []) <= set(slots), f"execution.evidence.{stage}.photos must be photo_slots")
         need(set((rule.get("documents") or []) + (rule.get("optional_documents") or [])) <= set(docs),
              f"execution.evidence.{stage} documents must be document_types")
-    gate = (ex.get("gates") or {}).get("material_dispatched") or {}
-    need(isinstance(gate.get("enabled"), bool) and isinstance(gate.get("through_milestone"), int),
-         "execution.gates.material_dispatched needs enabled (true/false) and through_milestone (a number)")
+    gates = ex.get("gates") or {}
+    for name in ("material_dispatched", "commissioned"):
+        g = gates.get(name) or {}
+        need(isinstance(g.get("enabled"), bool) and isinstance(g.get("through_milestone"), int),
+             f"execution.gates.{name} needs enabled (true/false) and through_milestone (a number)")
+    gate = gates["material_dispatched"]
     policy = ex.get("photo_policy") or {}
     need(isinstance(policy.get("allow_gallery"), bool) and isinstance(policy.get("gallery_counts_fully"), bool)
          and isinstance(policy.get("exif_max_age_days"), int) and policy["exif_max_age_days"] > 0,
@@ -79,10 +82,14 @@ def _validate(data: dict) -> dict:
         raise ExecutionConfigError(f"{_PATH.name}: payments.schedule_template percents must be numbers")
     need(all(p > 0 for p in percents) and sum(percents) == 100, "payments.schedule_template percents must sum to 100")
     all_stages = {s.value for s in ProjectStage}
-    need(all(m.get("trigger") in all_stages and m.get("label") for m in template),
-         "each payments.schedule_template milestone needs a label and a trigger stage")
-    need(gate["through_milestone"] in range(1, len(template) + 1),
-         "execution.gates.material_dispatched.through_milestone must be a milestone number")
+    def _trigger_ok(trigger) -> bool:
+        stages = trigger if isinstance(trigger, list) else [trigger]
+        return bool(stages) and all(t in all_stages for t in stages)
+    need(all(_trigger_ok(m.get("trigger")) and m.get("label") for m in template),
+         "each payments.schedule_template milestone needs a label and a trigger stage (or a list of stages)")
+    for name in ("material_dispatched", "commissioned"):
+        need(gates[name]["through_milestone"] in range(1, len(template) + 1),
+             f"execution.gates.{name}.through_milestone must be a milestone number")
     modes = pay.get("enabled_modes") or []
     need(modes and set(modes) <= set(PAYMENT_MODES), f"payments.enabled_modes must be among {PAYMENT_MODES} (no cash)")
     th = pay.get("thresholds") or {}

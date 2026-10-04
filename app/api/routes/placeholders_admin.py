@@ -32,6 +32,8 @@ def _item(entry: registry.Entry, state: dict) -> dict:
         "blocking": entry.blocking,
         "probe": entry.probe,
         "resolved": state["resolved"] is True,
+        "status": entry.status,
+        "status_note": entry.status_note,
         "probe_error": state["error"],
         "resolution": state["resolution"],
     }

@@ -59,8 +59,8 @@ sanity:
   inr_per_kwh_for_bill_check: null              # [PLACEHOLDER]
 
 # Customer-facing equipment package names → the stored equipment_tier value.
-# [UNCONFIRMED] — "Nova Assured" and "Nova Signature" do not appear anywhere else in
-# this codebase; this mapping is an assumption until Grid Nova confirms it.
+# Confirmed by Grid Nova's Pricing & Equipment Master Data (config/price_list.yaml):
+# Nova Assured = standard, Nova Signature = premium.
 equipment_packages:
   nova_assured:
     label: "Nova Assured"

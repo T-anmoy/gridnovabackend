@@ -3,13 +3,18 @@
 Not a proposal: no approval, no send-guard, no sign-off, no progress stage, and it
 never feeds the formal proposal or the agreement. The numbers come from exactly the
 engine behind the public Solar Calculator (app/pricing/instant_estimate.py — sizing,
-cost layers, fixed public tier, access difficulty, PM Surya Ghar subsidy), applied to
-this customer's onboarding data, so an associate shows the same indicative figures the
-public website would. Each estimate is kept as shown (inputs and result), so there is a
-record of what the customer saw.
+Grid Nova's price list for both packages, PM Surya Ghar subsidy), applied to this
+customer's onboarding data, so an associate shows the same figures the public website
+would. Each estimate is kept as shown (inputs and result), so there is a record of what
+the customer saw; the snapshot carries `price_list_version`, `priced_kw`, the package(s)
+chosen on the onboarding (`chosen_packages`: Nova Assured for the standard package,
+Nova Signature for premium, both for "as recommended") and both packages' figures.
+Estimates made before the price list stay readable exactly as stored.
 
-If the associate recorded a requested capacity (desired_output_kw), that size is priced;
-otherwise the engine sizes from monthly units, then the bill, then roof area.
+If the associate recorded a requested capacity (desired_output_kw), that size is priced
+— and must be a whole kW in the price list's range for the connection phase (422
+unsupported_size otherwise); it is never rounded. Otherwise the engine sizes from
+monthly units, then the bill, then roof area, and rounds up to a whole kW.
 """
 from __future__ import annotations
 
@@ -76,7 +81,17 @@ def build_inputs(db: Session, onboarding: CustomerOnboarding, *, segment: Option
         access_difficulty=access_difficulty,
         is_housing_society=is_housing_society,
         requested_size_kw=inputs.desired_output_kw if method == "requested_size" else None,
+        connection_type=inputs.connection_type.value if inputs.connection_type else None,
+        battery_storage=bool(inputs.battery_storage),
     )
+
+
+def chosen_packages(inputs: ProposalInputs) -> list[str]:
+    """The package(s) the onboarding's equipment package means; both when "as
+    recommended by Grid Nova" or not chosen."""
+    from app.pricing.price_list import PACKAGE_FOR_TIER, PACKAGES
+    tier = inputs.equipment_tier.value if inputs.equipment_tier else None
+    return [PACKAGE_FOR_TIER[tier]] if tier in PACKAGE_FOR_TIER else list(PACKAGES)
 
 
 def create(db: Session, onboarding: CustomerOnboarding, performed_by: str, *, segment: Optional[str] = None,
@@ -87,22 +102,32 @@ def create(db: Session, onboarding: CustomerOnboarding, performed_by: str, *, se
                                  access_difficulty=access_difficulty, is_housing_society=is_housing_society)
     try:
         result = instant_estimate.calculate_instant_estimate(MemoryManager(db), engine_inputs)
+    except instant_estimate.UnsupportedSize as exc:
+        raise AssociateError(str(exc), code="unsupported_size", status_code=422, field="desired_output_kw",
+                             extra={"reason": exc.reason})
     except ValueError as exc:
         raise AssociateError(str(exc), code="estimate_failed", status_code=422)
+    snapshot = asdict(result)
+    snapshot["chosen_packages"] = chosen_packages(db.get(ProposalInputs, onboarding.proposal_inputs_id))
     estimate = IndicativeEstimate(onboarding_id=onboarding.id, inputs=asdict(engine_inputs),
-                                  result=asdict(result), created_by=performed_by)
+                                  result=snapshot, created_by=performed_by)
     db.add(estimate)
     db.flush()
-    figure = (f"INR {result.net_cost:,.0f}" if result.net_cost is not None
-              else f"INR {result.net_cost_range_min:,.0f}–{result.net_cost_range_max:,.0f}")
+    if result.price_status == "list_price":
+        shown = "; ".join(f"{result.packages[p]['display_name']} INR {float(result.packages[p]['final']):,.0f}"
+                          for p in snapshot["chosen_packages"])
+        figure = f"{result.priced_kw} kW — {shown} (list price, before subsidy)"
+    else:
+        figure = f"{result.recommended_size_kw:g} kW — custom quote ({', '.join(result.custom_quote_reasons)})"
     db.add(AuditLog(entity_type="indicative_estimate", entity_id=str(estimate.id), action="created",
                     performed_by=performed_by,
                     after_value={"onboarding_id": onboarding.id, "size_kw": result.recommended_size_kw,
-                                 "net_cost": result.net_cost, "is_indicative_range": result.is_indicative_range}))
+                                 "priced_kw": result.priced_kw, "price_status": result.price_status,
+                                 "price_list_version": result.price_list_version,
+                                 "chosen_packages": snapshot["chosen_packages"], "net_cost": result.net_cost}))
     MemoryManager(db).add_timeline_event(
         lead_id=onboarding.lead_id, event_type=TimelineEventType.indicative_estimate_created,
-        description=f"Indicative estimate shown: {result.recommended_size_kw:g} kW, {figure} after subsidy",
-        created_by=performed_by)
+        description=f"Indicative estimate shown: {figure}", created_by=performed_by)
     return estimate
 
 
@@ -112,5 +137,9 @@ def list_for(db: Session, onboarding: CustomerOnboarding) -> list[IndicativeEsti
 
 
 def serialize(e: IndicativeEstimate) -> dict:
+    result = e.result or {}
+    # Estimates made before the price list (PM-A) have none of these — null, never guessed.
     return {"estimate_id": e.id, "indicative": True, "created_at": e.created_at.isoformat(),
-            "created_by": e.created_by, "inputs": e.inputs, "result": e.result}
+            "created_by": e.created_by, "inputs": e.inputs, "result": e.result,
+            "price_status": result.get("price_status"), "price_list_version": result.get("price_list_version"),
+            "priced_kw": result.get("priced_kw"), "chosen_packages": result.get("chosen_packages")}

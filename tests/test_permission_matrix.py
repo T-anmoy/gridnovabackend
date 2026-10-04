@@ -29,7 +29,7 @@ MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balanc
 
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
-                   "associate_payments", "payments_admin")
+                   "associate_payments", "payments_admin", "pricing")
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
 PAY_PROCESSORS = {"admin", "accounts"}
@@ -146,6 +146,22 @@ STAFF = {
     ("GET", "/api/v1/dashboard/exports/ledger.csv"): (PAY_PROCESSORS, {}),
     # Every staff role may ask; each sees only the areas it has (tests/test_accounts_ops.py).
     ("GET", "/api/v1/dashboard/work-queues"): (set(ROLES), {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/catalogue"):
+        (EXECUTION_ACTORS, {"json": {"category": "structure", "brand": "Matrix Fab", "model_name": "GI-{role}",
+                                     "is_dcr_compliant": False}}),
+    # The placeholder engine's internal breakdown (PM-A: never customer-facing).
+    ("POST", "/api/v1/pricing/breakdown"):
+        ({"admin", "sales"}, {"json": {"segment": "residential", "size_kw": 5, "state": "West Bengal"}}),
+}
+
+# Public, unauthenticated routes (PM-A pricing): reachable with no credentials at all.
+PUBLIC = {
+    ("POST", "/api/v1/pricing/estimate"):
+        {"json": {"segment": "residential", "size_kw": 5, "state": "West Bengal", "connection_phase": "single_phase"}},
+    ("POST", "/api/v1/pricing/instant-estimate"):
+        {"json": {"segment": "residential", "state": "West Bengal", "sizing_method": "by_units",
+                  "monthly_units_kwh": 400, "connection_phase": "single_phase"}},
+    ("GET", "/api/v1/pricing/packages"): {},
 }
 
 # Associate routes: "own" = not tied to one customer; "read"/"write" = one customer's.
@@ -288,9 +304,17 @@ class TestMatrixIsComplete:
             for r in importlib.import_module(f"app.api.routes.{name}").router.routes:
                 for method in r.methods:
                     routes.add((method, r.path))
-        assert routes == set(STAFF) | set(ASSOCIATE), (
-            f"missing: {sorted(routes - set(STAFF) - set(ASSOCIATE))}; "
-            f"stale: {sorted((set(STAFF) | set(ASSOCIATE)) - routes)}")
+        known = set(STAFF) | set(ASSOCIATE) | set(PUBLIC)
+        assert routes == known, f"missing: {sorted(routes - known)}; stale: {sorted(known - routes)}"
+
+
+@pytest.mark.parametrize("route", sorted(PUBLIC), ids=lambda r: f"{r[0]} {r[1]}")
+def test_public_route(client, route):
+    method, path = route
+    r = client.request(method, path, **PUBLIC[route])
+    assert r.status_code == 200, f"{r.status_code} {r.text[:200]}"
+    # A staff or associate credential changes nothing on a public route.
+    assert client.request(method, path, headers=staff("operations"), **PUBLIC[route]).status_code == 200
 
 
 @pytest.mark.parametrize("route", sorted(STAFF), ids=lambda r: f"{r[0]} {r[1]}")
