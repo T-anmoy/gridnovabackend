@@ -136,11 +136,13 @@ RESEND_API_URL = "https://api.resend.com/emails"
 STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "manager_signoff_required", "customer_accepted", "stale_lead_digest",
                       "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
+                      "catalogue_unmatched",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention")
 # Events for one team rather than all staff: sent to that team's own recipients
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
-                  "dcr_mismatch": ("operations", "staff"), "payment_recorded": ("accounts",),
+                  "dcr_mismatch": ("operations", "staff"), "catalogue_unmatched": ("operations",),
+                  "payment_recorded": ("accounts",),
                   "payment_dishonoured": ("accounts", "staff"), "receipt_blocked": ("accounts",),
                   "payments_attention": ("accounts",)}
 _RECEIPT_REASONS = {"held": "it would contain placeholder text (company or wording not yet supplied)",
@@ -218,6 +220,16 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"A non-DCR module was registered on {who}'s PM Surya Ghar project "
                  f"(associate-sourced customer #{payload.get('onboarding_id')}).",
                  "The subsidy cannot be claimed until the module is corrected or an Admin records why it may proceed."],
+                "Open the customer", lead_url)
+    if event_type == "catalogue_unmatched":
+        who = payload.get("customer_name") or "a customer"
+        count = payload.get("count") or 1
+        return (f"Units to match: {who} ({payload.get('project_reference_id')})",
+                [f"{count} installed unit(s) on {who}'s project (associate-sourced customer "
+                 f"#{payload.get('onboarding_id')}) were registered with the brand and model as printed, because the "
+                 "catalogue has no matching item.",
+                 "Match each unit to a catalogue item (or add the item first). The serial register cannot be "
+                 "verified until every unit is matched."],
                 "Open the customer", lead_url)
     if event_type in ("payment_recorded", "payment_dishonoured"):
         who = payload.get("customer_name") or "a customer"

@@ -490,3 +490,39 @@ class TestSiteLocation:
             assert conn.execute("SELECT site_latitude FROM customer_onboardings WHERE id = 1").fetchone() == (26.49,)
         finally:
             conn.close()
+
+
+class TestUnmatchedUnitsMigration:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0042_site_location", db_path=db_at_0025).returncode == 0
+        result = _run_alembic("upgrade", "0043_unmatched_units", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(installed_units)")}
+            assert {"brand_as_printed", "model_as_printed"} <= cols
+            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'installed_units'").fetchone()[0]
+            assert "ck_installed_units_make_known" in sql and "ck_installed_units_equipment_required" not in sql
+            conn.execute("PRAGMA foreign_keys = OFF")
+            # An unmatched module needs both printed fields.
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert(conn, "installed_units", id=1, project_id=1, onboarding_id=1, category="module",
+                        serial_number="S1", serial_normalized="S1", status="entered", brand_as_printed="B")
+            _insert(conn, "installed_units", id=2, project_id=1, onboarding_id=1, category="module",
+                    serial_number="S2", serial_normalized="S2", status="entered", brand_as_printed="B",
+                    model_as_printed="M")
+            conn.commit()
+        finally:
+            conn.close()
+        # The old constraint cannot come back while an unmatched unit exists — by design.
+        assert _run_alembic("downgrade", "0042_site_location", db_path=db_at_0025).returncode != 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            # SQLite DDL is not transactional: the refused batch copy leaves its temp table.
+            conn.execute("DROP TABLE IF EXISTS _alembic_tmp_installed_units")
+            conn.execute("UPDATE installed_units SET category = 'other' WHERE id = 2")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0042_site_location", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr

@@ -43,7 +43,7 @@ _NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app
                       "app.api.routes.execution_register_admin", "app.payments", "app.jobs.payment_alerts",
                       "app.api.routes.associate_payments", "app.api.routes.payments_admin",
                       "app.api.routes.public_receipts", "app.geo", "app.onboarding.maps_link",
-                      "app.onboarding.site_location")
+                      "app.onboarding.site_location", "app.api.routes.associate_equipment")
 
 # 12 digits, optionally grouped 4-4-4 by spaces or hyphens as printed on the card.
 _AADHAAR_RE = re.compile(r"(?<!\d)(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")

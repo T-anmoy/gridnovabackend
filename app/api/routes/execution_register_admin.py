@@ -170,3 +170,22 @@ def catalogue_from_nameplate(onboarding_id: int, body: CatalogueIn, db: Session 
                           "is_dcr_compliant": item.is_dcr_compliant, "is_active": item.is_active},
             "package": package, "approved_makes": register.approved_makes(package, component),
             "in_package": register.make_in_package(package, component, item.brand)}
+
+
+class MatchIn(BaseModel):
+    equipment_id: int
+    reason: Optional[str] = Field(default=None, max_length=2000)   # required by the lock after verification
+
+
+@router.post("/units/{unit_id}/match")
+def match_unit(onboarding_id: int, unit_id: int, body: MatchIn, db: Session = Depends(get_db),
+               employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Operations/Admin match an unmatched unit (registered with the brand/model as
+    printed) to a catalogue item — of the unit's category and agreeing with its declared
+    DCR status. Create the item first with POST .../execution/catalogue when it does not
+    exist. Staff only; associates never see unmatched status."""
+    onboarding, record, viewer = _target(db, employee, onboarding_id, change=True)
+    unit = _unit(db, onboarding, unit_id)
+    _write(db, lambda: register.match_unit(db, onboarding, record, unit, body.equipment_id, viewer, body.reason))
+    return {"unit": register.unit_json(db, unit, staff=True),
+            "register": register.summary(db, onboarding, record, staff=True)["register"]}

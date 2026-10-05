@@ -145,6 +145,8 @@ def reset_chat_inmemory_state():
     public_intake._recent_emails.clear()
     public_intake._contact_request_log.clear()
     public_intake._recent_contact_emails.clear()
+    import app.api.routes.associate_equipment as associate_equipment
+    associate_equipment._request_log.clear()
     yield
     for log in (public_associates._apply_request_log, public_associates._verify_request_log,
                 public_associates._lookup_request_log):

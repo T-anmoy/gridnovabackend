@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes.agent_governance import router as agent_governance_router
 from app.api.routes.associate_onboarding import router as associate_onboarding_router
 from app.api.routes.associate_execution import router as associate_execution_router
+from app.api.routes.associate_equipment import router as associate_equipment_router
 from app.api.routes.associate_payments import router as associate_payments_router
 from app.api.routes.associate_portal import router as associate_portal_router
 from app.api.routes.associates_admin import router as associates_admin_router
@@ -111,6 +112,7 @@ app.include_router(associate_onboarding_router)
 app.include_router(onboarding_admin_router)
 app.include_router(placeholders_admin_router)
 app.include_router(associate_execution_router)
+app.include_router(associate_equipment_router)
 # Before execution_admin: its POST .../execution/{stage} would otherwise swallow
 # .../execution/units and .../execution/dcr-override.
 app.include_router(execution_register_admin_router)

@@ -119,3 +119,22 @@ def test_every_site_location_mutation_is_audited(client, db_session, onboarding_
         "source": "pasted_coordinates", "text": "26.49, 89.52", "reason": "Confirmed on the call."}).status_code == 200
     seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
     assert SITE_LOCATION_EXPECTED <= seen, f"not audited: {sorted(SITE_LOCATION_EXPECTED - seen)}"
+
+
+
+def test_matching_an_unmatched_unit_is_audited(client, db_session, onboarding_ready):
+    """HF-C — the staff match action."""
+    from app.memory.models import Equipment, EquipmentCategory
+    from tests.execution_support import associate_in_execution, exec_url, staff_exec_url
+    gna, oid = associate_in_execution(client, db_session)
+    uid = client.post(f"{exec_url(oid)}/units", headers=headers(gna), json={
+        "category": "module", "serial_number": "AUD-UNM-1", "rating_wp": "540", "is_dcr": True,
+        "brand_as_printed": "Sova Solar", "model_as_printed": "SS-540M"}).json()["unit"]["unit_id"]
+    item = Equipment(category=EquipmentCategory.module, brand="Sova Solar", model_name="SS-540M",
+                     is_dcr_compliant=True, is_active=True)
+    db_session.add(item)
+    db_session.commit()
+    assert client.post(f"{staff_exec_url(oid)}/units/{uid}/match", json={"equipment_id": item.id},
+                       headers=OPS).status_code == 200
+    seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
+    assert ("installed_unit", "matched") in seen

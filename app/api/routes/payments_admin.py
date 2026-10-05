@@ -85,6 +85,16 @@ def _visible(db: Session, employee: AuthenticatedEmployee, q):
     return q
 
 
+def _who(db: Session, project_id: int) -> dict:
+    """The customer and project a list row belongs to, so Accounts can tell rows apart
+    without opening each one."""
+    from app.memory.models import Customer, Project
+    project = db.get(Project, project_id)
+    customer = db.get(Customer, project.customer_id) if project and project.customer_id else None
+    return {"customer_name": customer.name if customer else None,
+            "project_reference_id": project.reference_id if project else None}
+
+
 @router.get("/payments")
 def list_payments(status: Optional[PaymentStatus] = None, mode: Optional[PaymentMode] = None,
                   needs_attention: Optional[bool] = None, onboarding_id: Optional[int] = None,
@@ -108,7 +118,7 @@ def list_payments(status: Optional[PaymentStatus] = None, mode: Optional[Payment
     if date_to:
         q = q.where(Payment.recorded_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc))
     rows = list(db.execute(q.order_by(Payment.recorded_at.desc(), Payment.id.desc())).scalars())
-    items = [payments.payment_json(db, p) for p in rows]
+    items = [{**payments.payment_json(db, p), **_who(db, p.project_id)} for p in rows]
     if needs_attention is not None:
         items = [i for i in items if i["needs_attention"] == needs_attention]
     return {"items": items[(page - 1) * page_size: page * page_size], "page": page, "page_size": page_size,
@@ -129,8 +139,9 @@ def list_milestones(needs_attention: Optional[bool] = None, page: int = Query(de
         q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     items = []
     for onboarding in db.execute(q.order_by(CustomerOnboarding.id)).scalars():
+        who = _who(db, onboarding.project_id)
         for m in payments.milestone_status(db, onboarding):
-            items.append({**m, "onboarding_id": onboarding.id, "needs_attention": m["overdue"]})
+            items.append({**m, "onboarding_id": onboarding.id, **who, "needs_attention": m["overdue"]})
     if needs_attention is not None:
         items = [i for i in items if i["needs_attention"] == needs_attention]
     return {"items": items[(page - 1) * page_size: page * page_size], "page": page, "page_size": page_size,

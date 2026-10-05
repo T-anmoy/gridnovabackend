@@ -166,6 +166,10 @@ class UnitIn(BaseModel):
     is_dcr: Optional[bool] = None
     warranty_start: Optional[str] = Field(default=None, max_length=10)
     warranty_end: Optional[str] = Field(default=None, max_length=10)
+    # When the model is not in the catalogue (equipment_id null): exactly as printed on
+    # the nameplate. Required then for modules and inverters.
+    brand_as_printed: Optional[str] = Field(default=None, max_length=100)
+    model_as_printed: Optional[str] = Field(default=None, max_length=100)
 
 
 class UnitPatch(BaseModel):
@@ -177,6 +181,8 @@ class UnitPatch(BaseModel):
     is_dcr: Optional[bool] = None
     warranty_start: Optional[str] = Field(default=None, max_length=10)
     warranty_end: Optional[str] = Field(default=None, max_length=10)
+    brand_as_printed: Optional[str] = Field(default=None, max_length=100)
+    model_as_printed: Optional[str] = Field(default=None, max_length=100)
     reason: Optional[str] = Field(default=None, max_length=2000)
 
 

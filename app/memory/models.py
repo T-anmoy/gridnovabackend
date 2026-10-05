@@ -1486,8 +1486,12 @@ class InstalledUnit(Base):
     typo cannot block the real serial elsewhere."""
     __tablename__ = "installed_units"
     __table_args__ = (
-        CheckConstraint("category = 'other' OR equipment_id IS NOT NULL",
-                        name="ck_installed_units_equipment_required"),
+        # A module/inverter names its catalogue item — or, when the catalogue has no match
+        # yet, the brand and model exactly as printed on the nameplate (an "unmatched"
+        # unit Operations/Admin match later; app/execution/register.py).
+        CheckConstraint("category = 'other' OR equipment_id IS NOT NULL OR "
+                        "(brand_as_printed IS NOT NULL AND model_as_printed IS NOT NULL)",
+                        name="ck_installed_units_make_known"),
         CheckConstraint("status = 'voided' OR serial_normalized IS NOT NULL",
                         name="ck_installed_units_serial_held"),
         CheckConstraint("warranty_start IS NULL OR warranty_end IS NULL OR warranty_end > warranty_start",
@@ -1501,6 +1505,8 @@ class InstalledUnit(Base):
     equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id"), nullable=True)
     serial_number: Mapped[str] = mapped_column(String(80), nullable=False)
     serial_normalized: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True)
+    brand_as_printed: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model_as_printed: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # A voided unit gives up serial_normalized (so the uniqueness stays literal) but keeps
     # it here, so the same serial turning up on another project can be flagged.
     voided_serial_normalized: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)

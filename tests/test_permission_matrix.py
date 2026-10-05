@@ -29,7 +29,7 @@ MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balanc
 
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
-                   "associate_payments", "payments_admin", "pricing")
+                   "associate_payments", "payments_admin", "pricing", "associate_equipment")
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
 PAY_PROCESSORS = {"admin", "accounts"}
@@ -146,6 +146,10 @@ STAFF = {
     ("GET", "/api/v1/dashboard/exports/ledger.csv"): (PAY_PROCESSORS, {}),
     # Every staff role may ask; each sees only the areas it has (tests/test_accounts_ops.py).
     ("GET", "/api/v1/dashboard/work-queues"): (set(ROLES), {}),
+    # The unit in the scenario is already matched, so allowed roles get 409 already_matched —
+    # the gate (403 for everyone else) is what is tested.
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/units/{unit_id}/match"):
+        (EXECUTION_ACTORS, {"json": {"equipment_id": "{equipment_id}"}}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/catalogue"):
         (EXECUTION_ACTORS, {"json": {"category": "structure", "brand": "Matrix Fab", "model_name": "GI-{role}",
                                      "is_dcr_compliant": False}}),
@@ -210,6 +214,7 @@ ASSOCIATE = {
         ("write", {"json": {"reason": "x"}}),
     ("GET", "/api/v1/associate/payments/instructions"): ("own", {}),
     ("GET", "/api/v1/associate/home"): ("own", {}),
+    ("GET", "/api/v1/associate/equipment"): ("own", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {"json": NEFT}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments/{payment_id}/proof"): ("owner", upload_form()),

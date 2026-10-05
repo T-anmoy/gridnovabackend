@@ -136,6 +136,15 @@ def _date(value, field: str) -> Optional[date]:
                              field=field)
 
 
+PRINTED_MAX_LENGTH = 100
+
+
+def is_unmatched(unit: InstalledUnit) -> bool:
+    """A module/inverter with no catalogue item yet (brand/model as printed only)."""
+    return unit.category != InstalledUnitCategory.other and unit.equipment_id is None \
+        and unit.status != InstalledUnitStatus.voided
+
+
 def validate(db: Session, data: dict) -> tuple[dict, list[dict]]:
     """Clean one unit's fields. Returns (values, warnings); raises AssociateError."""
     sanity = _sanity()
@@ -155,11 +164,22 @@ def validate(db: Session, data: dict) -> tuple[dict, list[dict]]:
         if equipment is None:
             raise AssociateError("No such catalogue item.", code="unknown_equipment", status_code=422,
                                  field="equipment_id")
+    brand_printed = (data.get("brand_as_printed") or "").strip() or None
+    model_printed = (data.get("model_as_printed") or "").strip() or None
+    for field, value in (("brand_as_printed", brand_printed), ("model_as_printed", model_printed)):
+        if value is not None and len(value) > PRINTED_MAX_LENGTH:
+            raise AssociateError(f"At most {PRINTED_MAX_LENGTH} characters.", code="printed_too_long",
+                                 status_code=422, field=field)
     if category != InstalledUnitCategory.other:
         if equipment is None:
-            raise AssociateError("Choose the catalogue item for this unit.", code="equipment_required",
-                                 status_code=422, field="equipment_id")
-        if equipment.category != EquipmentCategory(category.value):
+            # Not in the catalogue yet: an UNMATCHED unit, recorded with the brand and
+            # model as printed on the nameplate; Operations/Admin match it later.
+            if not brand_printed or not model_printed:
+                raise AssociateError("Choose the catalogue item for this unit — or, if its model is not listed, "
+                                     "enter the brand and model exactly as printed on the nameplate.",
+                                     code="equipment_required", status_code=422,
+                                     field="model_as_printed" if brand_printed else "brand_as_printed")
+        elif equipment.category != EquipmentCategory(category.value):
             raise AssociateError(f"That catalogue item is not a {category.value}.",
                                  code="equipment_category_mismatch", status_code=422, field="equipment_id")
     rating_wp = _decimal(data.get("rating_wp"), "rating_wp")
@@ -207,7 +227,8 @@ def validate(db: Session, data: dict) -> tuple[dict, list[dict]]:
                          "message": f"Inverters are usually {sanity['inverter_kw_min']}–{sanity['inverter_kw_max']} kW."})
     return ({"category": category, "equipment_id": equipment.id if equipment else None, "serial_number": serial,
              "serial_normalized": normalized, "rating_wp": rating_wp, "rating_kw": rating_kw,
-             "is_dcr": bool(is_dcr), "warranty_start": start, "warranty_end": end}, warnings)
+             "is_dcr": bool(is_dcr), "warranty_start": start, "warranty_end": end,
+             "brand_as_printed": brand_printed, "model_as_printed": model_printed}, warnings)
 
 
 # ── Changes ──────────────────────────────────────────────────────────────────────
@@ -234,6 +255,7 @@ def _json(unit: InstalledUnit) -> dict:
                          ("serial_number", unit.serial_number), ("rating_wp", unit.rating_wp),
                          ("rating_kw", unit.rating_kw), ("is_dcr", unit.is_dcr),
                          ("warranty_start", unit.warranty_start), ("warranty_end", unit.warranty_end),
+                         ("brand_as_printed", unit.brand_as_printed), ("model_as_printed", unit.model_as_printed),
                          ("status", unit.status))}
 
 
@@ -303,6 +325,7 @@ def add_units(db: Session, onboarding: CustomerOnboarding, execution: ProjectExe
         db.add(AuditLog(entity_type="installed_unit", entity_id=str(unit.id), action="added",
                         performed_by=viewer.actor, after_value={**_json(unit), "reason": audit_reason}))
     _after_change(db, onboarding, execution)
+    _notify_unmatched(db, onboarding, [u for u in units if is_unmatched(u)])
     return units, warnings
 
 
@@ -313,7 +336,8 @@ def update_unit(db: Session, onboarding: CustomerOnboarding, execution: ProjectE
     audit_reason = _locked_guard(execution, viewer, reason)
     before = _json(unit)
     merged = {**{k: getattr(unit, k) for k in ("category", "equipment_id", "serial_number", "rating_wp", "rating_kw",
-                                               "is_dcr", "warranty_start", "warranty_end")}, **changes}
+                                               "is_dcr", "warranty_start", "warranty_end", "brand_as_printed",
+                                               "model_as_printed")}, **changes}
     merged["category"] = merged["category"].value if hasattr(merged["category"], "value") else merged["category"]
     values, warnings = validate(db, merged)
     if values["serial_normalized"] != unit.serial_normalized:
@@ -332,7 +356,66 @@ def update_unit(db: Session, onboarding: CustomerOnboarding, execution: ProjectE
     db.add(AuditLog(entity_type="installed_unit", entity_id=str(unit.id), action="updated", performed_by=viewer.actor,
                     before_value=before, after_value={**_json(unit), "reason": audit_reason}))
     _after_change(db, onboarding, execution)
+    if is_unmatched(unit) and before.get("equipment_id") is not None:
+        _notify_unmatched(db, onboarding, [unit])
     return unit, warnings
+
+
+def match_unit(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution, unit: InstalledUnit,
+               equipment_id: int, viewer: Viewer, reason: Optional[str] = None) -> InstalledUnit:
+    """Operations/Admin match an unmatched unit to a catalogue item. The item must be of
+    the unit's category and agree with the unit's declared DCR status; the brand/model
+    as printed stay on the unit as the record of what was declared."""
+    if unit.status == InstalledUnitStatus.voided:
+        raise AssociateError("This unit was voided.", code="unit_voided", status_code=409)
+    if unit.category == InstalledUnitCategory.other:
+        raise AssociateError("Only modules and inverters are matched to the catalogue.", code="not_matchable",
+                             status_code=422, field="equipment_id")
+    if unit.equipment_id is not None:
+        raise AssociateError("This unit is already matched to a catalogue item.", code="already_matched",
+                             status_code=409)
+    audit_reason = _locked_guard(execution, viewer, reason)
+    equipment = db.get(Equipment, equipment_id)
+    if equipment is None:
+        raise AssociateError("No such catalogue item.", code="unknown_equipment", status_code=422, field="equipment_id")
+    if not equipment.is_active:
+        raise AssociateError("That catalogue item is deactivated.", code="equipment_inactive", status_code=422,
+                             field="equipment_id")
+    if equipment.category != EquipmentCategory(unit.category.value):
+        raise AssociateError(f"That catalogue item is not a {unit.category.value}.",
+                             code="equipment_category_mismatch", status_code=422, field="equipment_id")
+    if unit.category == InstalledUnitCategory.module and bool(unit.is_dcr) != equipment.is_dcr_compliant:
+        raise AssociateError("DCR status does not match the catalogue item "
+                             f"({'DCR' if equipment.is_dcr_compliant else 'non-DCR'}); the unit was declared "
+                             f"{'DCR' if unit.is_dcr else 'non-DCR'}.", code="dcr_mismatch", status_code=422,
+                             field="equipment_id")
+    before = _json(unit)
+    unit.equipment_id = equipment.id
+    if unit.category == InstalledUnitCategory.inverter:
+        unit.is_dcr = equipment.is_dcr_compliant
+    unit.updated_at = _now()
+    db.flush()
+    db.add(AuditLog(entity_type="installed_unit", entity_id=str(unit.id), action="matched", performed_by=viewer.actor,
+                    before_value=before, after_value={**_json(unit), "reason": audit_reason}))
+    _after_change(db, onboarding, execution)
+    return unit
+
+
+def _notify_unmatched(db: Session, onboarding: CustomerOnboarding, units: list) -> None:
+    """Post-commit email to Operations: units that need matching before the register
+    can be verified (silent-stall rule)."""
+    if not units:
+        return
+    from app.memory.memory_manager import MemoryManager
+    from app.memory.models import Customer
+    from app.notifications import notifier as notifier_module
+
+    customer = db.get(Customer, onboarding.customer_id)
+    payload = {"onboarding_id": onboarding.id, "customer_name": customer.name if customer else None,
+               "project_reference_id": db.get(Project, onboarding.project_id).reference_id,
+               "unit_ids": [u.id for u in units], "count": len(units)}
+    MemoryManager(db).notify_after_commit(lambda: notifier_module.notifier.notify("catalogue_unmatched", payload),
+                                          "catalogue_unmatched")
 
 
 def void_unit(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution, unit: InstalledUnit,
@@ -364,6 +447,10 @@ def verify_register(db: Session, onboarding: CustomerOnboarding, execution: Proj
     if execution.register_verified_at is not None:
         raise AssociateError("The register is already verified.", code="register_already_verified", status_code=409)
     units = _active_units(db, onboarding.project_id)
+    unmatched = [u.id for u in units if is_unmatched(u)]
+    if unmatched:
+        raise AssociateError("Match every unit to a catalogue item before verifying the register.",
+                             code="units_unmatched", status_code=409, extra={"unit_ids": unmatched})
     categories = {u.category for u in units}
     missing = [c.value for c in (InstalledUnitCategory.module, InstalledUnitCategory.inverter) if c not in categories]
     if missing:
@@ -478,9 +565,10 @@ def make_in_package(package: Optional[str], component: Optional[str], brand: Opt
 
 def _unit_make_not_in_package(db: Session, unit: InstalledUnit, package: Optional[str]) -> bool:
     equipment = db.get(Equipment, unit.equipment_id) if unit.equipment_id else None
-    if equipment is None or unit.status == InstalledUnitStatus.voided:
+    brand = equipment.brand if equipment is not None else unit.brand_as_printed
+    if not brand or unit.status == InstalledUnitStatus.voided:
         return False
-    return make_in_package(package, COMPONENT_FOR_CATEGORY.get(unit.category.value), equipment.brand) is False
+    return make_in_package(package, COMPONENT_FOR_CATEGORY.get(unit.category.value), brand) is False
 
 
 def catalogue_from_nameplate(db: Session, onboarding: CustomerOnboarding, viewer: "Viewer", data: dict) -> Equipment:
@@ -528,8 +616,12 @@ def project_flags(db: Session, onboarding: CustomerOnboarding, execution: Projec
         flags.append("previously_voided")
     if staff:
         package = project_package(db, onboarding)
-        if any(_unit_make_not_in_package(db, u, package) for u in _active_units(db, onboarding.project_id)):
+        active = _active_units(db, onboarding.project_id)
+        if any(_unit_make_not_in_package(db, u, package) for u in active):
             flags.append("make_not_in_package")
+        # Unmatched units block register verification — visible to staff, never associates.
+        if any(is_unmatched(u) for u in active):
+            flags.append("catalogue_unmatched")
     return flags
 
 
@@ -569,6 +661,7 @@ def unit_json(db: Session, unit: InstalledUnit, staff: bool = False, package: Op
         "equipment": None if equipment is None else {
             "id": equipment.id, "brand": equipment.brand, "model_name": equipment.model_name,
             "is_dcr_compliant": equipment.is_dcr_compliant, "is_placeholder": bool(equipment.is_placeholder)},
+        "brand_as_printed": unit.brand_as_printed, "model_as_printed": unit.model_as_printed,
         "rating_wp": str(unit.rating_wp) if unit.rating_wp is not None else None,
         "rating_kw": str(unit.rating_kw) if unit.rating_kw is not None else None,
         "is_dcr": unit.is_dcr,
@@ -585,6 +678,8 @@ def unit_json(db: Session, unit: InstalledUnit, staff: bool = False, package: Op
             package = project_package(db, onboarding) if onboarding else None
         # Non-blocking: the unit's make is not one Grid Nova lists for the project's package.
         body["make_not_in_package"] = _unit_make_not_in_package(db, unit, package)
+        # No catalogue item yet (blocks register verification until matched).
+        body["catalogue_unmatched"] = is_unmatched(unit)
     return body
 
 
