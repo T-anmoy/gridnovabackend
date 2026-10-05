@@ -293,3 +293,6 @@ totals: {customers, awaiting_grid_nova, needing_action}}`, sorted by priority. K
 `execution_next_step` (2), `receipt_available` (3, home feed only). List items in
 `GET /associate/onboardings` carry `progress_summary: {current_stage, stage_label,
 next_stage, next_stage_label, needs_action, action_kinds[], blocked, site_location}`.
+
+## Addendum
+`GET /api/v1/associate/onboardings/{id}/execution` also returns `can_submit` (bool): true only for the owning associate when `execution_mode` is `associate`; the associate screens use it to enable entry, edit and void.
