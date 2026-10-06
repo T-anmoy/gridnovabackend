@@ -2,6 +2,8 @@
 proposal as a separate later step, in-person acceptance, the separate approver, and the
 agreement."""
 from datetime import date, timedelta
+
+from app.associates.service import today_ist
 from unittest.mock import patch
 
 import pytest
@@ -258,7 +260,7 @@ class TestSeparateApprover:
 # ── Accepting: online or in person ───────────────────────────────────────────────
 
 def _in_person(client, who_headers, oid, pid, **overrides):
-    body = {"proposal_id": pid, "delivered_on": date.today().isoformat(),
+    body = {"proposal_id": pid, "delivered_on": today_ist().isoformat(),
             "note": "Explained the proposal at the customer's home; customer agreed.",
             "reference": "Printed copy v1 handed over, verbal acknowledgement", **overrides}
     base = BASE if "X-Associate-Id" in who_headers else DASH + "/onboardings"
@@ -274,7 +276,7 @@ class TestAcceptance:
         assert r.status_code == 200, r.text
         db_session.expire_all()
         proposal = db_session.get(Proposal, pid)
-        assert proposal.status == ProposalStatus.accepted and proposal.date_sent.date() == date.today()
+        assert proposal.status == ProposalStatus.accepted and proposal.date_sent.date() == today_ist()
         stages = _stages(r.json()["progress"])
         assert stages["proposal_issued"]["evidence"]["via"] == "handed over in person"
         assert stages["accepted"]["evidence"]["via"] == "in person"
@@ -318,9 +320,9 @@ class TestAcceptance:
         assert _in_person(client, headers(gna), oid, pid, reference="").status_code == 422
         r = _in_person(client, headers(gna), oid, pid, reference="   ")
         assert r.status_code == 422 and r.json()["detail"]["code"] == "reference_required"
-        r = _in_person(client, headers(gna), oid, pid, delivered_on=(date.today() + timedelta(days=1)).isoformat())
+        r = _in_person(client, headers(gna), oid, pid, delivered_on=(today_ist() + timedelta(days=1)).isoformat())
         assert r.json()["detail"]["code"] == "invalid_delivered_on"
-        r = _in_person(client, headers(gna), oid, pid, delivered_on=(date.today() - timedelta(days=40)).isoformat())
+        r = _in_person(client, headers(gna), oid, pid, delivered_on=(today_ist() - timedelta(days=40)).isoformat())
         assert r.status_code == 409 and r.json()["detail"]["code"] == "expired"
         assert _in_person(client, headers(gna), oid, 99999).status_code == 404
         head = make_associate(db_session, level="state_head", territory=19)

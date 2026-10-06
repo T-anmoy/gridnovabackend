@@ -163,6 +163,22 @@ class TestAssociateEmails:
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_proposal_ready" and mail["to"].startswith("assoc")
         assert mail["subject"] == "Proposal ready for Customer " + mail["subject"].split("Customer ")[1]
+        assert mail["link_url"].endswith(f"/associates/portal/customers/{onboarding.customer_id}")
+
+    def test_preferred_associate_link_uses_preferred_portal(self, client, db_session, onboarding_ready,
+                                                            notifications):
+        from app.memory.memory_manager import MemoryManager
+        gna = make_associate(db_session, level="district_head", territory=ALIPURDUAR)
+        oid = new_customer(client, gna)
+        onboarding = db_session.get(CustomerOnboarding, oid)
+        proposal = Proposal(lead_id=onboarding.lead_id, version=1, status=ProposalStatus.draft, content={})
+        db_session.add(proposal)
+        db_session.commit()
+        MemoryManager(db_session).transition_proposal_status(proposal.id, ProposalStatus.approved, "emp-admin-1",
+                                                           approved_by_employee_id="emp-admin-1")
+        db_session.commit()
+        [mail] = notifications.of("associate_email")
+        assert mail["link_url"].endswith(f"/preferred/portal/customers/{onboarding.customer_id}")
 
     def test_stage_rejected(self, client, db_session, onboarding_ready, notifications):
         gna, oid = associate_in_execution(client, db_session)
@@ -172,6 +188,7 @@ class TestAssociateEmails:
         client.post(f"{DASH}/execution/submissions/{sid}/reject", json={"note": "Wrong reference."}, headers=OPS)
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_stage_rejected" and "Wrong reference." in " ".join(mail["lines"])
+        assert "/associates/portal/customers/" in mail["link_url"]
 
     def test_payment_verified_link_only_when_not_held(self, client, db_session, onboarding_ready, stub_pdf,
                                                       notifications):
@@ -181,6 +198,7 @@ class TestAssociateEmails:
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_payment_verified" and mail["link_url"] is None
         assert "20000.00" in mail["lines"][0]
+        assert any("/associates/portal/customers/" in line for line in mail["lines"])
 
     def test_switched_off_or_no_email(self, client, db_session, onboarding_ready, notifications, monkeypatch):
         from app.config import settings

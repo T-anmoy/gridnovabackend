@@ -548,20 +548,17 @@ class ProposalInputs(Base):
     additional_requirements: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # ── Documents ─────────────────────────────────────────────────────────────
-    # List of {type, filename, storage_key} — storage_key is a Cloudflare R2 object
-    # key, null until upload is wired.
-    # TODO: wire actual file upload when R2 credentials are configured.
+    # List of {type, filename, storage_key} — storage_key is a Cloudflare R2 object key.
     document_refs: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     # Structured installation photos, one of INSTALLATION_PHOTO_SLOTS above per
     # key -> {filename, storage_key} (same per-item shape as document_refs,
     # but keyed rather than a loose list, since a real site-survey checklist
-    # calls for these specific categories, not an open-ended pile). Same R2
-    # wiring TODO as document_refs above.
+    # calls for these specific categories, not an open-ended pile).
     installation_photo_refs: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # ── Signatures ────────────────────────────────────────────────────────────
-    # {filename, storage_key, signed_at} — same shape/TODO as document_refs;
+    # {filename, storage_key, signed_at} — same shape as document_refs;
     # a signature is stored the same way any other captured image is.
     staff_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     customer_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

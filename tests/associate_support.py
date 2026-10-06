@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app.associates import validation
+from app.associates import service, validation
 from app.associates.territory_seed import DATA_DIR, seed_territories
 
 # Real LGD codes (see data/territories/).
@@ -73,7 +73,7 @@ def aadhaar(body11: str = "23456789012") -> str:
 
 
 def adult_dob(years: int = 30) -> str:
-    today = date.today()
+    today = service.today_ist()
     return date(today.year - years, 1, 15).isoformat()
 
 
