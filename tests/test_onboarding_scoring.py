@@ -9,7 +9,7 @@ from app.memory.models import CustomerOnboarding, Lead, LeadScore, ScoreBand
 from app.notifications.notifier import LogNotifier
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, ALIPURDUAR_I, BASE, DASH, SALES, headers, kyc_ready, make_associate, onboarding_body,
-    onboarding_ready, territories, upload, upload_required_documents, confirm_site_location,
+    onboarding_ready, territories, upload, upload_required_documents, complete_survey, confirm_site_location,
 )
 
 
@@ -62,6 +62,7 @@ class TestScore:
         for slot in ("panel_installation_area", "wiring_path"):
             upload(client, gna, oid, photo_slot=slot)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         r = client.post(f"{DASH}/onboardings/{oid}/verification-call",
                         json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)
@@ -117,6 +118,7 @@ class TestScore:
             oid = _create(client, gna, n=n)["onboarding_id"]
             upload_required_documents(client, gna, oid)
             confirm_site_location(client, gna, oid)
+            complete_survey(client, gna, oid)
             client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
             if n < 3:
                 client.post(f"{DASH}/onboardings/{oid}/verification-call",
@@ -131,6 +133,7 @@ class TestScore:
         assert client.get(f"{BASE}/{oid}", headers=headers(gna)).json()["score"]["response_due_at"] is None
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         body = client.post(f"{BASE}/{oid}/submit", headers=headers(gna)).json()
         due = datetime.fromisoformat(body["score"]["response_due_at"])
         submitted = datetime.fromisoformat(body["submitted_at"])
@@ -153,6 +156,7 @@ class TestEscalation:
         oid = _create(client, gna, n=n, **kw)["onboarding_id"]
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         o = db_session.get(CustomerOnboarding, oid)
         db_session.refresh(o)

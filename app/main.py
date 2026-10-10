@@ -11,6 +11,7 @@ from app.api.routes.associate_execution import router as associate_execution_rou
 from app.api.routes.associate_equipment import router as associate_equipment_router
 from app.api.routes.associate_payments import router as associate_payments_router
 from app.api.routes.associate_portal import router as associate_portal_router
+from app.api.routes.associate_survey import router as associate_survey_router
 from app.api.routes.associates_admin import router as associates_admin_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
@@ -22,6 +23,7 @@ from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.payments_admin import router as payments_admin_router
 from app.api.routes.placeholders_admin import router as placeholders_admin_router
 from app.api.routes.pricing import router as pricing_router
+from app.api.routes.survey_admin import router as survey_admin_router
 from app.api.routes.proposal_inputs import router as proposal_inputs_router
 from app.api.routes.public_associates import router as public_associates_router
 from app.api.routes.public_booking import router as public_booking_router
@@ -56,6 +58,9 @@ async def lifespan(app: FastAPI):
     # And execution/payments (config/execution_payments.yaml).
     from app.execution.config import load as load_execution_config
     load_execution_config()
+    # And the on-site survey (config/site_survey.yaml).
+    from app.survey.config import load as load_survey_config
+    load_survey_config()
     # And Grid Nova's price list + pricing policy (config/price_list.yaml,
     # config/pricing_policy.yaml) — a tampered table must stop the boot.
     from app.pricing.price_list import load as load_price_list
@@ -110,6 +115,8 @@ app.include_router(associates_admin_router)
 app.include_router(associate_portal_router)
 app.include_router(associate_onboarding_router)
 app.include_router(onboarding_admin_router)
+app.include_router(associate_survey_router)
+app.include_router(survey_admin_router)
 app.include_router(placeholders_admin_router)
 app.include_router(associate_execution_router)
 app.include_router(associate_equipment_router)

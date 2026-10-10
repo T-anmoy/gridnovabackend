@@ -183,6 +183,43 @@
         "title": "AvailabilityResponse",
         "type": "object"
       },
+      "Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post": {
+        "properties": {
+          "customer_confirms_data": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Confirms Data"
+          },
+          "declaration_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declaration Name"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post",
+        "type": "object"
+      },
       "Body_upload_execution_file_api_v1_dashboard_onboardings__onboarding_id__execution_files_post": {
         "properties": {
           "capture_method": {
@@ -1146,41 +1183,6 @@
         "title": "ConsumerPriorityClass",
         "type": "string"
       },
-      "ConsumptionMonth": {
-        "properties": {
-          "bill_inr": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bill Inr"
-          },
-          "month": {
-            "title": "Month",
-            "type": "string"
-          },
-          "units_kwh": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Units Kwh"
-          }
-        },
-        "required": [
-          "month"
-        ],
-        "title": "ConsumptionMonth",
-        "type": "object"
-      },
       "ContactRequest": {
         "properties": {
           "email": {
@@ -1261,6 +1263,15 @@
           "industrial"
         ],
         "title": "DiscomConsumerCategory",
+        "type": "string"
+      },
+      "DistanceMethod": {
+        "enum": [
+          "tape",
+          "laser",
+          "estimated"
+        ],
+        "title": "DistanceMethod",
         "type": "string"
       },
       "DocumentRef": {
@@ -1758,6 +1769,16 @@
         "title": "InstantEstimateRequest",
         "type": "object"
       },
+      "InverterLocation": {
+        "enum": [
+          "terrace",
+          "indoor_wall",
+          "outdoor_wall",
+          "other"
+        ],
+        "title": "InverterLocation",
+        "type": "string"
+      },
       "LeadAssignRequest": {
         "properties": {
           "employee_id": {
@@ -2160,6 +2181,33 @@
             "$ref": "#/components/schemas/ConsumerPriorityClass",
             "default": "normal"
           },
+          "consumption_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/app__api__routes__associate_onboarding__ConsumptionMonth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumption History"
+          },
+          "contract_demand_kva": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Demand Kva"
+          },
           "customer_email": {
             "anyOf": [
               {
@@ -2234,6 +2282,48 @@
               }
             ]
           },
+          "distance_inverter_to_lt_panel_m": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Inverter To Lt Panel M"
+          },
+          "distance_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistanceMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distance_panel_to_inverter_m": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Panel To Inverter M"
+          },
           "district_lgd_code": {
             "title": "District Lgd Code",
             "type": "integer"
@@ -2273,6 +2363,17 @@
             "title": "Full Address",
             "type": "string"
           },
+          "future_roof_expansion_planned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Future Roof Expansion Planned"
+          },
           "gst_number": {
             "anyOf": [
               {
@@ -2283,6 +2384,27 @@
               }
             ],
             "title": "Gst Number"
+          },
+          "indoor_wall_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indoor Wall Available"
+          },
+          "inverter_location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InverterLocation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "load_notes": {
             "anyOf": [
@@ -2352,6 +2474,29 @@
             "title": "Property In Customer Name",
             "type": "boolean"
           },
+          "roof_access_note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Access Note"
+          },
+          "roof_accessible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Accessible"
+          },
           "roof_age_years": {
             "anyOf": [
               {
@@ -2378,6 +2523,62 @@
             ],
             "title": "Roof Area Sqft"
           },
+          "roof_material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoofMaterial"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roof_material_other": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Material Other"
+          },
+          "roof_obstacles": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "water_tank",
+                    "stair_room",
+                    "trees",
+                    "nearby_building",
+                    "overhead_line",
+                    "antenna_dish",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 7,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Obstacles"
+          },
+          "roof_orientation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoofOrientation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "roof_ownership_confirmed": {
             "anyOf": [
               {
@@ -2388,6 +2589,47 @@
               }
             ],
             "title": "Roof Ownership Confirmed"
+          },
+          "roof_sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RoofSection"
+                },
+                "maxItems": 6,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Sections"
+          },
+          "roofs_available_count": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roofs Available Count"
+          },
+          "roofs_considered_count": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roofs Considered Count"
           },
           "sanctioned_load_kw": {
             "anyOf": [
@@ -2421,6 +2663,19 @@
               }
             ]
           },
+          "shadow_free_area_sqft": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Free Area Sqft"
+          },
           "site_latitude": {
             "anyOf": [
               {
@@ -2450,6 +2705,29 @@
           "site_type": {
             "$ref": "#/components/schemas/SiteType"
           },
+          "society_flat_count": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Society Flat Count"
+          },
+          "society_noc_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SocietyNocStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "state_lgd_code": {
             "title": "State Lgd Code",
             "type": "integer"
@@ -2465,6 +2743,38 @@
               }
             ],
             "title": "Structural Notes"
+          },
+          "survey_variant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SurveyVariant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenant_noc_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Noc Available"
+          },
+          "water_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Water Available"
           }
         },
         "required": [
@@ -2611,6 +2921,33 @@
               }
             ]
           },
+          "consumption_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/app__api__routes__associate_onboarding__ConsumptionMonth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumption History"
+          },
+          "contract_demand_kva": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Demand Kva"
+          },
           "customer_email": {
             "anyOf": [
               {
@@ -2712,6 +3049,48 @@
               }
             ]
           },
+          "distance_inverter_to_lt_panel_m": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Inverter To Lt Panel M"
+          },
+          "distance_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistanceMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distance_panel_to_inverter_m": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Panel To Inverter M"
+          },
           "district_lgd_code": {
             "anyOf": [
               {
@@ -2770,6 +3149,17 @@
             ],
             "title": "Full Address"
           },
+          "future_roof_expansion_planned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Future Roof Expansion Planned"
+          },
           "gst_number": {
             "anyOf": [
               {
@@ -2780,6 +3170,27 @@
               }
             ],
             "title": "Gst Number"
+          },
+          "indoor_wall_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indoor Wall Available"
+          },
+          "inverter_location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InverterLocation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "load_notes": {
             "anyOf": [
@@ -2861,6 +3272,29 @@
             ],
             "title": "Property In Customer Name"
           },
+          "roof_access_note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Access Note"
+          },
+          "roof_accessible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Accessible"
+          },
           "roof_age_years": {
             "anyOf": [
               {
@@ -2887,6 +3321,62 @@
             ],
             "title": "Roof Area Sqft"
           },
+          "roof_material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoofMaterial"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roof_material_other": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Material Other"
+          },
+          "roof_obstacles": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "water_tank",
+                    "stair_room",
+                    "trees",
+                    "nearby_building",
+                    "overhead_line",
+                    "antenna_dish",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 7,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Obstacles"
+          },
+          "roof_orientation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoofOrientation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "roof_ownership_confirmed": {
             "anyOf": [
               {
@@ -2897,6 +3387,47 @@
               }
             ],
             "title": "Roof Ownership Confirmed"
+          },
+          "roof_sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RoofSection"
+                },
+                "maxItems": 6,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Sections"
+          },
+          "roofs_available_count": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roofs Available Count"
+          },
+          "roofs_considered_count": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roofs Considered Count"
           },
           "sanctioned_load_kw": {
             "anyOf": [
@@ -2942,6 +3473,19 @@
               }
             ]
           },
+          "shadow_free_area_sqft": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Free Area Sqft"
+          },
           "site_latitude": {
             "anyOf": [
               {
@@ -2978,6 +3522,29 @@
               }
             ]
           },
+          "society_flat_count": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Society Flat Count"
+          },
+          "society_noc_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SocietyNocStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "state_lgd_code": {
             "anyOf": [
               {
@@ -3000,6 +3567,38 @@
               }
             ],
             "title": "Structural Notes"
+          },
+          "survey_variant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SurveyVariant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenant_noc_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Noc Available"
+          },
+          "water_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Water Available"
           }
         },
         "title": "OnboardingUpdate",
@@ -3224,7 +3823,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/ConsumptionMonth"
+                  "$ref": "#/components/schemas/app__api__routes__proposal_inputs__ConsumptionMonth"
                 },
                 "type": "array"
               },
@@ -3867,6 +4466,87 @@
         "title": "RoleUpdateRequest",
         "type": "object"
       },
+      "RoofMaterial": {
+        "enum": [
+          "concrete_flat",
+          "tin_shed",
+          "asbestos",
+          "other"
+        ],
+        "title": "RoofMaterial",
+        "type": "string"
+      },
+      "RoofOrientation": {
+        "enum": [
+          "south",
+          "east",
+          "west",
+          "north",
+          "mixed",
+          "unknown"
+        ],
+        "title": "RoofOrientation",
+        "type": "string"
+      },
+      "RoofSection": {
+        "properties": {
+          "label": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 500.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Length M"
+          },
+          "obstacle_area_sqm": {
+            "anyOf": [
+              {
+                "maximum": 250000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obstacle Area Sqm"
+          },
+          "width_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 500.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Width M"
+          }
+        },
+        "required": [
+          "label",
+          "length_m",
+          "width_m"
+        ],
+        "title": "RoofSection",
+        "type": "object"
+      },
       "ScheduleIn": {
         "properties": {
           "milestones": {
@@ -4006,6 +4686,16 @@
         "title": "SiteType",
         "type": "string"
       },
+      "SocietyNocStatus": {
+        "enum": [
+          "obtained",
+          "in_progress",
+          "not_required",
+          "not_available"
+        ],
+        "title": "SocietyNocStatus",
+        "type": "string"
+      },
       "StaffSiteLocationRequest": {
         "properties": {
           "link": {
@@ -4087,6 +4777,15 @@
         ],
         "title": "SubmitStageRequest",
         "type": "object"
+      },
+      "SurveyVariant": {
+        "enum": [
+          "individual_house",
+          "housing_society",
+          "commercial_roof"
+        ],
+        "title": "SurveyVariant",
+        "type": "string"
       },
       "SwitchModeRequest": {
         "properties": {
@@ -4595,6 +5294,53 @@
         "title": "_PhotoGps",
         "type": "object"
       },
+      "app__api__routes__associate_onboarding__ConsumptionMonth": {
+        "description": "One electricity bill. `month` is YYYY-MM (checked in app/survey/validation.py).",
+        "properties": {
+          "bill_inr": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Inr"
+          },
+          "month": {
+            "maxLength": 7,
+            "title": "Month",
+            "type": "string"
+          },
+          "units_kwh": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units Kwh"
+          }
+        },
+        "required": [
+          "month"
+        ],
+        "title": "ConsumptionMonth",
+        "type": "object"
+      },
       "app__api__routes__associate_onboarding__EstimateRequest": {
         "properties": {
           "access_difficulty": {
@@ -4638,6 +5384,41 @@
           }
         },
         "title": "EstimateRequest",
+        "type": "object"
+      },
+      "app__api__routes__proposal_inputs__ConsumptionMonth": {
+        "properties": {
+          "bill_inr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Inr"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "units_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units Kwh"
+          }
+        },
+        "required": [
+          "month"
+        ],
+        "title": "ConsumptionMonth",
         "type": "object"
       },
       "app__api__routes__public_intake__EstimateRequest": {
@@ -6619,6 +7400,158 @@
           }
         ],
         "summary": "Submit Onboarding"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/survey": {
+      "get": {
+        "description": "Which survey sections are complete (and what each still needs), the two\nsignatures and the customer's declaration.",
+        "operationId": "get_survey_api_v1_associate_onboardings__onboarding_id__survey_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Survey"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/survey/results": {
+      "get": {
+        "description": "Sizes, the suggested size and its limiting factor, the indicative list price for\nboth packages with the subsidy, and warning codes — on the saved data.",
+        "operationId": "get_survey_results_api_v1_associate_onboardings__onboarding_id__survey_results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Survey Results"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}": {
+      "post": {
+        "description": "One on-screen signature (multipart: `file`, a PNG). The customer's also needs\n`declaration_name` (the name the customer typed) and `customer_confirms_data=true`.\nOwner only; draft or submitted (a submitted customer returns to draft).",
+        "operationId": "sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "party",
+            "required": true,
+            "schema": {
+              "enum": [
+                "customer",
+                "associate"
+              ],
+              "title": "Party",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sign Survey"
       }
     },
     "/api/v1/associate/payments/instructions": {
@@ -11002,6 +11935,90 @@
           }
         ],
         "summary": "Correct Site Location"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/survey": {
+      "get": {
+        "operationId": "get_survey_api_v1_dashboard_onboardings__onboarding_id__survey_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Survey"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results": {
+      "get": {
+        "operationId": "get_survey_results_api_v1_dashboard_onboardings__onboarding_id__survey_results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Survey Results"
       }
     },
     "/api/v1/dashboard/onboardings/{onboarding_id}/verification-call": {

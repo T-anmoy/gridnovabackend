@@ -194,6 +194,16 @@ INPUT_FIELDS = (
     "ev_charging", "battery_storage", "equipment_tier", "additional_requirements",
 )
 ONBOARDING_FIELDS = ("connection_in_customer_name", "property_in_customer_name", "customer_timeline")
+# On-site survey fields (S1, app/survey/) — also stored on ProposalInputs, under the same
+# edit rules. Checked and partly derived by app/survey/validation.py.
+SURVEY_FIELDS = (
+    "survey_variant", "roof_accessible", "roof_access_note", "roof_material", "roof_material_other",
+    "roof_orientation", "roof_obstacles", "roof_sections", "shadow_free_area_sqft", "roofs_available_count",
+    "roofs_considered_count", "future_roof_expansion_planned", "water_available", "inverter_location",
+    "indoor_wall_available", "distance_panel_to_inverter_m", "distance_inverter_to_lt_panel_m", "distance_method",
+    "society_flat_count", "society_noc_status", "contract_demand_kva", "tenant_noc_available",
+)
+WRITABLE_INPUT_FIELDS = INPUT_FIELDS + SURVEY_FIELDS
 
 
 def _place(db: Session, data: dict) -> Place:
@@ -215,6 +225,9 @@ def create(db: Session, associate: Associate, data: dict) -> tuple[CustomerOnboa
     """`data` is validated input (see the route's OnboardingCreate). Caller commits."""
     from app.memory.lead_fields import apply_lead_fields
 
+    from app.survey import validation as survey_validation
+
+    data = survey_validation.prepare(data, None)
     memory = MemoryManager(db)
     who = actor(associate)
     place = _place(db, data)
@@ -238,7 +251,7 @@ def create(db: Session, associate: Associate, data: dict) -> tuple[CustomerOnboa
     lead = memory.create_lead(customer.id, performed_by=who, project_id=project.id, source=source)
     inputs = memory.create_proposal_inputs(
         lead.id, performed_by=who, state=place.state.name, district=place.district.name,
-        **{f: data.get(f) for f in INPUT_FIELDS if f in data},
+        **{f: data[f] for f in WRITABLE_INPUT_FIELDS if f in data and data[f] is not None},
     )
     version, _ = config.current_notice()
     onboarding = CustomerOnboarding(
@@ -295,9 +308,12 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
     if onboarding.status not in EDITABLE_STATUSES:
         raise AssociateError(f"This customer is {onboarding.status.value} and can no longer be edited here.",
                              code="not_editable", status_code=409)
+    from app.survey import validation as survey_validation
+
     memory = MemoryManager(db)
     who = actor(associate)
     inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
+    changes = survey_validation.prepare(changes, inputs)
     customer = db.get(Customer, onboarding.customer_id)
     before: dict = {}
     after: dict = {}
@@ -322,7 +338,7 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
         matches = _matches(db, mobile=mobile, consumer_number_key=key, exclude_id=onboarding.id)
         _refuse_own_duplicate(matches, associate)
 
-    for field in INPUT_FIELDS:
+    for field in WRITABLE_INPUT_FIELDS:
         if field in changes and getattr(inputs, field) != changes[field]:
             before[field], after[field] = getattr(inputs, field), changes[field]
             setattr(inputs, field, changes[field])
@@ -340,6 +356,11 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
         before.update(customer_mobile=onboarding.customer_mobile, consumer_number_key=onboarding.consumer_number_key)
         after.update(customer_mobile=mobile, consumer_number_key=key)
         onboarding.customer_mobile, onboarding.consumer_number_key = mobile, key
+
+    from app.survey import signatures
+    cleared_before, cleared_after = signatures.clear_after_edit(inputs, set(after))
+    before.update(cleared_before)
+    after.update(cleared_after)
 
     customer_changes = {}
     if "customer_name" in changes and changes["customer_name"] != customer.name:
@@ -383,7 +404,8 @@ def _lgd(db: Session, level: str, pk: Optional[int]) -> Optional[int]:
 
 
 def _jsonable(d: dict) -> dict:
-    return {k: (v.value if hasattr(v, "value") else v) for k, v in d.items()}
+    from decimal import Decimal
+    return {k: (v.value if hasattr(v, "value") else str(v) if isinstance(v, Decimal) else v) for k, v in d.items()}
 
 
 # ── Documents and completeness ───────────────────────────────────────────────────
@@ -403,9 +425,12 @@ def submit(db: Session, onboarding: CustomerOnboarding, associate: Associate) ->
     if onboarding.status != OnboardingStatus.draft:
         raise AssociateError(f"Only a draft can be submitted (this one is {onboarding.status.value}).",
                              code="invalid_transition", status_code=409)
+    from app.survey import status as survey_status
+
     missing = checklist(db, onboarding)["missing"]
     gaps = site_location.submit_gaps(onboarding)
-    if missing or any(gaps.values()):
+    survey_gaps = survey_status.submit_gaps(onboarding, db.get(ProposalInputs, onboarding.proposal_inputs_id))
+    if missing or any(gaps.values()) or any(survey_gaps.values()):
         problems = []
         if missing:
             problems.append("upload every required document (" + ", ".join(missing) + ")")
@@ -413,8 +438,12 @@ def submit(db: Session, onboarding: CustomerOnboarding, associate: Associate) ->
             problems.append("set the customer's site location")
         elif gaps["site_location_unconfirmed"]:
             problems.append("confirm the site location is the customer's house")
+        if survey_gaps["missing_survey_sections"]:
+            problems.append("complete the site survey (" + ", ".join(survey_gaps["missing_survey_sections"]) + ")")
+        if survey_gaps["survey_unsigned"]:
+            problems.append("get the site survey signed (" + ", ".join(survey_gaps["survey_unsigned"]) + ")")
         raise AssociateError("Before submitting, " + "; ".join(problems) + ".", code="incomplete",
-                             status_code=422, extra={"missing_documents": missing, **gaps})
+                             status_code=422, extra={"missing_documents": missing, **gaps, **survey_gaps})
     who = actor(associate)
     onboarding.status = OnboardingStatus.submitted
     onboarding.submitted_at = _now()

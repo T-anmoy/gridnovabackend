@@ -12,7 +12,7 @@ from app.memory.models import (
 )
 from app.onboarding import formal, scoring, service, site_location
 
-_INPUT_FIELDS = tuple(f for f in service.INPUT_FIELDS)
+_INPUT_FIELDS = tuple(service.WRITABLE_INPUT_FIELDS)
 
 
 def _iso(v) -> Optional[str]:
@@ -20,6 +20,9 @@ def _iso(v) -> Optional[str]:
 
 
 def _val(v):
+    from decimal import Decimal
+    if isinstance(v, Decimal):   # metres (survey distances) — decimal strings, like money
+        return str(v)
     return v.value if hasattr(v, "value") else v
 
 

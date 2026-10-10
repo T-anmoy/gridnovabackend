@@ -200,6 +200,12 @@ class AuthenticatedEmployee:
         unassigned leads, as everywhere else on the Sales surface."""
         return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
 
+    def can_view_surveys(self) -> bool:
+        """The on-site survey of an associate-sourced customer (S1). Engineers read it
+        (they review it) but never the indicative prices in its results. Sales is
+        limited to its own or unassigned leads."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales, EmployeeRole.engineer)
+
     def can_verify_onboarding(self) -> bool:
         """The staff verification call on an associate-sourced customer."""
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)

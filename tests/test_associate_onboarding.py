@@ -13,7 +13,7 @@ from app.memory.models import (
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, ALIPURDUAR_I, ALIPURDUAR_II, ARARIA, ARARIA_BLOCK, BASE, DASH, ENG, KOLKATA, MGMT, SALES,
     headers, kyc_ready, make_associate, onboarding_body, onboarding_ready, territories, upload,
-    upload_required_documents, confirm_site_location,
+    upload_required_documents, complete_survey, confirm_site_location,
 )
 
 
@@ -30,6 +30,7 @@ def _codes(body) -> set:
 def _submit_and_verify(client, gna, oid, note="Spoke to the customer; details confirmed."):
     upload_required_documents(client, gna, oid)
     confirm_site_location(client, gna, oid)
+    complete_survey(client, gna, oid)
     assert client.post(f"{BASE}/{oid}/submit", headers=headers(gna)).status_code == 200
     return client.post(f"{DASH}/onboardings/{oid}/verification-call",
                        json={"verification_call_completed": True, "note": note}, headers=ADMIN)
@@ -194,13 +195,17 @@ class TestUpdate:
         oid = _create(client, gna)["onboarding_id"]
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         assert client.post(f"{BASE}/{oid}/submit", headers=headers(gna)).json()["status"] == "submitted"
         r = client.patch(f"{BASE}/{oid}", json={"floors": 3, "customer_name": "Renamed"}, headers=headers(gna))
         assert r.status_code == 200 and r.json()["status"] == "draft"
         assert r.json()["site_assessment"]["floors"] == 3 and r.json()["customer"]["name"] == "Renamed"
         entry = db_session.execute(select(AuditLog).where(
-            AuditLog.entity_type == "customer_onboarding", AuditLog.action == "updated")).scalar_one()
+            AuditLog.entity_type == "customer_onboarding", AuditLog.action == "updated")
+            .order_by(AuditLog.id.desc()).limit(1)).scalar_one()
         assert entry.before_value["status"] == "submitted" and entry.after_value["floors"] == 3
+        # floors is a survey field: the signed survey must be signed again.
+        assert entry.after_value["signatures"] == "cleared_after_edit"
 
     def test_changing_the_mobile_to_another_associates_customer_flags_it(self, client, db_session, onboarding_ready):
         a, b = make_associate(db_session), make_associate(db_session)
@@ -279,6 +284,7 @@ class TestSubmitAndChecklist:
         oid = _create(client, gna)["onboarding_id"]
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         r = client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         assert r.status_code == 200 and r.json()["status"] == "submitted" and r.json()["submitted_at"]
         assert client.post(f"{BASE}/{oid}/submit", headers=headers(gna)).status_code == 409
@@ -304,6 +310,7 @@ class TestVerificationCall:
         assert client.post(url, json=ok, headers=ADMIN).status_code == 409  # still draft
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
         assert client.post(url, json={**ok, "verification_call_completed": False}, headers=ADMIN).status_code == 422
         assert client.post(url, json={**ok, "note": " "}, headers=ADMIN).status_code == 422

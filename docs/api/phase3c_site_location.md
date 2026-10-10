@@ -125,7 +125,8 @@ recommended_source: "photo_gps"}` (values from `config/associate_onboarding.yaml
 {"detail": {"code": "incomplete", "message": "Before submitting, …",
             "missing_documents": [], "missing_site_location": true, "site_location_unconfirmed": false}}
 ```
-Both booleans are always present on `incomplete`. Customers already submitted, verified
+Both booleans are always present on `incomplete`. Since S1 the detail also always carries
+`missing_survey_sections` and `survey_unsigned` (lists) — see [site_survey.md](site_survey.md) §6. Customers already submitted, verified
 or closed are grandfathered (a submitted customer without a location can still be
 verified by staff).
 

@@ -1,0 +1,91 @@
+# Grid Nova Energy — on-site site survey (S1)
+#
+# Grid Nova's paper "Checklist to Assess Potential Solar Rooftop System" as a guided
+# survey the associate fills on site. It extends the site assessment (ProposalInputs);
+# there is no separate survey record. Read by app/survey/config.py and validated at
+# startup. Anything marked [UNCONFIRMED] is the developer's working default, registered
+# in config/placeholder_registry.yaml (SRV-*), until Grid Nova confirms it.
+
+# Submitting a customer needs a complete survey and both signatures. Customers already
+# submitted (or later) when this arrived are grandfathered (migration 0044).
+survey_required_to_submit: true      # [UNCONFIRMED]
+
+# Electricity bills: the app asks for requested_consumption_months and the survey is
+# complete with min_consumption_months.
+requested_consumption_months: 6      # [UNCONFIRMED]
+min_consumption_months: 3            # [UNCONFIRMED]
+max_consumption_months: 12
+
+# Shadow-free roof area needed per kW. Grid Nova's two sample proposals imply roughly
+# 75–83 sq ft per kW; 90 is the working default.
+area_sqft_per_kw: 90                 # [UNCONFIRMED]
+
+# Maximum system size as a share of the sanctioned load (1.0 = up to the sanctioned load).
+load_cap_ratio: 1.0                  # [UNCONFIRMED]
+
+# Bill ÷ units outside this range (₹ per unit) raises implied_tariff_outside_range.
+implied_tariff_inr_per_kwh:          # [UNCONFIRMED]
+  min: 3
+  max: 20
+
+# An average the associate typed differs from the average of the bills by more than
+# this share → units_bill_mismatch.
+average_mismatch_ratio: 0.25         # [UNCONFIRMED]
+
+# Distances are refused (422 out_of_range) above this many metres.
+distance_max_m: 300                  # [UNCONFIRMED]
+
+# A total roof area above this (per variant) raises area_implausible.
+max_plausible_roof_area_sqft:        # [UNCONFIRMED]
+  individual_house: 5000
+  housing_society: 50000
+  commercial_roof: 200000
+
+# On-screen signatures: PNG only, at most this size.
+signature_max_kb: 500                # [UNCONFIRMED]
+
+# Any change to a survey field after a signature clears both signatures (the customer
+# signed what was on screen), so the survey must be signed again.
+resign_after_edit: true              # [UNCONFIRMED]
+
+# Engineers aim to review a submitted survey within this many hours; older ones are
+# needs_attention.
+review_target_hours: 48              # [UNCONFIRMED]
+
+# DISCOMs the app offers (plus free text under "Other"). Stored as entered.
+discom_options:                      # [UNCONFIRMED]
+  - WBSEDCL
+  - CESC
+  - NBPDCL
+  - SBPDCL
+  - Other
+
+# Survey sections in the order the app shows them. A field is complete when it has a
+# value ([] counts for a list: "none"). `bills` is complete with min_consumption_months
+# valid months in consumption_history.
+sections:
+  - key: connection
+    fields: [discom, consumer_number, connection_phase, sanctioned_load_kw]
+  - key: bills
+    fields: [consumption_history]
+  - key: roof
+    fields: [roof_accessible, roof_material, roof_orientation, roof_ownership_confirmed, floors,
+             shading_condition, roof_obstacles]
+  - key: roof_area
+    fields: [roof_area_sqft, shadow_free_area_sqft]
+  - key: layout
+    fields: [inverter_location, indoor_wall_available, distance_panel_to_inverter_m,
+             distance_inverter_to_lt_panel_m, distance_method, water_available]
+
+# Extra required fields per survey variant, by section. [UNCONFIRMED]
+variants:
+  individual_house: {}
+  housing_society:
+    connection: [society_flat_count, society_noc_status]
+  commercial_roof:
+    connection: [contract_demand_kva]
+
+# Fields required only when another field has a given value.
+conditional:
+  - {section: roof, when: {roof_material: other}, require: [roof_material_other]}
+  - {section: roof, when: {roof_ownership_confirmed: false}, require: [tenant_noc_available]}

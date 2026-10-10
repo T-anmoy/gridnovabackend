@@ -165,3 +165,48 @@ def onboarding_ready(kyc_ready, db_session):
     """Storage, encryption key and the territory subset — plus the staff rows used."""
     seed_employees(db_session, "emp-admin-1", "emp-sales-1")
     return kyc_ready
+
+
+SURVEY = {
+    "discom": "WBSEDCL",
+    # Same 400 units a month as onboarding_body, so derived averages change nothing.
+    "consumption_history": [{"month": f"2026-0{m}", "units_kwh": 400, "bill_inr": 3200} for m in (3, 4, 5)],
+    "roof_accessible": True,
+    "roof_material": "concrete_flat",
+    "roof_orientation": "south",
+    "roof_ownership_confirmed": True,
+    "floors": 2,
+    "shading_condition": "none",
+    "roof_obstacles": [],
+    "roof_area_sqft": 800,
+    "roof_sections": [{"label": "Main", "length_m": 10, "width_m": 6}],
+    "inverter_location": "indoor_wall",
+    "indoor_wall_available": True,
+    "distance_panel_to_inverter_m": 12,
+    "distance_inverter_to_lt_panel_m": 5,
+    "distance_method": "tape",
+    "water_available": True,
+}
+
+
+def sign_survey(client, associate_id, onboarding_id, party: str = "customer", content: bytes = PNG, **form):
+    data = {"declaration_name": "Customer", "customer_confirms_data": "true"} if party == "customer" else {}
+    data.update(form)
+    return client.post(f"{BASE}/{onboarding_id}/survey/signatures/{party}", data=data,
+                       files={"file": ("sig.png", content, "image/png")}, headers=headers(associate_id))
+
+
+def complete_survey(client, associate_id, onboarding_id, sign: bool = True, **overrides) -> dict:
+    """Fill every survey section (S1) — keeping the phase the test chose, defaulting to
+    single phase — and, unless `sign=False`, take both signatures."""
+    detail = client.get(f"{BASE}/{onboarding_id}", headers=headers(associate_id)).json()["site_assessment"]
+    body = {**SURVEY, **overrides}
+    if detail.get("connection_phase") is None and "connection_phase" not in body:
+        body["connection_phase"] = "single_phase"
+    r = client.patch(f"{BASE}/{onboarding_id}", json=body, headers=headers(associate_id))
+    assert r.status_code == 200, r.text
+    if sign:
+        for party in ("customer", "associate"):
+            r = sign_survey(client, associate_id, onboarding_id, party)
+            assert r.status_code == 201, r.text
+    return client.get(f"{BASE}/{onboarding_id}/survey", headers=headers(associate_id)).json()

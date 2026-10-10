@@ -746,6 +746,120 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  # ── Site survey (S1) ───────────────────────────────────────────────────────────
+  - id: SRV-1
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: survey_required_to_submit}
+    description: "Submitting a customer needs a complete on-site survey and both signatures (customers submitted before S1 are grandfathered)."
+    dummy_value: true
+    needed_from_grid_nova: "Must every customer have a complete, signed on-site survey before the associate can submit them?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-2
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: requested_consumption_months}
+    description: "How many months of electricity bills the survey asks for."
+    dummy_value: 6
+    needed_from_grid_nova: "How many months of electricity bills should associates collect?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-3
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: min_consumption_months}
+    description: "The fewest months of bills that complete the survey's bills section."
+    dummy_value: 3
+    needed_from_grid_nova: "What is the minimum number of months of bills you accept?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-4
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: area_sqft_per_kw}
+    description: "Shadow-free roof area needed per kW when the survey works out the largest system the roof allows (Grid Nova's two sample proposals imply about 75–83)."
+    dummy_value: 90
+    needed_from_grid_nova: "How many square feet of shadow-free roof does Grid Nova allow per kW?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SRV-5
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: load_cap_ratio}
+    description: "Largest system as a share of the sanctioned load (1.0 = up to the sanctioned load)."
+    dummy_value: 1.0
+    needed_from_grid_nova: "Can a system be larger than the customer's sanctioned load, and by how much?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SRV-6
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: implied_tariff_inr_per_kwh}
+    description: "Bill ÷ units outside this range raises the implied_tariff_outside_range warning."
+    dummy_value: {min: 3, max: 20}
+    needed_from_grid_nova: "What range of rupees per unit is normal on the bills you see?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-7
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: average_mismatch_ratio}
+    description: "A typed average that differs from the bills' average by more than this share raises units_bill_mismatch."
+    dummy_value: 0.25
+    needed_from_grid_nova: "Nothing needed — a working default; listed so it is visible."
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-8
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: distance_max_m}
+    description: "Panel-to-inverter and inverter-to-LT-panel distances above this are refused as a likely typo."
+    dummy_value: 300
+    needed_from_grid_nova: "What is the longest cable run you would expect on a rooftop job?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-9
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: max_plausible_roof_area_sqft}
+    description: "A total roof area above this (per survey type) raises area_implausible."
+    dummy_value: {individual_house: 5000, housing_society: 50000, commercial_roof: 200000}
+    needed_from_grid_nova: "Nothing needed — a working default; listed so it is visible."
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-10
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: signature_max_kb}
+    description: "Largest on-screen signature image accepted (PNG)."
+    dummy_value: 500
+    needed_from_grid_nova: "Nothing needed — a working default; listed so it is visible."
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-11
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: resign_after_edit}
+    description: "Changing any survey field after signing clears both signatures, so the customer signs what is on screen."
+    dummy_value: true
+    needed_from_grid_nova: "If the associate corrects the survey after the customer has signed, must the customer sign again?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-12
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: review_target_hours}
+    description: "Engineers aim to review a submitted survey within this many hours; older ones are needs_attention."
+    dummy_value: 48
+    needed_from_grid_nova: "How quickly should an Engineer review a submitted site survey?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-13
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: discom_options}
+    description: "The DISCOMs the survey offers (plus Other with free text)."
+    dummy_value: [WBSEDCL, CESC, NBPDCL, SBPDCL, Other]
+    needed_from_grid_nova: "Which DISCOMs should the survey list for the states Grid Nova works in?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SRV-14
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: variants}
+    description: "Extra required fields for housing societies (flat count, NOC status) and commercial roofs (contract demand)."
+    dummy_value: {housing_society: [society_flat_count, society_noc_status], commercial_roof: [contract_demand_kva]}
+    needed_from_grid_nova: "What must the survey record for a housing society and for a commercial roof beyond the house checklist?"
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.

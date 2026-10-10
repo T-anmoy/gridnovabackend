@@ -124,6 +124,14 @@ def _size(inputs: InstantEstimateInputs) -> sizing_module.SizingResult:
         connection_phase=None))
 
 
+def package_amounts(lp: list_pricing.ListPricing, subsidy: float) -> dict:
+    """Both packages' list amounts (decimal strings) and the net after the subsidy —
+    shared with the survey results (app/survey/results.py)."""
+    return {package: {**q.amounts(), "display_name": price_list.display_name(package),
+                      "net_after_subsidy": str(q.final - Decimal(str(subsidy)))}
+            for package, q in lp.packages.items()}
+
+
 def calculate_instant_estimate(memory: "MemoryManager", inputs: InstantEstimateInputs) -> InstantEstimateResult:
     from app.pricing.engine import KNOWN_SEGMENTS
     if (inputs.segment or "").strip().lower() not in KNOWN_SEGMENTS:
@@ -145,10 +153,7 @@ def calculate_instant_estimate(memory: "MemoryManager", inputs: InstantEstimateI
     subsidy_kw = lp.priced_kw if lp.priced_kw is not None else sizing_result.recommended_size_kw
     subsidy = calculate_pm_surya_ghar_subsidy(size_kw=subsidy_kw, segment=inputs.segment,
                                               is_housing_society=inputs.is_housing_society)
-    packages = {}
-    for package, q in lp.packages.items():
-        packages[package] = {**q.amounts(), "display_name": price_list.display_name(package),
-                             "net_after_subsidy": str(q.final - Decimal(str(subsidy)))}
+    packages = package_amounts(lp, subsidy)
     assured = lp.packages.get("NOVA_ASSURED")
     significant = (inputs.shading or "").strip().lower() == SIGNIFICANT_SHADING_VALUE
 

@@ -19,7 +19,7 @@ def test_index_lists_existing_files():
     index = (DOCS / "README.md").read_text(encoding="utf-8")
     linked = set(re.findall(r"\]\(([a-z0-9_]+\.md)\)", index))
     assert {"phase4a.md", "phase4a_followups.md", "phase3c_site_location.md", "pma_pricing.md",
-            "hf_c_equipment.md"} <= linked
+            "hf_c_equipment.md", "site_survey.md"} <= linked
     for name in linked:
         assert (DOCS / name).exists(), name
 
@@ -31,5 +31,8 @@ def test_documented_new_paths_exist_in_openapi():
                  "/api/v1/dashboard/onboardings/{onboarding_id}/execution/units/{unit_id}/match",
                  "/api/v1/pricing/packages",
                  "/api/v1/associate/onboardings/{onboarding_id}/site-location",
-                 "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
+                 "/api/v1/dashboard/onboardings/{onboarding_id}/site-location",
+                 "/api/v1/associate/onboardings/{onboarding_id}/survey/results",
+                 "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}",
+                 "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results"):
         assert path in paths, path

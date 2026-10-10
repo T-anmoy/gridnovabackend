@@ -10,7 +10,8 @@ into English, Hindi or Bengali.
     documents_missing         todo.documents_missing              1  (params: missing_documents)
     site_location_missing     todo.site_location_missing          1  (draft only)
     site_location_unconfirmed todo.site_location_unconfirmed      1  (draft only)
-    ready_to_submit           todo.ready_to_submit                1  (documents AND confirmed location)
+    ready_to_submit           todo.ready_to_submit                1  (documents, confirmed location AND — unless
+                                                                     grandfathered — a complete, signed survey)
     upload_signed_agreement   todo.upload_signed_agreement        2
     formal_proposal_ready     todo.formal_proposal_ready          2
     execution_next_step       todo.execution_next_step            2  (params: stage, stage_label)
@@ -70,7 +71,10 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
             items.append(_item(onboarding, name, "site_location_missing", 1))
         elif gaps["site_location_unconfirmed"]:
             items.append(_item(onboarding, name, "site_location_unconfirmed", 1))
-        if not missing and not any(gaps.values()):
+        from app.memory.models import ProposalInputs
+        from app.survey import status as survey_status
+        survey_gaps = survey_status.submit_gaps(onboarding, db.get(ProposalInputs, onboarding.proposal_inputs_id))
+        if not missing and not any(gaps.values()) and not any(survey_gaps.values()):
             items.append(_item(onboarding, name, "ready_to_submit", 1))
     done = progress.recorded(db, onboarding.project_id)
     if ProjectStage.proposal_prepared in done and ProjectStage.accepted not in done:

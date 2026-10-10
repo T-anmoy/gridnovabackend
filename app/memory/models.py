@@ -112,6 +112,10 @@ class TimelineEventType(str, enum.Enum):
     execution_stage_submitted = "execution_stage_submitted"
     execution_stage_rejected = "execution_stage_rejected"
     site_location_updated = "site_location_updated"
+    survey_signed = "survey_signed"
+    survey_reviewed = "survey_reviewed"
+    survey_correction_requested = "survey_correction_requested"
+    survey_corrected = "survey_corrected"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -249,6 +253,66 @@ class InputStatus(str, enum.Enum):
     under_review = "under_review"                  # sales team is looking at it
     approved_for_proposal = "approved_for_proposal"  # ready for Proposal Agent
     rejected = "rejected"                           # not viable, with reason
+
+
+# ── On-site survey (S1) — extends the site assessment; app/survey/ ───────────────
+
+class SurveyVariant(str, enum.Enum):
+    individual_house = "individual_house"
+    housing_society = "housing_society"
+    commercial_roof = "commercial_roof"
+
+
+class RoofMaterial(str, enum.Enum):
+    concrete_flat = "concrete_flat"
+    tin_shed = "tin_shed"
+    asbestos = "asbestos"
+    other = "other"
+
+
+class RoofOrientation(str, enum.Enum):
+    south = "south"
+    east = "east"
+    west = "west"
+    north = "north"
+    mixed = "mixed"
+    unknown = "unknown"
+
+
+ROOF_OBSTACLES = ("water_tank", "stair_room", "trees", "nearby_building", "overhead_line", "antenna_dish", "other")
+
+
+class InverterLocation(str, enum.Enum):
+    terrace = "terrace"
+    indoor_wall = "indoor_wall"
+    outdoor_wall = "outdoor_wall"
+    other = "other"
+
+
+class DistanceMethod(str, enum.Enum):
+    tape = "tape"
+    laser = "laser"
+    estimated = "estimated"
+
+
+class SocietyNocStatus(str, enum.Enum):
+    obtained = "obtained"
+    in_progress = "in_progress"
+    not_required = "not_required"
+    not_available = "not_available"
+
+
+class FeasibilityOutcome(str, enum.Enum):
+    feasible = "feasible"
+    feasible_with_conditions = "feasible_with_conditions"
+    revisit_needed = "revisit_needed"
+    not_feasible = "not_feasible"
+
+
+class SurveyCorrectionStatus(str, enum.Enum):
+    pending = "pending"
+    applied = "applied"
+    rejected = "rejected"
 
 
 class EquipmentCategory(str, enum.Enum):
@@ -457,6 +521,14 @@ class Proposal(Base):
     # "associate:GNA-…" when an associate requested it. For associate-sourced leads the
     # standard approver must be someone else (dashboard.approve_proposal).
     drafted_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # S1 — a survey change that affects size, price or design after this proposal was
+    # drafted. Sending is blocked until a reviewer clears it (app/survey/changes.py).
+    needs_reverification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                       server_default=false())
+    reverification_reason: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reverification_flagged_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    reverification_cleared_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reverification_cleared_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
 
     lead: Mapped["Lead"] = relationship(back_populates="proposals")
     approved_by: Mapped[Optional["Employee"]] = relationship(back_populates="approved_proposals")
@@ -566,8 +638,53 @@ class ProposalInputs(Base):
     # ── Internal notes ────────────────────────────────────────────────────────
     internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── On-site survey (S1) — app/survey/. Grid Nova's paper "Checklist to Assess
+    # Potential Solar Rooftop System", filled by the associate on site. ─────────────
+    survey_variant: Mapped[SurveyVariant] = mapped_column(
+        SAEnum(SurveyVariant), nullable=False, default=SurveyVariant.individual_house,
+        server_default=SurveyVariant.individual_house.value)
+    roof_accessible: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    roof_access_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    roof_material: Mapped[Optional[RoofMaterial]] = mapped_column(SAEnum(RoofMaterial), nullable=True)
+    roof_material_other: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    roof_orientation: Mapped[Optional[RoofOrientation]] = mapped_column(SAEnum(RoofOrientation), nullable=True)
+    # Tags from ROOF_OBSTACLES; [] = surveyed, no obstacles.
+    roof_obstacles: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Up to 6 of {label, length_m, width_m, obstacle_area_sqm?} (metres as decimal strings).
+    roof_sections: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Derived from roof_sections by the server when there are sections; entered otherwise.
+    shadow_free_area_sqft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    water_available: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    inverter_location: Mapped[Optional[InverterLocation]] = mapped_column(SAEnum(InverterLocation), nullable=True)
+    indoor_wall_available: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    distance_panel_to_inverter_m: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 2), nullable=True)
+    distance_inverter_to_lt_panel_m: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 2), nullable=True)
+    distance_method: Mapped[Optional[DistanceMethod]] = mapped_column(SAEnum(DistanceMethod), nullable=True)
+    society_flat_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    society_noc_status: Mapped[Optional[SocietyNocStatus]] = mapped_column(SAEnum(SocietyNocStatus), nullable=True)
+    contract_demand_kva: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tenant_noc_available: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # {filename, storage_key, signed_at, content_type, size_bytes, signed_by} — like customer_signature_ref.
+    associate_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    customer_declared_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    customer_declaration_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # The Engineer's review of the survey (S1 Step 5).
+    feasibility_outcome: Mapped[Optional[FeasibilityOutcome]] = mapped_column(SAEnum(FeasibilityOutcome),
+                                                                              nullable=True)
+    feasibility_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feasibility_conditions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    revisit_items: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    feasibility_reviewed_by_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("employees.id", name="fk_proposal_inputs_feasibility_reviewed_by"), nullable=True)
+    feasibility_reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    survey_revised_after_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                              server_default=false())
+    # The survey report PDF (S1 Step 7), private storage.
+    survey_report_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    survey_report_generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
     lead: Mapped["Lead"] = relationship(back_populates="proposal_inputs")
-    reviewed_by: Mapped[Optional["Employee"]] = relationship()
+    reviewed_by: Mapped[Optional["Employee"]] = relationship(foreign_keys=[reviewed_by_id])
 
 
 class TimelineEvent(Base):
@@ -1240,6 +1357,10 @@ class CustomerOnboarding(Base):
     verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     attribution_locked_until: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     closed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # S1 — onboardings already submitted (or later) when the on-site survey arrived are
+    # not held to the survey submit gate (migration 0044 backfill).
+    survey_grandfathered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                       server_default=false())
 
     # Lead scoring v2 — the score, its band, and every factor that produced it
     # (app/onboarding/scoring.py). response_due_at is when the staff verification call
@@ -1715,3 +1836,29 @@ class PaymentReceipt(Base):
     held_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     emailed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class SurveyCorrectionRequest(Base):
+    """An associate's request to change survey fields after verification or review (S1
+    Step 6). Staff apply or reject it; applying writes the change with an audit
+    before/after. Never deleted."""
+    __tablename__ = "survey_correction_requests"
+    __table_args__ = (
+        Index("ix_survey_correction_requests_onboarding", "onboarding_id"),
+        Index("ix_survey_correction_requests_status", "status"),
+        # One pending request per onboarding at a time.
+        Index("uq_survey_correction_requests_one_pending", "onboarding_id", unique=True,
+              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String, nullable=False)
+    changes: Mapped[dict] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[SurveyCorrectionStatus] = mapped_column(
+        SAEnum(SurveyCorrectionStatus), nullable=False, default=SurveyCorrectionStatus.pending)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_now)

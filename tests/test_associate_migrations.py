@@ -526,3 +526,53 @@ class TestUnmatchedUnitsMigration:
             conn.close()
         result = _run_alembic("downgrade", "0042_site_location", db_path=db_at_0025)
         assert result.returncode == 0, result.stderr
+
+
+class TestSiteSurveyMigration:
+    def test_upgrade_grandfathers_submitted_customers_and_downgrades(self, db_at_0025):
+        assert _run_alembic("upgrade", "0043_unmatched_units", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            verified = dict(verification_call_completed=1, verification_call_note="x", verified_by_employee_id="e",
+                            attribution_locked_until="2026-12-01 00:00:00")
+            for i, status in enumerate(("draft", "submitted", "verified", "closed"), start=1):
+                _insert(conn, "customer_onboardings", id=i, lead_id=i, customer_id=1, project_id=1,
+                        proposal_inputs_id=i, owner_associate_id=1, status=status, state_id=1, district_id=1,
+                        customer_mobile=f"983000000{i}", **(verified if status == "verified" else {}))
+            conn.execute("INSERT INTO proposal_inputs (id) VALUES (1)")
+            conn.execute("INSERT INTO proposals (id) VALUES (1)")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("upgrade", "0044_site_survey", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            rows = conn.execute("SELECT id, survey_grandfathered FROM customer_onboardings ORDER BY id").fetchall()
+            assert rows == [(1, 0), (2, 1), (3, 1), (4, 1)]
+            assert conn.execute("SELECT survey_variant, survey_revised_after_review FROM proposal_inputs").fetchone() \
+                == ("individual_house", 0)
+            assert conn.execute("SELECT needs_reverification FROM proposals").fetchone() == (0,)
+            conn.execute("PRAGMA foreign_keys = OFF")
+            _insert(conn, "survey_correction_requests", id=1, onboarding_id=1, changes="{}", status="pending")
+            # One pending correction per customer at a time.
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert(conn, "survey_correction_requests", id=2, onboarding_id=1, changes="{}", status="pending")
+            _insert(conn, "survey_correction_requests", id=3, onboarding_id=1, changes="{}", status="applied")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0043_unmatched_units", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert "survey_variant" not in {r[1] for r in conn.execute("PRAGMA table_info(proposal_inputs)")}
+            assert "needs_reverification" not in {r[1] for r in conn.execute("PRAGMA table_info(proposals)")}
+            assert "survey_grandfathered" not in {
+                r[1] for r in conn.execute("PRAGMA table_info(customer_onboardings)")}
+            assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'survey_correction_requests'"
+                                ).fetchone() is None
+        finally:
+            conn.close()
+        assert _run_alembic("upgrade", "0044_site_survey", db_path=db_at_0025).returncode == 0

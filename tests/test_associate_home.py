@@ -12,7 +12,7 @@ from tests.execution_support import (  # noqa: F401 — fixtures
     ADMIN, ALIPURDUAR, BASE, DASH, OPS, SALES, advance_to, associate_in_execution, days_ago, exec_url, headers,
     kyc_ready, make_associate, new_customer, notifications, onboarding_ready, territories,
 )
-from tests.onboarding_support import confirm_site_location, upload_required_documents
+from tests.onboarding_support import complete_survey, confirm_site_location, upload_required_documents
 from tests.payments_support import ACCOUNTS, PAY, accepted_customer, neft, record, stub_pdf  # noqa: F401
 
 HOME = "/api/v1/associate/home"
@@ -34,6 +34,7 @@ class TestFeed:
         assert body["totals"] == {"customers": 1, "awaiting_grid_nova": 0, "needing_action": 1}
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         _, items = _feed(client, gna)
         assert set(items) == {(oid, "ready_to_submit")}
         client.post(f"{BASE}/{oid}/submit", headers=headers(gna))

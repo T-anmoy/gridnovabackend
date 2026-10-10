@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Annotated, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -22,11 +23,13 @@ from app.auth.scoping import onboarding_scope, require_onboarding_edit, require_
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
-    INSTALLATION_PHOTO_SLOTS, Associate, ConnectionPhase, ConnectionType, ConsumerPriorityClass, CustomerOnboarding,
-    CustomerTimeline, CustomerType, DiscomConsumerCategory, GovernmentScheme, OnboardingStatus, ProjectFamily,
-    ProposalInputs, ShadingCondition, SiteType,
+    INSTALLATION_PHOTO_SLOTS, ROOF_OBSTACLES, Associate, ConnectionPhase, ConnectionType, ConsumerPriorityClass,
+    CustomerOnboarding, CustomerTimeline, CustomerType, DiscomConsumerCategory, DistanceMethod, GovernmentScheme,
+    InverterLocation, OnboardingStatus, ProjectFamily, ProposalInputs, RoofMaterial, RoofOrientation,
+    ShadingCondition, SiteType, SocietyNocStatus, SurveyVariant,
 )
 from app.onboarding import config, serialize, service, site_location
+from app.survey import config as survey_config
 
 router = APIRouter(prefix="/api/v1/associate/onboardings")
 
@@ -42,6 +45,20 @@ def _error(exc: AssociateError) -> HTTPException:
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────────
+
+class ConsumptionMonth(BaseModel):
+    """One electricity bill. `month` is YYYY-MM (checked in app/survey/validation.py)."""
+    month: str = Field(max_length=7)
+    units_kwh: Optional[Decimal] = Field(default=None, ge=0, le=10_000_000)
+    bill_inr: Optional[Decimal] = Field(default=None, ge=0, le=100_000_000)
+
+
+class RoofSection(BaseModel):
+    label: str = Field(min_length=1, max_length=40)
+    length_m: Decimal = Field(gt=0, le=500)
+    width_m: Decimal = Field(gt=0, le=500)
+    obstacle_area_sqm: Optional[Decimal] = Field(default=None, ge=0, le=250_000)
+
 
 class _SiteAssessment(BaseModel):
     """Fields shared by create and update. Hard limits reject impossible values;
@@ -90,6 +107,30 @@ class _SiteAssessment(BaseModel):
     customer_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     customer_mobile: Optional[str] = None
     customer_email: Optional[str] = None
+    # ── On-site survey (S1, app/survey/) ──
+    consumption_history: Optional[list[ConsumptionMonth]] = None
+    survey_variant: Optional[SurveyVariant] = None
+    roof_accessible: Optional[bool] = None
+    roof_access_note: Optional[str] = Field(default=None, max_length=1000)
+    roof_material: Optional[RoofMaterial] = None
+    roof_material_other: Optional[str] = Field(default=None, max_length=200)
+    roof_orientation: Optional[RoofOrientation] = None
+    roof_obstacles: Optional[list[Literal[ROOF_OBSTACLES]]] = Field(default=None, max_length=len(ROOF_OBSTACLES))
+    roof_sections: Optional[list[RoofSection]] = Field(default=None, max_length=survey_config.MAX_ROOF_SECTIONS)
+    shadow_free_area_sqft: Optional[float] = Field(default=None, ge=0, le=10_000_000)
+    roofs_available_count: Optional[int] = Field(default=None, ge=0, le=100)
+    roofs_considered_count: Optional[int] = Field(default=None, ge=0, le=100)
+    future_roof_expansion_planned: Optional[bool] = None
+    water_available: Optional[bool] = None
+    inverter_location: Optional[InverterLocation] = None
+    indoor_wall_available: Optional[bool] = None
+    distance_panel_to_inverter_m: Optional[Decimal] = Field(default=None, ge=0, le=100_000)
+    distance_inverter_to_lt_panel_m: Optional[Decimal] = Field(default=None, ge=0, le=100_000)
+    distance_method: Optional[DistanceMethod] = None
+    society_flat_count: Optional[int] = Field(default=None, ge=1, le=100_000)
+    society_noc_status: Optional[SocietyNocStatus] = None
+    contract_demand_kva: Optional[float] = Field(default=None, gt=0, le=1_000_000)
+    tenant_noc_available: Optional[bool] = None
 
     @field_validator("pin_code")
     @classmethod
@@ -131,6 +172,9 @@ class _SiteAssessment(BaseModel):
 
     def to_service(self, fields: set[str]) -> dict:
         data = {k: getattr(self, k) for k in fields}
+        for k in ("consumption_history", "roof_sections"):
+            if data.get(k) is not None:
+                data[k] = [item.model_dump() for item in data[k]]
         if "equipment_package" in data:
             package = data.pop("equipment_package")
             data["equipment_tier"] = (config.load()["equipment_packages"][package]["equipment_tier"]
@@ -190,6 +234,7 @@ def options(current: AuthenticatedAssociate = Depends(get_current_associate)):
         "customer_timelines": [t.value for t in CustomerTimeline],
         "attribution_lock_days": cfg["attribution_lock_days"],
         "site_location": site_location.options(),
+        "survey": survey_config.options(),
     }
 
 

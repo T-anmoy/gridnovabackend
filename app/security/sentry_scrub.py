@@ -36,6 +36,9 @@ SENSITIVE_KEYS = frozenset({
     "cheque_number", "utr", "payment_reference", "payer_account_number", "reference", "reference_normalized",
     # Site location (Phase 3C) — where the customer lives.
     "site_latitude", "site_longitude", "latitude", "longitude", "site_location_raw_input",
+    # Site survey (S1) — the customer's connection, signature images and declared name.
+    "consumer_number", "customer_signature_ref", "associate_signature_ref", "declaration_name",
+    "customer_declaration_name", "signature",
 })
 _NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app.onboarding",
                       "app.api.routes.associate_onboarding", "app.api.routes.onboarding_admin",
@@ -43,7 +46,8 @@ _NO_LOCALS_MODULES = ("app.api.routes.public_associates", "app.associates", "app
                       "app.api.routes.execution_register_admin", "app.payments", "app.jobs.payment_alerts",
                       "app.api.routes.associate_payments", "app.api.routes.payments_admin",
                       "app.api.routes.public_receipts", "app.geo", "app.onboarding.maps_link",
-                      "app.onboarding.site_location", "app.api.routes.associate_equipment")
+                      "app.onboarding.site_location", "app.api.routes.associate_equipment", "app.survey",
+                      "app.api.routes.associate_survey", "app.api.routes.survey_admin")
 
 # 12 digits, optionally grouped 4-4-4 by spaces or hyphens as printed on the card.
 _AADHAAR_RE = re.compile(r"(?<!\d)(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.memory.models import AuditLog, CustomerOnboarding, OnboardingStatus, TimelineEvent, TimelineEventType
 from app.onboarding import maps_link
 from tests.onboarding_support import (  # noqa: F401 — fixtures
-    ADMIN, ALIPURDUAR, BASE, DASH, ENG, KOLKATA, MGMT, SALES, confirm_site_location, headers, kyc_ready,
+    ADMIN, ALIPURDUAR, BASE, DASH, ENG, KOLKATA, MGMT, SALES, complete_survey, confirm_site_location, headers, kyc_ready,
     make_associate, onboarding_body, onboarding_ready, territories, upload, upload_required_documents,
 )
 
@@ -324,6 +324,7 @@ class TestLegacyPair:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         same = {"site_latitude": 26.49, "site_longitude": 89.52}
         body = client.patch(f"{BASE}/{oid}", json=same, headers=headers(gna)).json()
         assert body["site_location"]["confirmed"] is True     # same coordinates: nothing changed
@@ -331,7 +332,7 @@ class TestLegacyPair:
                             headers=headers(gna)).json()
         assert (body["site_location"]["source"], body["site_location"]["confirmed"]) == ("unknown_legacy", False)
         assert len(_audits(db_session, oid, "site_location_confirmation_cleared")) == 1
-        [updated] = _audits(db_session, oid, "updated")
+        updated = _audits(db_session, oid, "updated")[-1]
         assert updated.after_value["site_location"]["source"] == "unknown_legacy"
 
     def test_legacy_pair_outside_india_cannot_be_confirmed(self, client, db_session, onboarding_ready):
@@ -348,6 +349,7 @@ class TestEditRules:
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         assert _submit(client, gna, oid).json()["status"] == "submitted"
         body = _set(client, gna, oid, GPS).json()
         assert body["status"] == "draft" and body["submitted_at"] is None
@@ -360,6 +362,7 @@ class TestEditRules:
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         _submit(client, gna, oid)
         assert _confirm(client, gna, oid).json()["status"] == "submitted"
 
@@ -397,6 +400,7 @@ class TestSubmitGate:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
+        complete_survey(client, gna, oid)
         _set(client, gna, oid, GPS)
         detail = _submit(client, gna, oid).json()["detail"]
         assert (detail["missing_site_location"], detail["site_location_unconfirmed"]) == (False, True)
@@ -414,6 +418,7 @@ class TestSubmitGate:
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         _set(client, gna, oid, GPS)
         r = _submit(client, gna, oid)
         assert r.status_code == 422 and r.json()["detail"]["site_location_unconfirmed"] is True
@@ -439,6 +444,7 @@ class TestSubmitGate:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
+        complete_survey(client, gna, oid)
         assert _submit(client, gna, oid).status_code == 200
 
 
@@ -482,6 +488,7 @@ class TestVisibility:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         confirm_site_location(client, gna, oid)
+        complete_survey(client, gna, oid)
         staff = client.get(f"{DASH}/onboardings/{oid}", headers=ADMIN).json()["site_location"]
         assert staff["flags"] == ["unverified_source"] and staff["check_with_customer"] is True
 
@@ -493,6 +500,7 @@ class TestStaffCorrection:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
+        complete_survey(client, gna, oid)
         _set(client, gna, oid, GPS)
         _confirm(client, gna, oid)
         _submit(client, gna, oid)
@@ -561,6 +569,7 @@ class TestOptionsAndFeed:
         gna = make_associate(db_session)
         oid = _create(client, gna)
         upload_required_documents(client, gna, oid)
+        complete_survey(client, gna, oid)
 
         def kinds():
             items = client.get("/api/v1/associate/home", headers=headers(gna)).json()["items"]

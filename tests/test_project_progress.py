@@ -8,7 +8,7 @@ from app.memory.models import CustomerOnboarding, ProjectStage, ProjectStageEven
 from app.onboarding import progress
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
-    territories, upload_required_documents, confirm_site_location,
+    territories, upload_required_documents, complete_survey, confirm_site_location,
 )
 
 
@@ -26,6 +26,7 @@ def _new(client, db_session, **kw):
 def _verify(client, gna, oid):
     upload_required_documents(client, gna, oid)
     confirm_site_location(client, gna, oid)
+    complete_survey(client, gna, oid)
     client.post(f"{BASE}/{oid}/submit", headers=headers(gna))
     r = client.post(f"{DASH}/onboardings/{oid}/verification-call",
                     json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)

@@ -29,7 +29,10 @@ MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balanc
 
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
-                   "associate_payments", "payments_admin", "pricing", "associate_equipment")
+                   "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
+                   "survey_admin")
+SURVEY_READERS = {"admin", "management", "sales", "engineer"}
+PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
 PAY_PROCESSORS = {"admin", "accounts"}
@@ -93,6 +96,8 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/proposal/in-person-acceptance"):
         (ONBOARDING_ACTORS, {"json": {"proposal_id": 1, "delivered_on": "2026-09-01", "note": "x",
                                       "reference": "x"}}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/survey"): (SURVEY_READERS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results"): (SURVEY_READERS, {}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
         (ONBOARDING_ACTORS, {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52",
                                       "reason": "Confirmed on the call."}}),
@@ -182,6 +187,9 @@ ASSOCIATE = {
         ("write", upload_form(kind="document", document_type="noc")),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/files/{file_ref}"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/submit"): ("write", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey/results"): ("read", {}),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}"): ("write", PNG_FILE),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location"):
         ("write", {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52"}}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location/confirm"): ("write", {}),
@@ -268,7 +276,7 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "associate_id": owner, "level": "districts", "lgd_code": ALIPURDUAR, "seat_id": 999, "flag_id": 999,
               "onboarding_id": oid, "stage": "portal_agreement_approved", "entry_id": "A1", "file_ref": "none",
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
-              "payment_id": payment.json()["payment"]["payment_id"],
+              "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
               "equipment_id": equipment_id}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 

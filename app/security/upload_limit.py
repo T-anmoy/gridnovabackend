@@ -1,6 +1,6 @@
 """Reject an oversized upload while it is arriving, not after — site-assessment files,
-the associate registration forms (four documents each), onboarding files and
-execution evidence. Every upload route must be listed here, or its body is unbounded.
+the associate registration forms (four documents each), onboarding files,
+execution evidence, payment proofs and survey signatures. Every upload route must be listed here, or its body is unbounded.
 
 FastAPI parses a whole multipart body before the endpoint runs, so a size check in
 the endpoint only happens once every byte has been received and spooled. This
@@ -22,6 +22,7 @@ _EXECUTION_FILE_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/execution/files|dashboard/onboardings/\d+/execution/files)/?$")
 _PAYMENT_PROOF_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/payments/\d+/proof|dashboard/payments/\d+/proof)/?$")
+_SIGNATURE_PATH = re.compile(r"^/api/v1/associate/onboardings/\d+/survey/signatures/[^/]+/?$")
 _FILE_ROUTES = (
     (_ONBOARDING_FILE_PATH, "app.api.routes.associate_onboarding", "MAX_FILE_BYTES"),
     (_EXECUTION_FILE_PATH, "app.execution.files", "MAX_FILE_BYTES"),
@@ -59,6 +60,9 @@ def limit_for(path: str):
         return _limit() + MULTIPART_OVERHEAD_BYTES, too_large_detail()
     if _REGISTRATION_PATH.match(path):
         return _registration_limit() + MULTIPART_OVERHEAD_BYTES, _registration_too_large_detail()
+    if _SIGNATURE_PATH.match(path):
+        from app.survey.signatures import max_bytes   # read at call time: config decides
+        return max_bytes() + MULTIPART_OVERHEAD_BYTES, f"Signature exceeds the {max_bytes() // 1024} KB limit."
     for pattern, module, attr in _FILE_ROUTES:
         if pattern.match(path):
             import importlib
