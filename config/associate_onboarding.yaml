@@ -14,6 +14,20 @@ notice_versions:
   placeholder-v0:
     text: >-
       [PLACEHOLDER — the Customer Information Notice text is to be supplied by Grid Nova.]
+  # Grid Nova's drafted notice (content/policies/GridNova_Policies_Draft_v1.md, document 7),
+  # flattened for display with white-space: pre-line. Loaded, NOT current: point
+  # current_notice_version at it once Grid Nova approves the text.
+  draft-v1.1:
+    text: |-
+      Grid Nova Energy — how we use your information
+
+      Grid Nova Energy will use the details, documents and photographs collected today to assess your site, prepare your proposal, install your solar system, and — if you choose — apply for government subsidy and grid connection through the national portal and your DISCOM.
+
+      Your information is seen only by Grid Nova, the Associate helping you, and the government bodies involved in your application. We never sell it.
+
+      Please pay only to Grid Nova's bank account, never in cash and never to any individual.
+
+      You can ask Grid Nova to see, correct or delete your information at any time: info@gridnova.in · +91 98747 74440.
 
 # How long the first complete, staff-verified onboarding owns a customer (attribution
 # lock). A later conflicting onboarding raises an admin flag either way.
@@ -155,3 +169,10 @@ agreement:
     [PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]
   # Blank space left at the top of page 1 for the stamp paper's own printed header.
   stamp_paper_top_margin_mm: 100   # [PLACEHOLDER] — confirm against the paper Grid Nova uses
+
+# Whether a Preferred Associate viewing a customer in their territory (not one they
+# onboarded) may open that customer's uploaded documents (ID proof, bills, photos), the
+# agreement and the execution files. false = only the associate who onboarded the
+# customer, and Grid Nova staff, can open them. Territory viewers never see exact
+# coordinates or money either way.
+territory_viewers_see_documents: false   # [UNCONFIRMED]

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import csv
 import io
-import re
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -20,19 +19,11 @@ from sqlalchemy.orm import Session
 from app.memory.models import (
     Customer, Payment, PaymentLedgerEntry, PaymentReceipt, Project,
 )
+from app.security.csv_cells import safe_cell
 
 BOM = "﻿"
-_NUMBER = re.compile(r"^-?\d+(\.\d+)?$")
-_DANGEROUS = ("=", "+", "-", "@", "\t", "\r")
-
-
-def safe(value) -> str:
-    if value is None:
-        return ""
-    text = str(value)
-    if text.startswith(_DANGEROUS) and not _NUMBER.match(text):
-        return "'" + text
-    return text
+# The shared CSV-injection guard (app/security/csv_cells.py); `safe` is its name here.
+safe = safe_cell
 
 
 def _times(dt: Optional[datetime]) -> tuple[str, str]:

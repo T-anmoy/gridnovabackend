@@ -37,6 +37,8 @@ class TestPackagesEndpoint:
         assert not any(p["phase"] == "THREE" and p["kw"] < 3 for p in body["prices"])
         from app.pricing import policy
         monkeypatch.setitem(policy.load(), "public_price_display", "hidden")
+        from app.api.routes import pricing
+        pricing._packages_body.cache_clear()  # built once per process from the config (BE-1 S10)
         hidden = client.get("/api/v1/pricing/packages").json()
         assert "prices" not in hidden and hidden["price_display"] == "hidden"
 

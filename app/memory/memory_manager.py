@@ -4,8 +4,10 @@ Every mutating method writes an AuditLog entry as part of the same operation.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -19,6 +21,7 @@ from app.memory.models import (
     AgentGovernanceOverride,
     AuditLog,
     Channel,
+    ChatSession,
     ConversationMessage,
     Customer,
     CustomerMemory,
@@ -69,6 +72,39 @@ _STAGE_EVENT_TYPES = {
     PipelineStage.lost: TimelineEventType.lost,
     PipelineStage.negotiation: TimelineEventType.negotiation,
 }
+
+
+# Every proposal status move the system makes, and nothing else. A revision is a NEW
+# version (create_proposal_draft), so revision_requested and accepted are final for
+# the row; a customer acceptance (sent → accepted) goes through mark_customer_accepted.
+PROPOSAL_TRANSITIONS: dict = {
+    ProposalStatus.draft: {ProposalStatus.pending_pricing_validation, ProposalStatus.pending_approval,
+                           ProposalStatus.approved, ProposalStatus.revision_requested},
+    ProposalStatus.pending_pricing_validation: {ProposalStatus.pending_approval, ProposalStatus.approved,
+                                                ProposalStatus.revision_requested, ProposalStatus.draft},
+    ProposalStatus.pending_approval: {ProposalStatus.approved, ProposalStatus.revision_requested,
+                                      ProposalStatus.draft},
+    ProposalStatus.approved: {ProposalStatus.sent, ProposalStatus.revision_requested},
+    ProposalStatus.sent: {ProposalStatus.accepted, ProposalStatus.revision_requested},
+    ProposalStatus.revision_requested: set(),
+    ProposalStatus.accepted: set(),
+}
+
+
+class ProposalTransitionError(ValueError):
+    """A proposal status move outside PROPOSAL_TRANSITIONS."""
+    code = "invalid_transition"
+
+    def __init__(self, current: ProposalStatus, target: ProposalStatus):
+        super().__init__(f"A proposal in status '{ProposalStatus(current).value}' cannot move to "
+                         f"'{ProposalStatus(target).value}'.")
+        self.current, self.target = current, target
+
+
+def check_proposal_transition(current, target) -> None:
+    current, target = ProposalStatus(current), ProposalStatus(target)
+    if target not in PROPOSAL_TRANSITIONS[current]:
+        raise ProposalTransitionError(current, target)
 
 
 # Records the stale-lead job writes about itself; never counted as lead activity.
@@ -283,8 +319,10 @@ class MemoryManager:
         if match:
             return match, True
         customer = self.create_placeholder_customer(performed_by=performed_by)
+        # A staff-initiated path: merging stays allowed here (the dashboard's manual lead).
         filled = self.update_customer_details(
             customer_id=customer.id, name=name, email=None, phone=phone, performed_by=performed_by,
+            allow_merge=True,
         )
         return filled or customer, False
 
@@ -305,24 +343,32 @@ class MemoryManager:
         email: Optional[str],
         performed_by: str,
         phone: Optional[str] = None,
+        allow_merge: bool = False,
+        lead_id: Optional[int] = None,
     ) -> Optional[Customer]:
         """Fill in a (typically placeholder) customer's real name/email/phone in
         place, once the conversation reveals them — same customer_id, same
         lead, same history.
 
         If the newly-extracted email OR phone already belongs to a DIFFERENT
-        real customer (someone messaging again from a new session, or the
-        same person now identifiable by a phone that matches an earlier,
-        still-anonymous visit), that's not this same person's record to
-        overwrite — merge this customer's leads/history into the existing one
-        instead, logged distinctly. Returns the surviving Customer (the
-        existing one on a merge), so callers can adopt the effective
-        customer_id.
+        real customer, that's not this customer's record to overwrite. What
+        happens then depends on who is asking:
 
-        Phone only triggers a merge under the same safety rule
+          * allow_merge=True (staff-initiated paths only): merge this
+            customer's leads/history into the existing one, logged distinctly,
+            and return the existing customer so callers adopt its id.
+          * allow_merge=False (the default — and always the anonymous website
+            chat): nothing is merged and the conflicting email/phone is NOT
+            written to this customer. Anyone can type someone else's email into
+            a chat; merging on that would hand them the other customer's record.
+            The claim is recorded for staff instead ("possible returning
+            customer #id (unverified)", on the lead's timeline when `lead_id`
+            is given, and in the audit log), and this customer is returned.
+
+        Phone only counts as a match under the same safety rule
         _find_matching_customer always applies: at least one side must lack a
         real, distinct email. Two people who each already have a real,
-        different email are never merged just because a phone matches.
+        different email are never matched just because a phone matches.
         """
         customer = self._db.get(Customer, customer_id)
         if not customer:
@@ -349,7 +395,7 @@ class MemoryManager:
                 exclude_customer_id=customer_id,
             )
 
-        if existing:
+        if existing and allow_merge:
             self._merge_customers(source=customer, target=existing, performed_by=performed_by)
             # Late-arriving details can still enrich the surviving record if it lacked them.
             if name and not existing.name:
@@ -358,6 +404,12 @@ class MemoryManager:
                 existing.phone = phone
             self._db.flush()
             return existing
+
+        if existing:
+            matched_on = "email" if email_changed and _normalize_email(existing.email) == email else "phone"
+            self.record_possible_returning_customer(customer, existing, matched_on, performed_by, lead_id)
+            # Only the name is safe to take; the contact detail belongs to someone else.
+            email, phone = None, None
 
         before = {"name": customer.name, "email": customer.email, "phone": customer.phone}
         if name:
@@ -373,9 +425,26 @@ class MemoryManager:
         )
         return customer
 
+    def record_possible_returning_customer(self, customer: Customer, existing: Customer, matched_on: str,
+                                            performed_by: str, lead_id: Optional[int]) -> None:
+        """A contact detail given on this customer's conversation matches another
+        customer. Recorded for staff to check; nothing is merged or loaded."""
+        self._audit(
+            "customer", str(customer.id), "possible_returning_customer", performed_by,
+            after={"matched_customer_id": existing.id, "matched_on": matched_on, "verified": False},
+        )
+        if lead_id is not None:
+            self.add_timeline_event(
+                lead_id=lead_id,
+                event_type=TimelineEventType.possible_returning_customer,
+                description=f"Possible returning customer #{existing.id} (unverified — matched on {matched_on})",
+                created_by=performed_by,
+            )
+
     def _merge_customers(self, *, source: Customer, target: Customer, performed_by: str) -> None:
-        """Repoint the source customer's leads and messages onto the target customer.
-        Logged distinctly on both sides so the merge is visibly auditable."""
+        """Repoint the source customer's leads, messages and chat sessions onto the
+        target customer. Logged distinctly on both sides so the merge is visibly
+        auditable."""
         source_id, target_id = source.id, target.id
 
         leads = list(self._db.execute(select(Lead).where(Lead.customer_id == source_id)).scalars())
@@ -386,6 +455,8 @@ class MemoryManager:
         )
         for msg in messages:
             msg.customer_id = target_id
+        for chat_session in self._db.execute(select(ChatSession).where(ChatSession.customer_id == source_id)).scalars():
+            chat_session.customer_id = target_id
         self._db.flush()
 
         self._audit(
@@ -401,6 +472,43 @@ class MemoryManager:
                 "messages_moved": len(messages),
             },
         )
+
+    # ── Website chat sessions ──────────────────────────────────────────────────
+
+    @staticmethod
+    def hash_chat_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def create_chat_session(self, *, lead_id: int, customer_id: int, performed_by: str = "website") -> str:
+        """Bind a new chat conversation to a fresh secret. Returns the raw token —
+        the only time it exists outside the browser; just its SHA-256 is stored."""
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        chat_session = ChatSession(token_hash=self.hash_chat_token(token), lead_id=lead_id,
+                                   customer_id=customer_id, created_at=now, last_seen_at=now)
+        self._db.add(chat_session)
+        self._db.flush()
+        self._audit("chat_session", str(chat_session.id), "created", performed_by,
+                    after={"lead_id": lead_id, "customer_id": customer_id})
+        return token
+
+    def resume_chat_session(self, token: Optional[str], ttl_days: int) -> Optional[ChatSession]:
+        """The session a token names, if it exists and was used within `ttl_days`;
+        its last_seen_at is moved to now. None for a missing, unknown or expired
+        token (the caller then starts a new conversation)."""
+        if not token or len(token) > 256:
+            return None
+        chat_session = self._db.execute(
+            select(ChatSession).where(ChatSession.token_hash == self.hash_chat_token(token))
+        ).scalar_one_or_none()
+        if chat_session is None:
+            return None
+        now = datetime.now(timezone.utc)
+        if _as_utc(chat_session.last_seen_at) < now - timedelta(days=ttl_days):
+            return None
+        chat_session.last_seen_at = now
+        self._db.flush()
+        return chat_session
 
     # ── Project ────────────────────────────────────────────────────────────────
 
@@ -657,8 +765,9 @@ class MemoryManager:
         scope=None,
     ) -> list[Lead]:
         """`scope` is an app.auth.scoping.LeadScope — the caller's visibility rule,
-        applied in the query."""
-        q = select(Lead).options(joinedload(Lead.project))
+        applied in the query. Projects and customers are loaded with the leads (the
+        CSV export reads every lead's customer)."""
+        q = select(Lead).options(joinedload(Lead.project), joinedload(Lead.customer))
         if scope is not None:
             q = q.where(scope.condition())
         if assigned_employee_id:
@@ -667,6 +776,41 @@ class MemoryManager:
             q = q.where(Lead.source == source)
         q = q.order_by(Lead.created_at.desc(), Lead.id.desc())
         return list(self._db.execute(q).scalars().all())
+
+    def paginate_leads(
+        self,
+        *,
+        source: Optional[LeadSource] = None,
+        scope=None,
+        q: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> tuple[list[Lead], int]:
+        """One page of leads, newest first, and the total — every filter (the caller's
+        scope, source, and `q`: customer name / email / phone, or a lead id) in SQL."""
+        query = select(Lead).join(Customer, Customer.id == Lead.customer_id)
+        if scope is not None:
+            query = query.where(scope.condition())
+        if source is not None:
+            query = query.where(Lead.source == source)
+        text = (q or "").strip()
+        if text:
+            like = f"%{text.lower()}%"
+            conditions = [func.lower(Customer.name).like(like), func.lower(Customer.email).like(like),
+                          func.lower(func.coalesce(Customer.phone, "")).like(like)]
+            digits = re.sub(r"\D", "", text)
+            if digits:
+                conditions.append(func.coalesce(Customer.phone, "").like(f"%{digits}%"))
+            if text.isdigit():
+                conditions.append(Lead.id == int(text))
+            query = query.where(or_(*conditions))
+        total = self._db.execute(select(func.count()).select_from(query.subquery())).scalar_one()
+        rows = self._db.execute(
+            query.options(joinedload(Lead.project))
+            .order_by(Lead.created_at.desc(), Lead.id.desc())
+            .offset((page - 1) * page_size).limit(page_size)
+        ).scalars().all()
+        return list(rows), int(total)
 
     # ── Stale-lead follow-up ─────────────────────────────────────────────────────
 
@@ -802,7 +946,14 @@ class MemoryManager:
         issue_details: Optional[dict] = None,
     ) -> Proposal:
         proposal = self._db.get(Proposal, proposal_id)
+        check_proposal_transition(proposal.status, new_status)
         before = {"status": proposal.status}
+        if ProposalStatus(proposal.status) == ProposalStatus.sent and proposal.accept_token:
+            # The link the customer holds stops working the moment the proposal is no
+            # longer on offer (sent back for revision).
+            proposal.accept_token = None
+            self._audit("proposal", str(proposal_id), "accept_token_revoked", performed_by,
+                        after={"reason": f"status changed to {ProposalStatus(new_status).value}"})
         proposal.status = new_status
         if new_status == ProposalStatus.approved and proposal.approved_at is None:
             proposal.approved_at = datetime.now(timezone.utc)
@@ -898,6 +1049,7 @@ class MemoryManager:
         or in person (recorded by the associate / employee who took it — `via` and
         `details` say so). Audited as 'customer_accepted'."""
         proposal = self._db.get(Proposal, proposal_id)
+        check_proposal_transition(proposal.status, ProposalStatus.accepted)
         when = when or datetime.now(timezone.utc)
         before = {"status": proposal.status, "accepted_at": proposal.accepted_at.isoformat() if proposal.accepted_at else None}
         proposal.accepted_at = when
@@ -1608,6 +1760,16 @@ class MemoryManager:
             .limit(limit)
         )
         return list(self._db.execute(stmt).scalars())
+
+    def customer_visible_to_sales(self, customer_id: int, employee_id: str) -> bool:
+        """The Sales lead rule applied to a customer: at least one of their leads is
+        assigned to this employee or to nobody. A customer with no lead is not."""
+        return self._db.execute(
+            select(Lead.id).where(
+                Lead.customer_id == customer_id,
+                or_(Lead.assigned_employee_id.is_(None), Lead.assigned_employee_id == employee_id),
+            ).limit(1)
+        ).first() is not None
 
     def get_customer_dossier(self, customer_id: int) -> dict:
         """Everything known about one customer, assembled for recall.

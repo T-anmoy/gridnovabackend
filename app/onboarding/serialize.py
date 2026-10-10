@@ -74,8 +74,11 @@ def onboarding(db: Session, o: CustomerOnboarding, *, viewer_is_owner: Optional[
         "project_reference_id": db.get(Project, o.project_id).reference_id,
         "owner": {"associate_id": owner.associate_id, "full_name": owner.full_name,
                   "associate_type": owner.associate_type.value},
-        "customer": {"name": customer.name, "mobile": o.customer_mobile,
-                     "email": None if is_placeholder_email(customer.email) else customer.email},
+        # A territory viewer (viewer_is_owner False) gets masked contact details.
+        "customer": {"name": customer.name,
+                     "mobile": o.customer_mobile if viewer_is_owner is not False else service.mask_mobile(o.customer_mobile),
+                     "email": None if is_placeholder_email(customer.email) else (
+                         customer.email if viewer_is_owner is not False else service.mask_email(customer.email))},
         "territory": _territory(db, o),
         "site_latitude": o.site_latitude if full_location else None,
         "site_longitude": o.site_longitude if full_location else None,

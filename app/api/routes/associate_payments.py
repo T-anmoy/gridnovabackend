@@ -114,14 +114,14 @@ def record_payment(onboarding_id: int, body: PaymentIn, db: Session = Depends(ge
     return {"payment": payments.payment_json(db, payment, staff=False), **overview(db, onboarding)}
 
 
-async def store_proof(db: Session, payment: Payment, file: UploadFile, actor: str) -> Payment:
+def store_proof(db: Session, payment: Payment, file: UploadFile, actor: str) -> Payment:
     import uuid
 
     from app.storage import r2
 
     try:
-        document = await uploads.read_document(file, "proof", allowed=uploads.DOCUMENT_TYPES,
-                                               max_bytes=MAX_PROOF_BYTES)
+        document = uploads.read_document_sync(file, "proof", allowed=uploads.DOCUMENT_TYPES,
+                                              max_bytes=MAX_PROOF_BYTES)
     except uploads.UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
     key = f"payments/{payment.project_id}/{payment.id}/{uuid.uuid4().hex}_{document.filename}"
@@ -140,12 +140,12 @@ async def store_proof(db: Session, payment: Payment, file: UploadFile, actor: st
 
 
 @router.post("/onboardings/{onboarding_id}/payments/{payment_id}/proof")
-async def upload_proof(onboarding_id: int, payment_id: int, file: UploadFile = File(...),
-                       db: Session = Depends(get_db), current: AuthenticatedAssociate = Depends(get_current_associate)):
+def upload_proof(onboarding_id: int, payment_id: int, file: UploadFile = File(...),
+                 db: Session = Depends(get_db), current: AuthenticatedAssociate = Depends(get_current_associate)):
     """A screenshot or scan (JPEG/PNG/WEBP/PDF, ≤ 10 MB) proving the payment."""
     associate, onboarding = _owner(db, current, onboarding_id)
     payment = _payment(db, onboarding, payment_id)
-    await store_proof(db, payment, file, onboarding_service.actor(associate))
+    store_proof(db, payment, file, onboarding_service.actor(associate))
     return payments.payment_json(db, payment, staff=False)
 
 

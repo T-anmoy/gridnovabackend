@@ -1,4 +1,5 @@
-"""Startup guard for ENVIRONMENT=production (app/config.py check_production_config)."""
+"""Startup guard for ENVIRONMENT=production and staging (app/config.py check_production_config),
+and the ENVIRONMENT value check itself (BE-1 A7)."""
 import logging
 
 import pytest
@@ -53,6 +54,7 @@ class TestErrors:
         ({"fernet_encryption_key": ""}, "FERNET_ENCRYPTION_KEY"),
         ({"allowed_origins": ["https://www.gridnova.in", "http://localhost:3000"]}, "ALLOWED_ORIGINS"),
         ({"allowed_origins": ["http://127.0.0.1:3000"]}, "ALLOWED_ORIGINS"),
+        ({"llm_api_key": ""}, "LLM_API_KEY"),
     ])
     def test_each_required_setting_fails_naming_the_variable(self, overrides, variable):
         with pytest.raises(RuntimeError, match=variable):
@@ -68,7 +70,6 @@ class TestWarnings:
     @pytest.mark.parametrize("overrides, variable", [
         ({"storage_bucket": ""}, "STORAGE_BUCKET"),
         ({"storage_secret_key": ""}, "STORAGE_SECRET_KEY"),
-        ({"llm_api_key": ""}, "LLM_API_KEY"),
         ({"google_oauth_client_id": ""}, "GOOGLE_OAUTH_CLIENT_ID"),
         ({"frontend_base_url": "http://localhost:3000"}, "FRONTEND_BASE_URL"),
         ({"public_api_base_url": ""}, "PUBLIC_API_BASE_URL"),
@@ -102,12 +103,66 @@ class TestWarnings:
 
 
 class TestNonProduction:
-    @pytest.mark.parametrize("environment", ["development", "test", "staging"])
-    def test_nothing_is_checked_outside_production(self, environment):
+    @pytest.mark.parametrize("environment", ["development", "test"])
+    def test_nothing_is_checked_in_development_or_test(self, environment):
         s = _settings(environment=environment, database_url="sqlite://", clerk_jwt_issuer="",
-                      fernet_encryption_key="", allowed_origins=["http://localhost:3000"])
+                      fernet_encryption_key="", allowed_origins=["http://localhost:3000"], llm_api_key="")
         assert production_config_problems(s) == ([], [])
         check_production_config(s)
+
+
+class TestStaging:
+    """Staging runs the production guard (BE-1 A7)."""
+
+    def test_staging_refuses_the_same_missing_settings(self):
+        with pytest.raises(RuntimeError, match="ENVIRONMENT=staging.*DATABASE_URL"):
+            check_production_config(_settings(environment="staging", database_url="sqlite://"))
+
+    def test_staging_without_an_llm_key_only_warns(self, real_associate_texts, caplog):
+        errors, warnings = production_config_problems(_settings(environment="staging", llm_api_key=""))
+        assert errors == []
+        assert any("LLM_API_KEY" in w for w in warnings)
+
+    def test_production_without_an_llm_key_refuses(self, real_associate_texts):
+        errors, _ = production_config_problems(_settings(llm_api_key=""))
+        assert any("LLM_API_KEY" in e for e in errors)
+
+    def test_staging_boot_runs_the_guard(self, monkeypatch):
+        monkeypatch.setattr(settings, "environment", "staging")
+        monkeypatch.setattr(settings, "database_url", "sqlite:///./gridnova_dev.db")
+        with pytest.raises(RuntimeError, match="ENVIRONMENT=staging"):
+            with TestClient(fastapi_app):
+                pass
+
+
+class TestEnvironmentValue:
+    @pytest.mark.parametrize("value", ["development", "test", "staging", "production"])
+    def test_the_four_known_values_are_accepted(self, value):
+        assert Settings(_env_file=None, environment=value).environment == value
+
+    @pytest.mark.parametrize("value", ["prod", "Production", "PRODUCTION", "dev", "Staging", "production ", ""])
+    def test_any_other_value_stops_the_boot(self, value):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError, match="ENVIRONMENT must be exactly one of"):
+            Settings(_env_file=None, environment=value)
+
+    def test_boot_fails_on_an_unknown_value(self, monkeypatch):
+        """A process started with ENVIRONMENT=prod never gets as far as serving."""
+        import subprocess
+        import sys
+        env = {"ENVIRONMENT": "prod", "PATH": "/usr/bin:/bin", "DATABASE_URL": "sqlite:///:memory:"}
+        result = subprocess.run([sys.executable, "-c", "import app.config"], env=env, capture_output=True,
+                                text=True, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+        assert result.returncode != 0
+        assert "ENVIRONMENT must be exactly one of" in result.stderr
+
+    @pytest.mark.parametrize("value, production_like, dev_auth", [
+        ("development", False, True), ("test", False, True), ("staging", True, False), ("production", True, False)])
+    def test_flags(self, value, production_like, dev_auth):
+        s = Settings(_env_file=None, environment=value)
+        assert s.is_production_like is production_like
+        assert s.allows_dev_auth is dev_auth
+        assert s.is_production is (value == "production")
 
 
 class TestStartup:

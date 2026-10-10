@@ -46,10 +46,10 @@ def get_survey_results(onboarding_id: int, db: Session = Depends(get_db),
     return results.compute(db, onboarding)
 
 
-async def read_signature(file: UploadFile) -> bytes:
+def read_signature(file: UploadFile) -> bytes:
     limit = signatures.max_bytes()
     try:
-        document = await uploads.read_document(file, "signature", allowed=(signatures.PNG,), max_bytes=limit)
+        document = uploads.read_document_sync(file, "signature", allowed=(signatures.PNG,), max_bytes=limit)
     except uploads.UploadRejected as exc:
         if exc.status_code == 413:
             raise HTTPException(status_code=413, detail={"code": "file_too_large", "max_kb": limit // 1024,
@@ -60,11 +60,11 @@ async def read_signature(file: UploadFile) -> bytes:
 
 
 @router.post("/{onboarding_id}/survey/signatures/{party}", status_code=201)
-async def sign_survey(onboarding_id: int, party: Literal["customer", "associate"], file: UploadFile = File(...),
-                      declaration_name: Optional[str] = Form(default=None, max_length=200),
-                      customer_confirms_data: Optional[bool] = Form(default=None),
-                      db: Session = Depends(get_db),
-                      current: AuthenticatedAssociate = Depends(get_current_associate)):
+def sign_survey(onboarding_id: int, party: Literal["customer", "associate"], file: UploadFile = File(...),
+                declaration_name: Optional[str] = Form(default=None, max_length=200),
+                customer_confirms_data: Optional[bool] = Form(default=None),
+                db: Session = Depends(get_db),
+                current: AuthenticatedAssociate = Depends(get_current_associate)):
     """One on-screen signature (multipart: `file`, a PNG). The customer's also needs
     `declaration_name` (the name the customer typed) and `customer_confirms_data=true`.
     Owner only; draft or submitted (a submitted customer returns to draft)."""
@@ -81,7 +81,7 @@ async def sign_survey(onboarding_id: int, party: Literal["customer", "associate"
             raise HTTPException(status_code=422, detail={"code": "confirmation_required",
                                                          "field": "customer_confirms_data",
                                                          "message": "The customer must confirm the survey data."})
-    content = await read_signature(file)
+    content = read_signature(file)
     from app.storage import r2
     try:
         signatures.record(db, onboarding, party, content=content, performed_by=service.actor(associate),

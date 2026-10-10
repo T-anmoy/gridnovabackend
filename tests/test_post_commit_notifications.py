@@ -13,6 +13,7 @@ from app.notifications.notifier import LogNotifier
 from app.scheduling import booking, google_calendar
 from app.security.encryption import encrypt, generate_key
 from tests.conftest import admin_headers, backdate_lead
+from tests.payments_support import kyc_ready, onboarding_ready, territories  # noqa: F401 — fixtures
 
 
 class _Capture(LogNotifier):
@@ -50,6 +51,50 @@ class TestQueue:
         notify_after_commit(db_session, lambda: sent.append(1), "t")
         db_session.rollback()
         db_session.commit()
+        assert sent == [] and pending_count(db_session) == 0
+
+    def test_a_savepoint_release_does_not_send(self, db_session, memory):
+        """BE-1 C5: after_commit also fires when a begin_nested() block exits. Payments
+        and the serial register use savepoints; a notification queued before one must
+        still wait for the outer commit — and vanish if the outer transaction rolls back."""
+        sent = []
+        memory.get_or_create_customer(email="sp@example.com", name="S")
+        notify_after_commit(db_session, lambda: sent.append(1), "t")
+        with db_session.begin_nested():
+            memory.get_or_create_customer(email="sp2@example.com", name="S2")
+        assert sent == [] and pending_count(db_session) == 1
+        db_session.rollback()
+        assert sent == [] and pending_count(db_session) == 0
+
+    def test_the_outer_commit_after_a_savepoint_sends_once(self, db_session, memory):
+        sent = []
+        notify_after_commit(db_session, lambda: sent.append(1), "t")
+        with db_session.begin_nested():
+            memory.get_or_create_customer(email="sp3@example.com", name="S3")
+        with db_session.begin_nested():
+            memory.get_or_create_customer(email="sp4@example.com", name="S4")
+        assert sent == []
+        db_session.commit()
+        assert sent == [1]
+
+    def test_a_real_savepoint_user_does_not_flush_the_queue(self, db_session, onboarding_ready, client):
+        """With production code: payments.ensure_schedule releases a savepoint. A
+        notification queued earlier in the same transaction must survive it unsent and
+        be discarded by the rollback. (Today's routes queue after their savepoints, so
+        this guards the mechanism rather than a known live path.)"""
+        from app.memory.models import CustomerOnboarding, PaymentMilestone
+        from app.payments import service as payments
+        from tests.payments_support import accepted_customer
+        from sqlalchemy import delete
+        _, oid = accepted_customer(client, db_session)
+        onboarding = db_session.get(CustomerOnboarding, oid)
+        db_session.execute(delete(PaymentMilestone).where(PaymentMilestone.project_id == onboarding.project_id))
+        db_session.commit()
+        sent = []
+        notify_after_commit(db_session, lambda: sent.append(1), "t")
+        assert payments.ensure_schedule(db_session, onboarding, "emp-acc-1")   # its own begin_nested()
+        assert sent == []
+        db_session.rollback()
         assert sent == [] and pending_count(db_session) == 0
 
     def test_close_without_commit_discards(self, _isolated_db):
@@ -104,7 +149,8 @@ class TestRoutes:
         self._calendar(memory, db_session, monkeypatch)
         monkeypatch.setattr(google_calendar, "insert_event",
                             lambda **k: {"google_event_id": "ev", "meet_link": "https://meet.google.com/a"})
-        slot = datetime.now(timezone.utc) + timedelta(days=1)
+        from tests.booking_support import grid_slot
+        slot = grid_slot()
         r = client.post("/api/v1/public/booking", json={"name": "B", "email": "b@example.com",
                                                         "scheduled_at": slot.isoformat()})
         assert r.status_code == 200
@@ -117,7 +163,8 @@ class TestRoutes:
         def _taken(**kwargs):
             raise booking.SlotUnavailableError("gone")
         monkeypatch.setattr(booking, "book_meeting", _taken)
-        slot = datetime.now(timezone.utc) + timedelta(days=1)
+        from tests.booking_support import grid_slot
+        slot = grid_slot()
         r = client.post("/api/v1/public/booking", json={"name": "B", "email": "rb@example.com",
                                                         "scheduled_at": slot.isoformat()})
         assert r.status_code == 409

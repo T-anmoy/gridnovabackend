@@ -79,6 +79,8 @@ class TestAutomaticStages:
         onboarding = db_session.get(CustomerOnboarding, o["onboarding_id"])
         proposal = memory.create_proposal_draft(lead_id=o["lead_id"], content={}, total_value=100000.0,
                                                 requires_manager_signoff=False, performed_by="emp-sales-1")
+        memory.transition_proposal_status(proposal.id, ProposalStatus.approved, performed_by="emp-sales-1",
+                                          approved_by_employee_id="emp-sales-1")
         memory.transition_proposal_status(proposal.id, ProposalStatus.sent, performed_by="emp-sales-1")
         memory.mark_customer_accepted(proposal.id)
         db_session.commit()
@@ -105,10 +107,14 @@ class TestAutomaticStages:
         assert len(rows) == 1 and rows[0].evidence["version"] == 1
 
     def test_non_associate_leads_are_untouched(self, db_session, memory):
+        from tests.conftest import seed_employees
+        seed_employees(db_session, "emp-sales-1")  # the approver (a real FK on PostgreSQL)
         customer = memory.get_or_create_customer("chat@x.test", "Chat")
         lead = memory.create_lead(customer.id)
         proposal = memory.create_proposal_draft(lead_id=lead.id, content={}, total_value=1.0,
                                                 requires_manager_signoff=False, performed_by="system")
+        memory.transition_proposal_status(proposal.id, ProposalStatus.approved, performed_by="system",
+                                          approved_by_employee_id="emp-sales-1")
         memory.transition_proposal_status(proposal.id, ProposalStatus.sent, performed_by="system")
         memory.mark_customer_accepted(proposal.id)
         db_session.commit()
@@ -143,6 +149,8 @@ class TestManualStages:
         _assess(client, o)
         proposal = memory.create_proposal_draft(lead_id=o["lead_id"], content={}, total_value=1.0,
                                                 requires_manager_signoff=False, performed_by="emp-sales-1")
+        memory.transition_proposal_status(proposal.id, ProposalStatus.approved, performed_by="emp-sales-1",
+                                          approved_by_employee_id="emp-sales-1")
         memory.transition_proposal_status(proposal.id, ProposalStatus.sent, performed_by="emp-sales-1")
         db_session.commit()
         return o

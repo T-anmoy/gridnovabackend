@@ -18,10 +18,11 @@ def _now() -> datetime:
 
 
 class UTCDateTime(TypeDecorator):
-    """DateTime(timezone=True) that survives SQLite's dialect dropping tzinfo.
+    """DateTime(timezone=True) that always comes back as UTC.
 
-    Postgres stores and returns real timezone-aware timestamps, so this is a no-op
-    there. SQLite has no native timestamp type — it stores the value as a plain
+    Postgres stores real timezone-aware timestamps but returns them in the session's
+    TimeZone, so they are normalised to UTC on the way out. SQLite has no native
+    timestamp type — it stores the value as a plain
     string and hands back a naive datetime on every read, silently discarding the
     UTC marker every write in this codebase already attaches (_now() and every
     other timestamp in this module always uses datetime.now(timezone.utc)). Left
@@ -33,10 +34,24 @@ class UTCDateTime(TypeDecorator):
     impl = DateTime(timezone=True)
     cache_ok = True
 
+    def process_bind_param(self, value, dialect):
+        # Always written as UTC: an aware value is converted (SQLite would otherwise
+        # store its local wall-clock time and drop the offset), a naive one is taken
+        # to be UTC already, as everywhere in this codebase.
+        if value is None:
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     def process_result_value(self, value, dialect):
-        if value is not None and value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value
+        # Always read back as UTC: SQLite returns naive values; PostgreSQL returns them
+        # in the session's TimeZone (e.g. +05:30 on an Asia/Kolkata server).
+        if value is None:
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
@@ -116,6 +131,9 @@ class TimelineEventType(str, enum.Enum):
     survey_reviewed = "survey_reviewed"
     survey_correction_requested = "survey_correction_requested"
     survey_corrected = "survey_corrected"
+    # A chat visitor gave contact details that belong to another customer. Never
+    # merged from the anonymous chat; staff decide (BE-1 S2).
+    possible_returning_customer = "possible_returning_customer"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -714,6 +732,36 @@ class ConversationMessage(Base):
 
     lead: Mapped[Optional["Lead"]] = relationship(back_populates="messages")
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="messages")
+
+
+class ChatSession(Base):
+    """One website chat conversation, bound to a secret the browser holds.
+
+    The browser keeps the raw token (returned once, as `session_token`); only its
+    SHA-256 is stored. A request resumes the lead and customer of the session its token
+    names — never ids the browser sends — so guessing another conversation's lead id
+    achieves nothing."""
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class OAuthStateNonce(Base):
+    """One Google Calendar consent flow in progress (BE-1 S7). The OAuth `state`
+    carries a random nonce; only its SHA-256 is stored, and a callback succeeds once
+    per nonce — a replayed or forged state names no unused row."""
+    __tablename__ = "oauth_state_nonces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    employee_id: Mapped[str] = mapped_column(String, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
 
 
 class AuditLog(Base):
@@ -1836,6 +1884,10 @@ class PaymentReceipt(Base):
     held_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     emailed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    # Set when the payment is dishonoured after verification: the receipt is void —
+    # never resent, never served on the public link, VOID on any re-render (BE-1 C3).
+    voided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    void_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class SurveyCorrectionRequest(Base):

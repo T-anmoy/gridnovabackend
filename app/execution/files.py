@@ -17,10 +17,10 @@ from app.memory.models import CustomerOnboarding, ProjectExecution
 MAX_FILE_BYTES = 10 * 1024 * 1024
 
 
-async def store(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution, upload, *, kind: str,
-                name: Optional[str], uploaded_by: str, latitude: Optional[float] = None,
-                longitude: Optional[float] = None, captured_at: Optional[str] = None,
-                capture_method: Optional[str] = None, exif_taken_at_client: Optional[str] = None) -> dict:
+def store(db: Session, onboarding: CustomerOnboarding, execution: ProjectExecution, upload, *, kind: str,
+          name: Optional[str], uploaded_by: str, latitude: Optional[float] = None,
+          longitude: Optional[float] = None, captured_at: Optional[str] = None,
+          capture_method: Optional[str] = None, exif_taken_at_client: Optional[str] = None) -> dict:
     """Raises AssociateError (422/503) or uploads.UploadRejected (413/422)."""
     from app.storage import r2
 
@@ -39,7 +39,7 @@ async def store(db: Session, onboarding: CustomerOnboarding, execution: ProjectE
         allowed = uploads.DOCUMENT_TYPES
     else:
         raise AssociateError("kind must be photo or document.", code="invalid_kind", status_code=422, field="kind")
-    document = await uploads.read_document(upload, name, allowed=allowed, max_bytes=MAX_FILE_BYTES)
+    document = uploads.read_document_sync(upload, name, allowed=allowed, max_bytes=MAX_FILE_BYTES)
     extra: dict = {}
     if kind == "photo":
         extra = photos.provenance(content=document.content, capture_method=capture_method, latitude=latitude,

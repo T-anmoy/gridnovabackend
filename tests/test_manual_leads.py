@@ -177,7 +177,7 @@ class TestProjectVisibility:
 
     def test_list_rows_carry_the_reference_id(self, client):
         data = client.post(LEADS, json=_body(), headers=admin_headers()).json()
-        rows = {row["id"]: row for row in client.get(LEADS, headers=admin_headers()).json()}
+        rows = {row["id"]: row for row in client.get(LEADS, headers=admin_headers()).json()["items"]}
         assert rows[data["lead_id"]]["project_reference_id"] == data["project_reference_id"]
         assert "assigned_employee_id" in rows[data["lead_id"]]
 

@@ -152,9 +152,14 @@ class TestProgressSummary:
 class TestAssociateEmails:
     def test_proposal_approved(self, client, db_session, onboarding_ready, notifications):
         from app.memory.memory_manager import MemoryManager
+        # A few unrelated customers first, so the customer id and the onboarding id differ.
+        for n in range(3):
+            MemoryManager(db_session).get_or_create_customer(email=f"other{n}@example.test", name="Other")
+        db_session.commit()
         gna = make_associate(db_session)
         oid = new_customer(client, gna)
         onboarding = db_session.get(CustomerOnboarding, oid)
+        assert onboarding.id != onboarding.customer_id
         proposal = Proposal(lead_id=onboarding.lead_id, version=1, status=ProposalStatus.draft, content={})
         db_session.add(proposal)
         db_session.commit()
@@ -164,7 +169,8 @@ class TestAssociateEmails:
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_proposal_ready" and mail["to"].startswith("assoc")
         assert mail["subject"] == "Proposal ready for Customer " + mail["subject"].split("Customer ")[1]
-        assert mail["link_url"].endswith(f"/associates/portal/customers/{onboarding.customer_id}")
+        # BE-1 A1: the portal page is keyed by the onboarding id, not the customer id.
+        assert mail["link_url"].endswith(f"/associates/portal/customers/{onboarding.id}")
 
     def test_preferred_associate_link_uses_preferred_portal(self, client, db_session, onboarding_ready,
                                                             notifications):
@@ -179,7 +185,7 @@ class TestAssociateEmails:
                                                            approved_by_employee_id="emp-admin-1")
         db_session.commit()
         [mail] = notifications.of("associate_email")
-        assert mail["link_url"].endswith(f"/preferred/portal/customers/{onboarding.customer_id}")
+        assert mail["link_url"].endswith(f"/preferred/portal/customers/{onboarding.id}")
 
     def test_stage_rejected(self, client, db_session, onboarding_ready, notifications):
         gna, oid = associate_in_execution(client, db_session)
@@ -189,7 +195,7 @@ class TestAssociateEmails:
         client.post(f"{DASH}/execution/submissions/{sid}/reject", json={"note": "Wrong reference."}, headers=OPS)
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_stage_rejected" and "Wrong reference." in " ".join(mail["lines"])
-        assert "/associates/portal/customers/" in mail["link_url"]
+        assert mail["link_url"].endswith(f"/associates/portal/customers/{oid}")
 
     def test_payment_verified_link_only_when_not_held(self, client, db_session, onboarding_ready, stub_pdf,
                                                       notifications):

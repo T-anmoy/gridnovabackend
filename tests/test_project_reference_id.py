@@ -133,7 +133,8 @@ class TestCreateProjectWiring:
     def test_chat_created_leads_get_a_referenced_project(self, client, memory):
         r = client.post("/api/v1/chat/message", json={"message": "hi, thinking about solar"})
         assert r.status_code == 200
-        lead = memory.get_lead(r.json()["lead_id"])
+        from tests.chat_support import lead_of
+        lead = lead_of(memory._db, r.json()["session_token"])
         project = memory._db.get(Project, lead.project_id)
         assert project.reference_id.startswith("GNE-")
 

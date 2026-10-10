@@ -15,6 +15,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.routes.dashboard import _require_admin_or_internal_key
@@ -185,21 +186,24 @@ def execution_file_link(onboarding_id: int, file_ref: str, db: Session = Depends
         url, expires_at = r2.signed_get_url(item["storage_key"], filename=item["filename"])
     except r2.StorageNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    from app.onboarding.service import audit_document_link
+    audit_document_link(db, onboarding, employee.employee_id, "execution_file", file_ref, item["filename"])
+    db.commit()
     return {"url": url, "expires_at": expires_at.isoformat(), "filename": item["filename"], "file_ref": file_ref}
 
 
 @router.post("/onboardings/{onboarding_id}/execution/files", status_code=201)
-async def upload_execution_file(onboarding_id: int, file: UploadFile = File(...),
-                                kind: Literal["document", "photo"] = Form(...),
-                                document_type: Optional[str] = Form(default=None),
-                                photo_slot: Optional[str] = Form(default=None),
-                                latitude: Optional[float] = Form(default=None, ge=-90, le=90),
-                                longitude: Optional[float] = Form(default=None, ge=-180, le=180),
-                                captured_at: Optional[str] = Form(default=None, max_length=40),
-                                capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
-                                exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
-                                db: Session = Depends(get_db),
-                                employee: AuthenticatedEmployee = Depends(get_current_employee)):
+def upload_execution_file(onboarding_id: int, file: UploadFile = File(...),
+                          kind: Literal["document", "photo"] = Form(...),
+                          document_type: Optional[str] = Form(default=None),
+                          photo_slot: Optional[str] = Form(default=None),
+                          latitude: Optional[float] = Form(default=None, ge=-90, le=90),
+                          longitude: Optional[float] = Form(default=None, ge=-180, le=180),
+                          captured_at: Optional[str] = Form(default=None, max_length=40),
+                          capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
+                          exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
+                          db: Session = Depends(get_db),
+                          employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Grid Nova's own team uploads execution evidence (grid_nova mode only)."""
     if not employee.can_record_execution():
         raise HTTPException(status_code=403, detail="Your role cannot record execution.")
@@ -214,7 +218,7 @@ async def upload_execution_file(onboarding_id: int, file: UploadFile = File(...)
     if onboarding.status == OnboardingStatus.closed:
         raise HTTPException(status_code=409, detail={"code": "not_editable", "message": "This customer record is closed."})
     try:
-        await execution_files.store(db, onboarding, record, file, kind=kind,
+        execution_files.store(db, onboarding, record, file, kind=kind,
                                     name=photo_slot if kind == "photo" else document_type,
                                     uploaded_by=employee.employee_id, latitude=latitude, longitude=longitude,
                                     captured_at=captured_at, capture_method=capture_method,
@@ -234,39 +238,55 @@ class ReviewRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=2000)
 
 
-def _submission(db: Session, employee: AuthenticatedEmployee, submission_id: int) -> StageSubmission:
+def _submission(db: Session, employee: AuthenticatedEmployee, submission_id: int, *,
+                lock: bool = False) -> StageSubmission:
     if not employee.can_verify_execution():
         raise HTTPException(status_code=403, detail="Only Operations or Admin can check a stage submission.")
     sub = db.get(StageSubmission, submission_id)
     if sub is None:
         raise HTTPException(status_code=404, detail="Submission not found")
     _load(db, employee, sub.onboarding_id)
+    if lock:
+        # Verify/reject decide on the row's status: lock it and re-read, so a second
+        # reviewer acting at the same moment sees the first decision.
+        sub = db.execute(select(StageSubmission).where(StageSubmission.id == submission_id).with_for_update()
+                         .execution_options(populate_existing=True)).scalar_one()
     return sub
+
+
+def _review_conflict(db: Session) -> HTTPException:
+    db.rollback()
+    return HTTPException(status_code=409, detail={"code": "submission_not_pending",
+                                                 "message": "This submission was just checked by someone else."})
 
 
 @router.post("/execution/submissions/{submission_id}/verify")
 def verify_submission(submission_id: int, body: ReviewRequest, db: Session = Depends(get_db),
                       employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    sub = _submission(db, employee, submission_id)
+    sub = _submission(db, employee, submission_id, lock=True)
     try:
         execution.verify(db, sub, employee.employee_id, body.note)
+        db.commit()
     except AssociateError as exc:
         db.rollback()
         raise _error(exc)
-    db.commit()
+    except IntegrityError:  # the stage was recorded by a simultaneous review
+        raise _review_conflict(db)
     return _detail(db, db.get(CustomerOnboarding, sub.onboarding_id), employee)
 
 
 @router.post("/execution/submissions/{submission_id}/reject")
 def reject_submission(submission_id: int, body: ReviewRequest, db: Session = Depends(get_db),
                       employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    sub = _submission(db, employee, submission_id)
+    sub = _submission(db, employee, submission_id, lock=True)
     try:
         execution.reject(db, sub, employee.employee_id, body.note or "")
+        db.commit()
     except AssociateError as exc:
         db.rollback()
         raise _error(exc)
-    db.commit()
+    except IntegrityError:
+        raise _review_conflict(db)
     return _detail(db, db.get(CustomerOnboarding, sub.onboarding_id), employee)
 
 

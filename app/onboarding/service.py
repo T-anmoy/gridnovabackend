@@ -54,6 +54,29 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def audit_document_link(db: Session, onboarding: CustomerOnboarding, performed_by: str, kind: str,
+                        ref: Optional[str] = None, filename: Optional[str] = None) -> None:
+    """Every signed link to a customer's document is recorded — who, which, when.
+    Caller commits."""
+    from app.memory.models import AuditLog
+    db.add(AuditLog(entity_type="onboarding_document", entity_id=str(onboarding.id), action="link_issued",
+                    performed_by=performed_by, after_value={"kind": kind, "ref": ref, "filename": filename}))
+
+
+def mask_mobile(mobile: Optional[str]) -> Optional[str]:
+    if not mobile:
+        return mobile
+    digits = re.sub(r"\D", "", mobile)
+    return "******" + digits[-4:] if len(digits) >= 4 else "******"
+
+
+def mask_email(email: Optional[str]) -> Optional[str]:
+    if not email or "@" not in email:
+        return email
+    local, domain = email.split("@", 1)
+    return f"{local[:1]}***@{domain}"
+
+
 def actor(associate: Associate) -> str:
     return f"associate:{associate.associate_id}"
 

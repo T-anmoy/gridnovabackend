@@ -58,13 +58,14 @@ WARRANTY_TERM = "unverified_warranty_term"
 MODEL_NUMBER = "equipment_model_number"
 DCR_CLAIM = "unverified_dcr_claim"
 SUBSIDY_CLAIM = "subsidy_eligibility_claim"
+PERSONAL_DATA = "unverified_personal_data"
 
 # Blocking codes replace the reply. The rest are recorded and let through: a reply
 # that stacks two questions is a quality problem, not a commercial risk, and
 # silently swapping it for a fallback would make the conversation worse.
 _BLOCKING = {NEW_MONEY, UNOFFERED_TIME, FALSE_CLAIM, INTERNAL_LEAK, EMPTY_REPLY,
              UNAPPROVED_EQUIPMENT, WARRANTY_TERM, SUBSIDY_CLAIM, MODEL_NUMBER, DCR_CLAIM,
-             nemo_guard.INTERNAL_DISCLOSURE}
+             PERSONAL_DATA, nemo_guard.INTERNAL_DISCLOSURE}
 
 
 @dataclass
@@ -518,6 +519,49 @@ def _memory_payload(line: str) -> str:
 
 
 
+# ── Personal data ──────────────────────────────────────────────────────────────
+#
+# A reply may repeat an email address, phone number or PIN code only if the customer
+# typed it in this conversation (or it is Grid Nova's own published contact detail,
+# from COMPANY_FACTS). Anything else came from somewhere the customer has no claim to —
+# another customer's record, a memory, the model's imagination — and is withheld.
+# Street addresses have no reliable shape to match; the PIN code is the part of an
+# address this check can see.
+
+_RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_RE_PHONE = re.compile(r"(?<![\w])\+?\d[\d\s().-]{7,}\d(?![\w])")
+_RE_PIN = re.compile(r"(?<![\d,.])\d{6}(?![\d,.])")
+
+
+def _phone_key(text: str) -> Optional[str]:
+    digits = re.sub(r"\D", "", text)
+    return digits[-10:] if len(digits) >= 10 else None
+
+
+def _contact_details(text: str) -> tuple[set, set, set]:
+    text = text or ""
+    emails = {m.group(0).lower().rstrip(".") for m in _RE_EMAIL.finditer(text)}
+    phones = {k for k in (_phone_key(m.group(0)) for m in _RE_PHONE.finditer(text)) if k}
+    pins = {m.group(0) for m in _RE_PIN.finditer(text)}
+    return emails, phones, pins
+
+
+def check_personal_data(reply: str, customer_text: str = "", facts_text: str = "") -> Optional[dict]:
+    emails, phones, pins = _contact_details(reply)
+    known_emails, known_phones, known_pins = _contact_details(f"{customer_text}\n{facts_text}")
+    found = []
+    if emails - known_emails:
+        found.append("email")
+    if phones - known_phones:
+        found.append("phone")
+    if pins - known_pins:
+        found.append("pin_code")
+    if found:
+        return {"code": PERSONAL_DATA,
+                "detail": f"reply contained contact details the customer did not give: {', '.join(found)}"}
+    return None
+
+
 # ── Shape ──────────────────────────────────────────────────────────────────────
 
 def check_shape(reply: str) -> list:
@@ -611,6 +655,7 @@ def enforce(
         lambda: check_model_numbers(reply, makes),
         lambda: check_dcr_claims(reply),
         lambda: check_subsidy(reply),
+        lambda: check_personal_data(reply, customer_text or user_message, COMPANY_FACTS),
     ):
         found = check()
         if found:

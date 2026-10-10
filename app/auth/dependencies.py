@@ -1,17 +1,21 @@
 """
 Clerk JWT verification.
 
-Production: verifies the JWT signature against Clerk's JWKS endpoint.
-Development: accepts an X-Employee-Id / X-Employee-Role header pair for
-             local testing — HARD-BLOCKED when ENVIRONMENT=production.
+Staging/production: verifies the JWT signature against Clerk's JWKS endpoint.
+Development/test:   also accepts an X-Employee-Id / X-Employee-Role header pair
+                    (or X-Associate-Id) for local testing — refused whenever
+                    ENVIRONMENT is anything other than exactly development or test.
+
+The dependencies are plain functions, not coroutines: they commit to the database and
+may fetch Clerk's JWKS over HTTPS, so FastAPI runs them in its threadpool instead of on
+the event loop.
 """
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
+import threading
 from typing import Optional
 
-import httpx
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -70,25 +74,46 @@ def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name:
     db.commit()
 
 
-@lru_cache(maxsize=1)
-def _fetch_jwks() -> dict:
-    if not settings.clerk_jwt_issuer:
-        return {}
-    jwks_url = f"{settings.clerk_jwt_issuer.rstrip('/')}/.well-known/jwks.json"
-    response = httpx.get(jwks_url, timeout=10)
-    response.raise_for_status()
-    return response.json()
+# One JWKS client per process (per issuer), so its key-set cache actually serves
+# requests: building a PyJWKClient per call meant an HTTPS fetch on every request.
+JWKS_CACHE_LIFESPAN_SECONDS = 300
+JWKS_FETCH_TIMEOUT_SECONDS = 5
+_jwks_lock = threading.Lock()
+_jwks_client = None
+_jwks_client_uri: Optional[str] = None
+
+
+class MissingSessionClaimsError(Exception):
+    """A verified token without public_metadata — Clerk's session token is not
+    configured to carry it, so no role or principal can be read."""
+
+
+def _jwks_uri() -> str:
+    return f"{settings.clerk_jwt_issuer.rstrip('/')}/.well-known/jwks.json"
+
+
+def get_jwks_client():
+    """The process-wide PyJWKClient for the configured issuer (rebuilt only if the
+    issuer setting changes)."""
+    global _jwks_client, _jwks_client_uri
+    from jwt import PyJWKClient
+
+    uri = _jwks_uri()
+    with _jwks_lock:
+        if _jwks_client is None or _jwks_client_uri != uri:
+            _jwks_client = PyJWKClient(uri, cache_jwk_set=True, lifespan=JWKS_CACHE_LIFESPAN_SECONDS,
+                                       timeout=JWKS_FETCH_TIMEOUT_SECONDS)
+            _jwks_client_uri = uri
+        return _jwks_client
 
 
 def _verify_clerk_jwt(token: str) -> dict:
-    """Verify signature and return decoded claims. Raises on failure."""
+    """Verify signature, expiry, issuer and — when present — the authorized party
+    (`azp`, set by Clerk to the browser origin) against ALLOWED_ORIGINS. Returns the
+    claims; raises on any failure."""
     import jwt
-    from jwt import PyJWKClient
 
-    jwks_uri = f"{settings.clerk_jwt_issuer.rstrip('/')}/.well-known/jwks.json"
-    jwks_client = PyJWKClient(jwks_uri)
-    signing_key = jwks_client.get_signing_key_from_jwt(token)
-
+    signing_key = get_jwks_client().get_signing_key_from_jwt(token)
     payload = jwt.decode(
         token,
         signing_key.key,
@@ -96,7 +121,32 @@ def _verify_clerk_jwt(token: str) -> dict:
         options={"verify_exp": True},
         issuer=settings.clerk_jwt_issuer,
     )
+    azp = payload.get("azp")
+    if azp is not None and azp.rstrip("/") not in {o.rstrip("/") for o in settings.allowed_origins}:
+        raise jwt.InvalidTokenError("azp is not an allowed origin")
     return payload
+
+
+def _session_metadata(payload: dict) -> dict:
+    metadata = payload.get("public_metadata")
+    if not isinstance(metadata, dict):
+        raise MissingSessionClaimsError()
+    return metadata
+
+
+def _missing_claims() -> HTTPException:
+    logger.warning(
+        "A verified Clerk token carries no public_metadata. Configure the Clerk session token "
+        "to include public_metadata (Clerk dashboard → Sessions → Customize session token)."
+    )
+    return HTTPException(status_code=403, detail={
+        "code": "session_token_missing_claims",
+        "message": "Your sign-in token does not carry your Grid Nova role. Ask an administrator to check "
+                   "the Clerk session token settings.",
+    })
+
+
+_DEV_HEADERS_REFUSED = "Dev auth headers are only accepted in development and test."
 
 
 class AuthenticatedEmployee:
@@ -253,7 +303,7 @@ class AuthenticatedEmployee:
         return self.role in (EmployeeRole.admin, EmployeeRole.operations)
 
 
-async def get_current_employee(
+def get_current_employee(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -262,11 +312,8 @@ async def get_current_employee(
     dev_id = request.headers.get("X-Employee-Id")
     dev_role = request.headers.get("X-Employee-Role")
     if dev_id and dev_role:
-        if settings.is_production:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Dev auth headers are not permitted in production.",
-            )
+        if not settings.allows_dev_auth:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_DEV_HEADERS_REFUSED)
         try:
             role = EmployeeRole(dev_role)
         except ValueError:
@@ -296,7 +343,10 @@ async def get_current_employee(
         )
 
     employee_id = payload.get("sub", "")
-    metadata = payload.get("public_metadata") or {}
+    try:
+        metadata = _session_metadata(payload)
+    except MissingSessionClaimsError:
+        raise _missing_claims()
     # A staff token has no `principal` claim (or "staff"). Anything else — above all
     # an associate's token — is refused BEFORE an Employee row could be provisioned:
     # associates are a separate kind of user and must never become employees.
@@ -366,7 +416,7 @@ def _resolve_associate(db: Session, associate_id: str, clerk_user_id: Optional[s
     )
 
 
-async def get_current_associate(
+def get_current_associate(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -378,11 +428,8 @@ async def get_current_associate(
     # ── Dev-only header bypass (mirrors X-Employee-Id) ─────────────────────────
     dev_associate = request.headers.get("X-Associate-Id")
     if dev_associate:
-        if settings.is_production:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Dev auth headers are not permitted in production.",
-            )
+        if not settings.allows_dev_auth:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_DEV_HEADERS_REFUSED)
         return _resolve_associate(db, dev_associate, clerk_user_id=None)
 
     if not credentials:
@@ -401,7 +448,10 @@ async def get_current_associate(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    metadata = payload.get("public_metadata") or {}
+    try:
+        metadata = _session_metadata(payload)
+    except MissingSessionClaimsError:
+        raise _missing_claims()
     if metadata.get("principal") != ASSOCIATE_PRINCIPAL:
         raise HTTPException(status_code=403, detail=_ASSOCIATE_ONLY)
     associate_id = metadata.get("associate_id")

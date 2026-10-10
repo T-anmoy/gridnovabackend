@@ -22,12 +22,10 @@ from sqlalchemy.orm import Session
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import PipelineStage, TimelineEventType
+from app.proposals import acceptance
 from app.security.client_ip import client_ip
 
 router = APIRouter()
-
-# Proposals are valid for 30 days from send (matches the PDF's stated validity).
-PROPOSAL_VALIDITY_DAYS = 30
 
 # Per-IP rate limiting for these public endpoints.
 _ACCEPT_RATE_LIMIT = 30
@@ -47,14 +45,22 @@ def _check_rate_limit(request: Request, log: Optional[defaultdict] = None) -> No
 
 
 def _validity(proposal) -> tuple[Optional[str], bool]:
-    """Return (valid_until_iso, is_expired)."""
-    if not proposal.date_sent:
-        return None, False
-    valid_until = proposal.date_sent + timedelta(days=PROPOSAL_VALIDITY_DAYS)
-    expired = datetime.now(timezone.utc) > (
-        valid_until if valid_until.tzinfo else valid_until.replace(tzinfo=timezone.utc)
-    )
-    return valid_until.isoformat(), expired
+    """Return (valid_until_iso, is_expired) — the period is config/sales_policy.yaml
+    proposal_validity_days (app/proposals/acceptance.py)."""
+    until = acceptance.valid_until(proposal)
+    return (until.isoformat() if until else None), acceptance.is_expired(proposal)
+
+
+def _refuse(code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": code, "message": message})
+
+
+def _on_offer(db: Session, proposal) -> None:
+    """409 unless the proposal is the one on offer (sent and not superseded) or the
+    customer's accepted one."""
+    refused = acceptance.refusal(db, proposal)
+    if refused:
+        raise _refuse(*refused)
 
 
 def _summary(proposal) -> dict:
@@ -86,6 +92,7 @@ def view_proposal(token: str, request: Request, db: Session = Depends(get_db)):
     # 404 for any unknown token — never leak whether a token almost-matched.
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found.")
+    _on_offer(db, proposal)
     return _summary(proposal)
 
 
@@ -96,15 +103,18 @@ def accept_proposal(token: str, request: Request, db: Session = Depends(get_db))
     proposal = memory.get_proposal_by_accept_token(token)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found.")
+    # Lock the lead and the proposal, then decide on what is true under the lock: a
+    # simultaneous second accept waits here and then sees accepted_at set.
+    proposal = acceptance.lock(db, proposal.id)
 
     # Idempotent: accepting again is a no-op success, no double-processing.
     if proposal.accepted_at is not None:
         return {"status": "accepted", "proposal_id": proposal.id,
                 "accepted_at": proposal.accepted_at.isoformat(), "already_accepted": True}
 
-    _, expired = _validity(proposal)
-    if expired:
-        raise HTTPException(status_code=409, detail="This proposal has expired and can no longer be accepted.")
+    _on_offer(db, proposal)
+    if acceptance.is_expired(proposal):
+        raise _refuse(acceptance.EXPIRED, "This proposal has expired and can no longer be accepted.")
 
     memory.mark_customer_accepted(proposal.id)
     memory.add_timeline_event(
@@ -147,6 +157,7 @@ def download_proposal_pdf(token: str, request: Request, db: Session = Depends(ge
     proposal = memory.get_proposal_by_accept_token(token)
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found.")
+    _on_offer(db, proposal)
     if not proposal.pdf_url and not proposal.pdf_storage_key:
         raise HTTPException(status_code=409, detail="The proposal PDF is still being prepared.")
 

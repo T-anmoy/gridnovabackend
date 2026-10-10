@@ -53,14 +53,15 @@ def _verified(client, db_session, reference="UTR-0001", **customer):
 
 
 class TestIssue:
-    def test_numbered_rendered_and_held_while_dummy(self, client, db_session, onboarding_ready, stub_pdf,
-                                                    notifications):
+    def test_numbered_and_held_unrendered_while_dummy(self, client, db_session, onboarding_ready, stub_pdf,
+                                                      notifications):
         _, _, first = _verified(client, db_session, customer_email="asha@example.test")
         _verified(client, db_session, reference="UTR-0002", customer_email="ravi@example.test")
         rows = db_session.execute(select(PaymentReceipt).order_by(PaymentReceipt.id)).scalars().all()
         year = rows[0].receipt_number.split("-")[1]
         assert [r.receipt_number for r in rows] == [f"GNR-{year}-000001", f"GNR-{year}-000002"]
-        assert all(r.pdf_key and r.email_status == ReceiptEmailStatus.held for r in rows)
+        # BE-1 C3: decided before rendering — no placeholder-content PDF is ever stored.
+        assert all(r.pdf_key is None and r.email_status == ReceiptEmailStatus.held for r in rows)
         assert rows[0].held_reason == "placeholder_content"
         assert not notifications.of("receipt_customer_email")          # never a DUMMY receipt to a customer
         assert [b["reason"] for b in notifications.of("receipt_blocked")] == ["held", "held"]
@@ -104,17 +105,22 @@ class TestIssue:
                                         monkeypatch):
         _verified(client, db_session, customer_email="asha@example.test")
         url = "/api/v1/dashboard/payment-receipts/release-held"
-        assert client.post(url, headers=ACCOUNTS).json() == {"released": 0, "still_held": 1,
+        assert client.post(url, headers=ACCOUNTS).json() == {"released": 0, "failed": 0, "still_held": 1,
                                                               "reason": "placeholder_content"}
         from app.execution import config
         receipt_cfg = config.payments()["receipt"]
         monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "19ABCDE1234F1Z5",
                                                      "bank_name": "SBI", "account_number": "1", "ifsc": "SBIN0000001"})
         monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a GST tax invoice."})
-        assert client.post(url, headers=ADMIN).json() == {"released": 1, "still_held": 0, "reason": None}
+        assert client.post(url, headers=ADMIN).json() == {"released": 1, "failed": 0, "still_held": 0,
+                                                          "reason": None}
         assert len(notifications.of("receipt_customer_email")) == 1
+        receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
+        db_session.refresh(receipt)
+        assert receipt.pdf_key  # rendered on release, with the real content
 
-    def test_render_failure_is_visible(self, client, db_session, onboarding_ready, notifications, monkeypatch):
+    def test_render_failure_is_visible(self, client, db_session, onboarding_ready, notifications, monkeypatch,
+                                       real_receipt_text):
         from app.associates import documents
 
         def boom(html):
@@ -147,7 +153,7 @@ class TestResendAndPublic:
         assert db_session.execute(select(AuditLog).where(AuditLog.action == "resend")).scalar_one()
         assert client.post(f"{PAY}/{pid}/receipt/resend", headers=headers("GNA-X")).status_code == 401
 
-    def test_public_token_route(self, client, db_session, onboarding_ready, stub_pdf):
+    def test_public_token_route(self, client, db_session, onboarding_ready, stub_pdf, real_receipt_text):
         _verified(client, db_session)
         receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
         r = client.get(f"/api/v1/public/receipts/{receipt.public_token}/pdf", follow_redirects=False)
@@ -181,3 +187,71 @@ def test_numbering_under_concurrency(_isolated_db):
     [t.start() for t in threads]
     [t.join(timeout=30) for t in threads]
     assert sorted(numbers) == [f"GNR-2026-{i:06d}" for i in range(1, 9)]
+
+
+class TestHeldVoidAndRelease:
+    """BE-1 C3."""
+
+    def test_a_held_receipt_is_404_on_the_public_link(self, client, db_session, onboarding_ready, stub_pdf):
+        _verified(client, db_session)                                 # shipped DUMMY text → held
+        receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
+        receipt.pdf_key = "receipts/legacy-dummy.pdf"                 # as an older build left it
+        db_session.commit()
+        assert client.get(f"/api/v1/public/receipts/{receipt.public_token}/pdf").status_code == 404
+
+    def test_dishonour_voids_the_receipt(self, client, db_session, onboarding_ready, stub_pdf, real_receipt_text,
+                                         notifications):
+        _, _, pid = _verified(client, db_session, customer_email="asha@example.test")
+        r = client.post(f"{PAY}/{pid}/dishonour", json={"reason": "cheque bounced"}, headers=ACCOUNTS)
+        assert r.status_code == 200, r.text
+        receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
+        db_session.refresh(receipt)
+        assert receipt.voided_at is not None and receipt.void_reason == "cheque bounced"
+        assert db_session.execute(select(AuditLog).where(AuditLog.action == "voided")).scalar_one()
+        assert client.get(f"/api/v1/public/receipts/{receipt.public_token}/pdf").status_code == 404
+        receipt.emailed_at = receipt.emailed_at.replace(year=2020)
+        db_session.commit()
+        r = client.post(f"{PAY}/{pid}/receipt/resend", headers=ACCOUNTS)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "receipt_voided"
+        body = client.get(f"{PAY}/{pid}", headers=ACCOUNTS).json()["receipt"]
+        assert body["voided"] is True and body["url"] is None and body["voided_at"]
+        assert "VOID" in receipts.receipt_html(db_session, receipt)
+
+    def test_one_failed_delivery_does_not_strand_the_rest(self, client, db_session, onboarding_ready, stub_pdf,
+                                                          notifications, monkeypatch):
+        _verified(client, db_session, customer_email="a@example.test")
+        _verified(client, db_session, reference="UTR-0002", customer_email="b@example.test")
+        from app.execution import config
+        receipt_cfg = config.payments()["receipt"]
+        monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "19ABCDE1234F1Z5",
+                                                     "bank_name": "SBI", "account_number": "1", "ifsc": "SBIN0000001"})
+        monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a GST tax invoice."})
+        real_deliver, calls = receipts.deliver, []
+
+        def flaky(db, receipt):
+            calls.append(receipt.id)
+            if len(calls) == 1:
+                raise RuntimeError("mail provider down")
+            return real_deliver(db, receipt)
+
+        monkeypatch.setattr(receipts, "deliver", flaky)
+        body = client.post("/api/v1/dashboard/payment-receipts/release-held", headers=ADMIN).json()
+        assert body == {"released": 2, "failed": 1, "still_held": 0, "reason": None}
+        db_session.expire_all()
+        statuses = sorted(r.email_status.value for r in db_session.execute(select(PaymentReceipt)).scalars())
+        assert statuses == ["failed", "sent"]
+        failed = next(r for r in db_session.execute(select(PaymentReceipt)).scalars()
+                      if r.email_status == ReceiptEmailStatus.failed)
+        assert failed.email_skipped_reason == "release_failed: RuntimeError"
+
+    def test_a_stale_pending_receipt_needs_attention(self, client, db_session, onboarding_ready, stub_pdf,
+                                                     real_receipt_text):
+        from datetime import datetime, timedelta, timezone
+        _verified(client, db_session, customer_email="asha@example.test")
+        receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
+        receipt.email_status = ReceiptEmailStatus.pending
+        receipt.created_at = datetime.now(timezone.utc) - timedelta(minutes=61)
+        db_session.commit()
+        assert receipts.attention(receipt) == ["receipt_pending_stale"]
+        receipt.created_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        assert receipts.attention(receipt) == []

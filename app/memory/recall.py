@@ -131,6 +131,7 @@ def resolve_customer(
     memory: "MemoryManager",
     question: str,
     customer_id: Optional[int] = None,
+    visible=None,
 ) -> tuple:
     """Work out which customer a question is about.
 
@@ -138,6 +139,10 @@ def resolve_customer(
     name, email or company. Returns (customer, candidates) — when candidates holds
     more than one, the caller must ask which one rather than guessing, because
     answering about the wrong customer is worse than not answering.
+
+    `visible(customer) -> bool`, when given, drops every match the asker may not see
+    BEFORE anything is returned — so an ambiguous name never lists, and never
+    resolves to, another rep's customer.
     """
     if customer_id is not None:
         customer = memory.get_customer_dossier(customer_id).get("customer")
@@ -148,6 +153,14 @@ def resolve_customer(
     fragments = _identity_fragments(question)
     for fragment in fragments:
         matches = memory.find_customers(fragment)
+        if visible is not None:
+            seen = [m for m in matches if visible(m)]
+            if matches and not seen:
+                # The name matched only customers the asker may not see. Stop here —
+                # falling through to a vaguer fragment ("Priya" after "Priya Sharma")
+                # would answer about somebody else. Same reply as no match at all.
+                return None, []
+            matches = seen
         if len(matches) == 1:
             return matches[0], matches
         if len(matches) > 1:

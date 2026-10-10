@@ -22,6 +22,8 @@ alembic/versions/__pycache__/
 
 # Additional safety entries
 .env.*
+# …but the documented example is meant to be committed.
+!.env.example
 *.sqlite
 .venv_qa/
 *.egg-info/

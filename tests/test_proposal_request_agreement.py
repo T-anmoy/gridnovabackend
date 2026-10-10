@@ -252,6 +252,27 @@ class TestSeparateApprover:
         assert r.status_code == 403 and "different employee" in r.json()["detail"]
         assert client.post(f"{DASH}/proposals/{pid}/approve", headers=ADMIN).status_code == 200
 
+    @pytest.mark.parametrize("all_leads, expected", [(False, 200), (True, 403)])
+    def test_website_lead_self_approval_follows_the_setting(self, client, db_session, memory, onboarding_ready,
+                                                            monkeypatch, all_leads, expected):
+        """BE-1 C9: require_different_approver_for_all_leads (config/sales_policy.yaml)."""
+        from app.rules import sales_policy
+        monkeypatch.setattr(sales_policy, "require_different_approver_for_all_leads", lambda: all_leads)
+        customer = memory.get_or_create_customer(f"self{int(all_leads)}@example.test", "Self Approver")
+        lead = memory.create_lead(customer.id)
+        from app.memory.lead_fields import apply_lead_fields
+        apply_lead_fields(memory, lead, {"name": "Self", "email": f"self{int(all_leads)}@example.test",
+                                         "project_type": "residential", "location": "Kolkata", "capacity_kw": 3},
+                          performed_by="emp-sales-1", via="test")
+        db_session.commit()
+        pid = client.post(f"{DASH}/proposals/draft", json={"lead_id": lead.id, "customer_id": customer.id},
+                          headers=SALES).json()["proposal_id"]
+        r = client.post(f"{DASH}/proposals/{pid}/approve", headers=SALES)
+        assert r.status_code == expected, r.text
+        if expected == 403:
+            assert r.json()["detail"] == "You drafted this proposal. A different employee must approve it."
+            assert client.post(f"{DASH}/proposals/{pid}/approve", headers=ADMIN).status_code == 200
+
     def test_non_associate_proposals_are_unchanged(self, client, db_session, memory, onboarding_ready):
         customer = memory.get_or_create_customer("walkin@example.test", "Walk In")
         lead = memory.create_lead(customer.id)
@@ -319,6 +340,23 @@ class TestAcceptance:
         stages = _stages(r.json()["progress"])
         assert stages["proposal_issued"]["evidence"]["via"] == "emailed with the online accept link"
         assert stages["accepted"]["evidence"]["via"] == "in person"
+
+    def test_in_person_twice_and_after_another_acceptance(self, client, db_session, memory,
+                                                           sendable_proposal_content, onboarding_ready):
+        """BE-1 S5: the second in-person acceptance is refused, and once one proposal
+        on the customer is accepted no later version can be accepted in person."""
+        gna, o, pid = _approved(client, db_session)
+        assert _in_person(client, headers(gna), o["onboarding_id"], pid).status_code == 200
+        r = _in_person(client, headers(gna), o["onboarding_id"], pid)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "already_accepted"
+        v1 = db_session.get(Proposal, pid)
+        v2 = memory.create_proposal_draft(lead_id=o["lead_id"], content=v1.content, total_value=v1.total_value,
+                                          requires_manager_signoff=False, performed_by="emp-sales-1")
+        memory.transition_proposal_status(v2.id, ProposalStatus.approved, performed_by="emp-admin-1",
+                                          approved_by_employee_id="emp-admin-1")
+        db_session.commit()
+        r = _in_person(client, headers(gna), o["onboarding_id"], v2.id)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "proposal_superseded"
 
     def test_guards(self, client, db_session, sendable_proposal_content, onboarding_ready):
         gna, o, pid = _prepared(client, db_session)

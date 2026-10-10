@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 def _target(db: Session, onboarding: CustomerOnboarding) -> Optional[tuple[str, str, str]]:
-    """(email, customer name, customer page URL in the associate's portal)."""
+    """(email, customer name, customer page URL in the associate's portal). The
+    portal's customer page is keyed by the ONBOARDING id
+    (app/(site)/[lang]/associates/portal/customers/[id] reads it as onboardingId)."""
     from app.config import settings
     if not settings.notify_associates:
         return None
@@ -34,7 +36,7 @@ def _target(db: Session, onboarding: CustomerOnboarding) -> Optional[tuple[str, 
     customer = db.get(Customer, onboarding.customer_id)
     section = "preferred" if associate.associate_type == AssociateType.preferred_associate else "associates"
     base = (settings.frontend_base_url or "").rstrip("/")
-    url = f"{base}/{section}/portal/customers/{onboarding.customer_id}"
+    url = f"{base}/{section}/portal/customers/{onboarding.id}"
     return associate.email.strip(), (customer.name if customer and customer.name else "your customer"), url
 
 

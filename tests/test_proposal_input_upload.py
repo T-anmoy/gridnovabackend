@@ -37,6 +37,9 @@ def _new_inputs(client, memory, db_session, email="upload-test@example.com"):
 
 
 _FAKE_PDF_BYTES = b"%PDF-1.4 fake but real bytes for a real upload test"
+# Real magic bytes: the endpoint types a file by its content, not the claimed Content-Type.
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
 
 class TestSuccessfulUpload:
@@ -66,7 +69,7 @@ class TestSuccessfulUpload:
 
         r = client.post(
             f"/api/v1/proposal-inputs/{inputs_id}/upload",
-            files={"file": ("earthing.jpg", b"fake jpeg bytes", "image/jpeg")},
+            files={"file": ("earthing.jpg", _JPEG, "image/jpeg")},
             data={"target": "installation_photo", "photo_slot": "earthing_location"},
             headers=sales_headers(),
         )
@@ -81,13 +84,13 @@ class TestSuccessfulUpload:
 
         client.post(
             f"/api/v1/proposal-inputs/{inputs_id}/upload",
-            files={"file": ("a.jpg", b"aaa", "image/jpeg")},
+            files={"file": ("a.jpg", _JPEG, "image/jpeg")},
             data={"target": "installation_photo", "photo_slot": "wiring_path"},
             headers=sales_headers(),
         )
         r2_ = client.post(
             f"/api/v1/proposal-inputs/{inputs_id}/upload",
-            files={"file": ("b.jpg", b"bbb", "image/jpeg")},
+            files={"file": ("b.jpg", _JPEG, "image/jpeg")},
             data={"target": "installation_photo", "photo_slot": "earthing_location"},
             headers=sales_headers(),
         )
@@ -100,7 +103,7 @@ class TestSuccessfulUpload:
 
         r = client.post(
             f"/api/v1/proposal-inputs/{inputs_id}/upload",
-            files={"file": ("sig.png", b"fake png bytes", "image/png")},
+            files={"file": ("sig.png", _PNG, "image/png")},
             data={"target": "staff_signature"},
             headers=sales_headers(),
         )
@@ -122,6 +125,45 @@ class TestRejections:
         )
         assert r.status_code == 422
 
+    def test_content_is_sniffed_not_the_claimed_type(self, client, memory, db_session, monkeypatch):
+        """BE-1 S10: an executable labelled image/jpeg is refused by its bytes."""
+        monkeypatch.setattr(r2_module, "upload_bytes", lambda key, body, ct: f"https://r2.example/{key}")
+        inputs_id = _new_inputs(client, memory, db_session, "sniff@example.com")
+        r = client.post(
+            f"/api/v1/proposal-inputs/{inputs_id}/upload",
+            files={"file": ("photo.jpg", b"MZ\x90\x00 not an image", "image/jpeg")},
+            data={"target": "installation_photo", "photo_slot": "earthing_location"},
+            headers=sales_headers(),
+        )
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "invalid_file"
+
+    def test_stored_type_and_filename_come_from_the_server(self, client, memory, db_session, monkeypatch):
+        stored = []
+        monkeypatch.setattr(r2_module, "upload_bytes", lambda key, body, ct: stored.append((key, ct)) or key)
+        inputs_id = _new_inputs(client, memory, db_session, "sanitise@example.com")
+        r = client.post(
+            f"/api/v1/proposal-inputs/{inputs_id}/upload",
+            files={"file": ("../../etc/<bill>.pdf", _FAKE_PDF_BYTES, "image/png")},
+            data={"target": "document", "document_type": "electricity_bill"},
+            headers=sales_headers(),
+        )
+        assert r.status_code == 200, r.text
+        key, content_type = stored[0]
+        assert content_type == "application/pdf"
+        assert "/../" not in key and "<" not in key and key.endswith("_bill_.pdf")
+
+    def test_unknown_document_type_rejected(self, client, memory, db_session):
+        inputs_id = _new_inputs(client, memory, db_session, "doctype@example.com")
+        r = client.post(
+            f"/api/v1/proposal-inputs/{inputs_id}/upload",
+            files={"file": ("f.pdf", _FAKE_PDF_BYTES, "application/pdf")},
+            data={"target": "document", "document_type": "anything_at_all"},
+            headers=sales_headers(),
+        )
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "unknown_document_type"
+
     def test_oversized_file_rejected(self, client, memory, db_session, monkeypatch):
         from app.api.routes import proposal_inputs as route_module
 
@@ -134,7 +176,7 @@ class TestRejections:
             headers=sales_headers(),
         )
         assert r.status_code == 413
-        assert "10" in r.json()["detail"] or "MB" in r.json()["detail"]
+        assert "MB" in r.json()["detail"]["message"]
 
     def test_empty_file_rejected(self, client, memory, db_session):
         inputs_id = _new_inputs(client, memory, db_session, "empty@example.com")

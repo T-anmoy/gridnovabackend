@@ -1,0 +1,38 @@
+# Build context for the Dockerfile's `COPY . .` — only what the image needs at runtime
+# or deploy goes in (tests/test_dockerignore.py guards the important lines):
+#   app/                 the application
+#   alembic/             migrations; GET /api/v1/health/ready reads its head revision
+#   config/              Grid Nova's YAML config, validated at boot
+#   data/                territory master and PIN directory (seeded / read at runtime)
+#   scripts/             bootstrap_db.py runs on every deploy (and the seed scripts)
+#   requirements*.txt    the image's pip install
+
+# Secrets and local databases — never in an image.
+.env
+.env.*
+*.db
+*.db-*
+*.db.bak*
+*.sqlite
+
+# Virtualenvs, tooling and caches.
+.venv*
+venv/
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.claude/
+*.log
+.DS_Store
+
+# Not needed in the image.
+.git
+.github/
+.gitignore
+.dockerignore
+Dockerfile
+tests/
+docs/
+README.md

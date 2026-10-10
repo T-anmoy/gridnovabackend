@@ -16,6 +16,38 @@ kyc_consent_versions:
       [PLACEHOLDER — the KYC consent notice text is to be supplied by Grid Nova.
       While this placeholder is the current version, a production deployment
       refuses registrations rather than collect KYC data under it.]
+  # Grid Nova's drafted notice (content/policies/GridNova_Policies_Draft_v1.md, document 6),
+  # flattened for display with white-space: pre-line. Loaded, NOT current: point
+  # current_kyc_consent_version at it once Grid Nova approves the text.
+  draft-v1.1:
+    text: |-
+      Why we are asking for this information
+
+      Grid Nova needs to confirm who you are, keep the Associate Network safe for customers, and pay your commission correctly and lawfully.
+
+      What we will collect
+
+      • Name, date of birth, photograph, address, mobile number and email.
+      • Aadhaar: we check the number you enter is valid, then store only its last four digits. Please upload a masked Aadhaar (showing only the last four digits), which you can download from UIDAI.
+      • PAN, and a copy of your PAN card, for identity and tax deduction.
+      • Bank account details and a cancelled cheque, for paying your commission.
+      • For Preferred Associate applications: business details, GSTIN (if any), experience and references.
+
+      How we will use it
+
+      To verify your identity, including by a phone call; to decide your application; to issue your Associate ID and ID card; to calculate, pay and report commission and tax; to prevent fraud; and to meet legal obligations.
+
+      Who will see it
+
+      Only authorised Grid Nova staff, and our service providers who store it securely for us. Your name, photo, ID, level and active status are shown on your ID card and its verification page.
+
+      How long we keep it
+
+      While you are an Associate, and afterwards only as long as tax and legal rules require.
+
+      Your choices
+
+      You can ask to see, correct or erase your data, or withdraw this consent, by writing to info@gridnova.in. Withdrawing consent ends your association, because we cannot run it without this information.
 
 # The body of the welcome letter PDF issued on approval. The letter's header
 # (name, Associate ID, date, programme, territory) is generated; only this

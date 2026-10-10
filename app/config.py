@@ -2,8 +2,14 @@ import json
 import logging
 from typing import List
 from urllib.parse import urlparse
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The only accepted ENVIRONMENT values, exactly as written (case matters: "Production"
+# or "prod" stops the boot instead of quietly running with development behaviour).
+ENVIRONMENTS = ("development", "test", "staging", "production")
+# Where the X-Employee-* / X-Associate-Id header bypass is accepted. Nowhere else.
+DEV_AUTH_ENVIRONMENTS = ("development", "test")
 
 
 class Settings(BaseSettings):
@@ -136,9 +142,33 @@ class Settings(BaseSettings):
     # payment verified). Placeholder-registry entry A1 — not yet confirmed by Grid Nova.
     notify_associates: bool = True
 
+    @field_validator("environment")
+    @classmethod
+    def _known_environment(cls, value: str) -> str:
+        if value not in ENVIRONMENTS:
+            raise ValueError(f"ENVIRONMENT must be exactly one of {', '.join(ENVIRONMENTS)} (got {value!r})")
+        return value
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def is_production_like(self) -> bool:
+        """Staging or production: production auth and the production config guard."""
+        return self.environment in ("staging", "production")
+
+    @property
+    def allows_dev_auth(self) -> bool:
+        """The dev header bypass — only when ENVIRONMENT is exactly development or test."""
+        return self.environment in DEV_AUTH_ENVIRONMENTS
+
+    @property
+    def allows_mock_replies(self) -> bool:
+        """The literal "[MOCK] …" model output may reach a customer only in development
+        and test; anywhere else a model-less deployment answers with the
+        deterministic fallback replies."""
+        return self.environment in DEV_AUTH_ENVIRONMENTS
 
     @property
     def staff_notify_email_list(self) -> List[str]:
@@ -176,11 +206,13 @@ def _is_local_url(url: str) -> bool:
 
 
 def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
-    """(errors, warnings) for a production boot. Empty unless ENVIRONMENT=production.
+    """(errors, warnings) for a production or staging boot. Empty otherwise.
 
     Errors are settings the app cannot run safely without; warnings are features
-    that will silently degrade (mock LLM, no PDFs uploaded, no calendar)."""
-    if not s.is_production:
+    that will silently degrade (no PDFs uploaded, no calendar). An empty LLM_API_KEY
+    is an error in production (customers would get canned replies) and a warning in
+    staging."""
+    if not s.is_production_like:
         return [], []
     errors: list[str] = []
     warnings: list[str] = []
@@ -206,7 +238,10 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
     if empty_storage:
         warnings.append(f"{', '.join(empty_storage)} empty — proposal PDFs and document uploads will not be stored")
     if s.llm_mock_mode:
-        warnings.append("LLM_API_KEY is empty — agents run in MOCK mode")
+        if s.is_production:
+            errors.append("LLM_API_KEY is empty — agents would run in MOCK mode")
+        else:
+            warnings.append("LLM_API_KEY is empty — agents run in MOCK mode (customers get the canned fallback replies)")
     if not s.google_calendar_enabled:
         warnings.append(
             "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REDIRECT_URI "
@@ -245,15 +280,16 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
 
 
 def check_production_config(s: Settings) -> None:
-    """Raise if a production boot is missing something it cannot run without; log a
-    WARNING for each feature that will be degraded. No-op outside production."""
+    """Raise if a production or staging boot is missing something it cannot run
+    without; log a WARNING for each feature that will be degraded. No-op in
+    development and test."""
     errors, warnings = production_config_problems(s)
     log = logging.getLogger("app.config")
     for message in warnings:
         log.warning("PRODUCTION CONFIG WARNING: %s", message)
     if errors:
         raise RuntimeError(
-            "Refusing to start with ENVIRONMENT=production: " + "; ".join(errors)
+            f"Refusing to start with ENVIRONMENT={s.environment}: " + "; ".join(errors)
         )
 
 

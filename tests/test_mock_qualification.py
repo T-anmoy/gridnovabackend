@@ -58,8 +58,7 @@ class TestChatOnlyQualification:
             "message": "Hi, I am interested in getting solar panels installed for my home."
         })
         assert r1.status_code == 200
-        lead_id = r1.json()["lead_id"]
-        customer_id = r1.json()["customer_id"]
+        token = r1.json()["session_token"]
         assert r1.json()["is_qualified"] is False
 
         r2 = client.post("/api/v1/chat/message", json={
@@ -67,8 +66,7 @@ class TestChatOnlyQualification:
                 "My name is Rohan Mehta, email rohan.mehta@example.com. I need a "
                 "rooftop solar system, about 8kW capacity, located in Pune, Maharashtra."
             ),
-            "lead_id": lead_id,
-            "customer_id": customer_id,
+            "session_token": token,
         })
         assert r2.status_code == 200
         assert r2.json()["is_qualified"] is True

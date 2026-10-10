@@ -11,8 +11,9 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
+from app.api import input_bounds as lim
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.auth.scoping import lead_scope, require_lead_access
 from app.memory.db import get_db
@@ -49,8 +50,8 @@ class DocumentRef(BaseModel):
 
 class ConsumptionMonth(BaseModel):
     month: str  # "YYYY-MM"
-    units_kwh: Optional[float] = None
-    bill_inr: Optional[float] = None
+    units_kwh: Optional[float] = lim.bounded(le=lim.MAX_MONTHLY_KWH)
+    bill_inr: Optional[float] = lim.bounded(le=lim.MAX_MONTHLY_INR)
 
 
 class InstallationPhotoRef(BaseModel):
@@ -87,8 +88,8 @@ class ProposalInputsCreate(BaseModel):
     discom: Optional[str] = None
     consumer_number: Optional[str] = None
     site_type: SiteType
-    roof_area_sqft: Optional[float] = None
-    floors: Optional[int] = None
+    roof_area_sqft: Optional[float] = lim.bounded(le=lim.MAX_AREA_SQFT)
+    floors: Optional[int] = Field(default=None, le=lim.MAX_FLOORS)
     shading_condition: Optional[ShadingCondition] = None
     structural_notes: Optional[str] = None
 
@@ -97,16 +98,16 @@ class ProposalInputsCreate(BaseModel):
     roofs_available_count: Optional[int] = None
     roofs_considered_count: Optional[int] = None
     future_roof_expansion_planned: Optional[bool] = None
-    roof_age_years: Optional[float] = None
+    roof_age_years: Optional[float] = lim.bounded(le=lim.MAX_YEARS)
 
     # Load & Output
-    avg_monthly_bill_inr: Optional[float] = None
-    avg_monthly_units_kwh: Optional[float] = None
+    avg_monthly_bill_inr: Optional[float] = lim.bounded(le=lim.MAX_MONTHLY_INR)
+    avg_monthly_units_kwh: Optional[float] = lim.bounded(le=lim.MAX_MONTHLY_KWH)
     consumption_history: Optional[list[ConsumptionMonth]] = None
-    peak_load_kw: Optional[float] = None
-    sanctioned_load_kw: Optional[float] = None
+    peak_load_kw: Optional[float] = lim.bounded(le=lim.MAX_KW)
+    sanctioned_load_kw: Optional[float] = lim.bounded(le=lim.MAX_KW)
     connection_phase: Optional[ConnectionPhase] = None
-    desired_output_kw: Optional[float] = None
+    desired_output_kw: Optional[float] = lim.bounded(le=lim.MAX_KW)
     load_notes: Optional[str] = None
 
     # DISCOM consumer classification
@@ -473,12 +474,20 @@ UPLOAD_TARGETS = ("document", "installation_photo", "staff_signature", "customer
 # slots already use as one uniform server-side ceiling — a judgment call, not
 # a third, independently-invented number.
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
-ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
-_READ_CHUNK_BYTES = 1024 * 1024
+# document_type values this endpoint accepts: the staff site-assessment form's own
+# (the frontend's ProposalInputForm DOCUMENT_UPLOAD_FIELDS) plus the associate
+# onboarding checklist keys (config/associate_onboarding.yaml required_documents),
+# since staff also complete associate-sourced assessments.
+STAFF_FORM_DOCUMENT_TYPES = ("electricity_bill", "site_plan", "govt_scheme_registration", "other")
+
+
+def allowed_document_types() -> tuple:
+    from app.onboarding import config as onboarding_config
+    return tuple(dict.fromkeys([*STAFF_FORM_DOCUMENT_TYPES, *onboarding_config.document_keys()]))
 
 
 @router.post("/{inputs_id}/upload")
-async def upload_proposal_input_file(
+def upload_proposal_input_file(
     inputs_id: int,
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
@@ -487,6 +496,11 @@ async def upload_proposal_input_file(
     document_type: Optional[str] = Form(default=None),
     photo_slot: Optional[str] = Form(default=None),
 ):
+    """One site-assessment file. Typed by its bytes (PDF, JPEG, PNG or WEBP — the
+    Content-Type the browser claims is not trusted), with a sanitised filename, like
+    every other upload route (app/associates/uploads.py)."""
+    from app.associates import uploads
+
     if not employee.can_manage_proposal_inputs():
         raise HTTPException(status_code=403, detail="Your role cannot upload site-assessment files.")
 
@@ -501,8 +515,13 @@ async def upload_proposal_input_file(
             status_code=422,
             detail=f"Unknown upload target: {target!r}. Expected one of {UPLOAD_TARGETS}.",
         )
-    if target == "document" and not document_type:
-        raise HTTPException(status_code=422, detail="document_type is required when target='document'.")
+    if target == "document":
+        if not document_type:
+            raise HTTPException(status_code=422, detail="document_type is required when target='document'.")
+        if document_type not in allowed_document_types():
+            raise HTTPException(status_code=422, detail={
+                "code": "unknown_document_type", "field": "document_type",
+                "message": f"document_type must be one of {list(allowed_document_types())}."})
     if target == "installation_photo":
         if not photo_slot:
             raise HTTPException(status_code=422, detail="photo_slot is required when target='installation_photo'.")
@@ -512,35 +531,17 @@ async def upload_proposal_input_file(
                 detail=f"Unknown installation photo slot: {photo_slot!r}. Expected one of {INSTALLATION_PHOTO_SLOTS}.",
             )
 
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unsupported file type: {file.content_type!r}. "
-                f"Expected one of {sorted(ALLOWED_CONTENT_TYPES)}."
-            ),
-        )
-
-    # Read in chunks and stop the moment the limit is passed (the request body as a
-    # whole is already bounded by app/security/upload_limit.py).
-    chunks, size = [], 0
-    while chunk := await file.read(_READ_CHUNK_BYTES):
-        size += len(chunk)
-        if size > MAX_UPLOAD_SIZE_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds the {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB limit.",
-            )
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    if not content:
-        raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+    try:
+        document = uploads.read_document_sync(file, "File", allowed=uploads.DOCUMENT_TYPES,
+                                              max_bytes=MAX_UPLOAD_SIZE_BYTES)
+    except uploads.UploadRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
 
     from app.storage import r2
 
-    key = f"proposal-inputs/{inputs_id}/{target}/{uuid.uuid4().hex}_{file.filename}"
+    key = f"proposal-inputs/{inputs_id}/{target}/{uuid.uuid4().hex}_{document.filename}"
     try:
-        r2.upload_bytes(key, content, file.content_type)
+        r2.upload_bytes(key, document.content, document.content_type)
     except r2.StorageNotConfiguredError as exc:
         # Never a fake success — this is the whole point of this endpoint.
         raise HTTPException(
@@ -551,7 +552,7 @@ async def upload_proposal_input_file(
     updated = memory.attach_proposal_input_upload(
         inputs_id=inputs_id,
         target=target,
-        filename=file.filename,
+        filename=document.filename,
         storage_key=key,
         performed_by=employee.employee_id,
         document_type=document_type,
@@ -584,5 +585,10 @@ def download_proposal_input_file(
         url, expires_at = r2.signed_get_url(match["storage_key"], filename=match["filename"])
     except r2.StorageNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    from app.memory.models import AuditLog
+    db.add(AuditLog(entity_type="proposal_inputs_document", entity_id=str(inputs_id), action="link_issued",
+                    performed_by=employee.employee_id,
+                    after_value={"ref": file_ref, "filename": match["filename"], "target": match["target"]}))
+    db.commit()
     return {"url": url, "expires_at": expires_at.isoformat(), "filename": match["filename"],
             "file_ref": file_ref, "target": match["target"]}

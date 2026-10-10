@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.api.routes.dashboard import _sign_state
+from app.scheduling import oauth_state
 from app.config import settings
 from app.memory.models import Employee
 from app.scheduling import google_calendar
@@ -30,6 +30,12 @@ def employee(memory, db_session):
     return "emp-cal"
 
 
+def _state(db_session, employee_id: str) -> str:
+    state = oauth_state.issue(db_session, employee_id)
+    db_session.commit()
+    return state
+
+
 def _callback(client, **params):
     r = client.get(CALLBACK, params=params, follow_redirects=False)
     assert r.status_code == 303, r.text
@@ -45,7 +51,7 @@ class TestCallbackRedirect:
         self, client, db_session, employee, monkeypatch
     ):
         monkeypatch.setattr(google_calendar, "exchange_code", lambda code: REFRESH_TOKEN)
-        assert _callback(client, code="auth-code", state=_sign_state(employee)) == {"calendar": "connected"}
+        assert _callback(client, code="auth-code", state=_state(db_session, employee)) == {"calendar": "connected"}
 
         db_session.expire_all()
         row = db_session.get(Employee, employee)
@@ -53,38 +59,38 @@ class TestCallbackRedirect:
         assert row.google_refresh_token and REFRESH_TOKEN not in row.google_refresh_token
 
     @pytest.mark.parametrize("state", [None, "", "garbage", "ZW1wLWNhbDpiYWRzaWc="])
-    def test_bad_or_missing_state(self, client, employee, state):
+    def test_bad_or_missing_state(self, client, db_session, employee, state):
         params = {"code": "auth-code"} if state is None else {"code": "auth-code", "state": state}
         assert _callback(client, **params) == {"calendar": "error", "reason": "invalid_state"}
 
-    def test_consent_declined(self, client, employee):
-        q = _callback(client, error="access_denied", state=_sign_state(employee))
+    def test_consent_declined(self, client, db_session, employee):
+        q = _callback(client, error="access_denied", state=_state(db_session, employee))
         assert q == {"calendar": "error", "reason": "access_denied"}
 
-    def test_other_google_error_is_not_echoed(self, client, employee):
-        q = _callback(client, error="<script>alert(1)</script>", state=_sign_state(employee))
+    def test_other_google_error_is_not_echoed(self, client, db_session, employee):
+        q = _callback(client, error="<script>alert(1)</script>", state=_state(db_session, employee))
         assert q == {"calendar": "error", "reason": "consent_failed"}
 
-    def test_missing_code(self, client, employee):
-        assert _callback(client, state=_sign_state(employee)) == {"calendar": "error", "reason": "missing_code"}
+    def test_missing_code(self, client, db_session, employee):
+        assert _callback(client, state=_state(db_session, employee)) == {"calendar": "error", "reason": "missing_code"}
 
-    def test_exchange_failure(self, client, employee, monkeypatch):
+    def test_exchange_failure(self, client, db_session, employee, monkeypatch):
         def _boom(code):
             raise RuntimeError(f"token endpoint said no; token={REFRESH_TOKEN}")
         monkeypatch.setattr(google_calendar, "exchange_code", _boom)
-        q = _callback(client, code="auth-code", state=_sign_state(employee))
+        q = _callback(client, code="auth-code", state=_state(db_session, employee))
         assert q == {"calendar": "error", "reason": "exchange_failed"}
 
-    def test_not_configured(self, client, employee, monkeypatch):
+    def test_not_configured(self, client, db_session, employee, monkeypatch):
         def _unconfigured(code):
             raise google_calendar.GoogleCalendarNotConfiguredError("not configured")
         monkeypatch.setattr(google_calendar, "exchange_code", _unconfigured)
-        q = _callback(client, code="auth-code", state=_sign_state(employee))
+        q = _callback(client, code="auth-code", state=_state(db_session, employee))
         assert q == {"calendar": "error", "reason": "not_configured"}
 
-    def test_signed_state_for_unknown_employee(self, client, monkeypatch):
+    def test_signed_state_for_unknown_employee(self, client, db_session, monkeypatch):
         monkeypatch.setattr(google_calendar, "exchange_code", lambda code: REFRESH_TOKEN)
-        q = _callback(client, code="auth-code", state=_sign_state("emp-nobody"))
+        q = _callback(client, code="auth-code", state=_state(db_session, "emp-nobody"))
         assert q == {"calendar": "error", "reason": "employee_not_found"}
 
 
@@ -107,7 +113,7 @@ class TestEmployeesList:
         assert all("google_refresh_token" not in e for e in rows.values())
         assert REFRESH_TOKEN not in r.text
 
-    def test_still_admin_only(self, client):
+    def test_still_admin_only(self, client, db_session):
         assert client.get("/api/v1/dashboard/employees", headers=sales_headers()).status_code == 403
 
 
@@ -129,11 +135,11 @@ class TestEmployeesMe:
     @pytest.mark.parametrize("headers, role", [
         (admin_headers(), "admin"), (engineer_headers(), "engineer"),
     ])
-    def test_any_role_may_read_its_own_record(self, client, headers, role):
+    def test_any_role_may_read_its_own_record(self, client, db_session, headers, role):
         r = client.get("/api/v1/dashboard/employees/me", headers=headers)
         assert r.status_code == 200 and r.json()["role"] == role
 
-    def test_requires_authentication(self, client):
+    def test_requires_authentication(self, client, db_session):
         assert client.get("/api/v1/dashboard/employees/me").status_code == 401
 
     def test_deactivated_employee_is_refused(self, client, memory, db_session):
@@ -141,3 +147,51 @@ class TestEmployeesMe:
         db_session.get(Employee, "emp-gone").is_active = False
         db_session.commit()
         assert client.get("/api/v1/dashboard/employees/me", headers=sales_headers("emp-gone")).status_code == 403
+
+
+class TestOAuthState:
+    """BE-1 S7: the state is random, short-lived, single-use and never signed with a
+    fallback key."""
+
+    def test_a_state_works_once(self, client, db_session, employee, monkeypatch):
+        monkeypatch.setattr(google_calendar, "exchange_code", lambda code: REFRESH_TOKEN)
+        state = _state(db_session, employee)
+        assert _callback(client, code="auth-code", state=state) == {"calendar": "connected"}
+        assert _callback(client, code="auth-code", state=state) == {"calendar": "error", "reason": "invalid_state"}
+
+    def test_two_states_for_the_same_employee_differ(self, db_session, employee):
+        assert _state(db_session, employee) != _state(db_session, employee)
+
+    def test_an_expired_state_is_refused(self, client, db_session, employee, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        monkeypatch.setattr(google_calendar, "exchange_code", lambda code: REFRESH_TOKEN)
+        old = datetime.now(timezone.utc) - timedelta(seconds=oauth_state.STATE_TTL_SECONDS + 5)
+        state = oauth_state.issue(db_session, employee, now=old)
+        db_session.commit()
+        assert _callback(client, code="auth-code", state=state) == {"calendar": "error", "reason": "invalid_state"}
+
+    def test_a_state_rewritten_for_another_employee_is_refused(self, client, db_session, employee, monkeypatch):
+        import base64
+        import json
+        monkeypatch.setattr(google_calendar, "exchange_code", lambda code: REFRESH_TOKEN)
+        payload, signature = _state(db_session, employee).split(".", 1)
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        data["e"] = "emp-admin-1"
+        forged = base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode() + "." + signature
+        assert _callback(client, code="auth-code", state=forged) == {"calendar": "error", "reason": "invalid_state"}
+
+    def test_no_secret_no_flow(self, client, db_session, employee, monkeypatch):
+        monkeypatch.setattr(settings, "clerk_secret_key", "")
+        monkeypatch.setattr(settings, "fernet_encryption_key", "")
+        r = client.get("/api/v1/dashboard/employees/me/calendar/connect", headers=sales_headers("emp-cal"))
+        assert r.status_code == 503 and r.json()["detail"]["code"] == "oauth_state_not_configured"
+        assert oauth_state.consume(db_session, "x.y") is None
+
+    def test_the_old_deterministic_state_is_refused(self, client, db_session, employee):
+        """The pre-BE-1 format: base64("employee:hmac") with the "dev-insecure" fallback."""
+        import base64
+        import hashlib
+        import hmac
+        sig = hmac.new(b"dev-insecure", employee.encode(), hashlib.sha256).hexdigest()
+        legacy = base64.urlsafe_b64encode(f"{employee}:{sig}".encode()).decode()
+        assert _callback(client, code="auth-code", state=legacy) == {"calendar": "error", "reason": "invalid_state"}

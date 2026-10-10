@@ -74,6 +74,13 @@ def _candidate_slots(duration_minutes: int, days_ahead: int, now_utc: datetime) 
     return slots
 
 
+def on_slot_grid(slot: datetime, duration_minutes: int, days_ahead: int, now: Optional[datetime] = None) -> bool:
+    """Whether `slot` (timezone-aware) is one of the business-hours slot starts
+    get_available_slots() would consider — same grid, same window — free or not."""
+    now_utc = now or datetime.now(timezone.utc)
+    return slot.astimezone(timezone.utc) in set(_candidate_slots(duration_minutes, days_ahead, now_utc))
+
+
 def _overlaps(slot_start: datetime, slot_end: datetime, busy: list[tuple[datetime, datetime]]) -> bool:
     for b_start, b_end in busy:
         if slot_start < b_end and b_start < slot_end:

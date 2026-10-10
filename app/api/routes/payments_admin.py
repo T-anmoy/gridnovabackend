@@ -88,39 +88,89 @@ def _visible(db: Session, employee: AuthenticatedEmployee, q):
 def _who(db: Session, project_id: int) -> dict:
     """The customer and project a list row belongs to, so Accounts can tell rows apart
     without opening each one."""
+    return _who_many(db, [project_id])[project_id]
+
+
+def _who_many(db: Session, project_ids) -> dict[int, dict]:
+    """_who for many projects in one query."""
     from app.memory.models import Customer, Project
-    project = db.get(Project, project_id)
-    customer = db.get(Customer, project.customer_id) if project and project.customer_id else None
-    return {"customer_name": customer.name if customer else None,
-            "project_reference_id": project.reference_id if project else None}
+    ids = set(project_ids)
+    rows = db.execute(select(Project.id, Project.reference_id, Customer.name)
+                      .outerjoin(Customer, Customer.id == Project.customer_id)
+                      .where(Project.id.in_(ids))).all() if ids else []
+    found = {pid: {"customer_name": name, "project_reference_id": ref} for pid, ref, name in rows}
+    return {pid: found.get(pid, {"customer_name": None, "project_reference_id": None}) for pid in ids}
+
+
+def _search(q):
+    """`q` on the payments queue: the customer's name, the payment reference
+    (normalised like at entry), the project reference (GNE-…) or the receipt number
+    (GNR-…). Applied inside the caller's scope, before paging."""
+    from sqlalchemy import exists, func, or_
+
+    from app.memory.models import Customer, PaymentReceipt, Project
+    text = q.strip()
+    like = f"%{text.lower()}%"
+    conditions = [
+        Payment.project_id.in_(select(Project.id).join(Customer, Customer.id == Project.customer_id)
+                               .where(func.lower(Customer.name).like(like))),
+        Payment.project_id.in_(select(Project.id).where(func.lower(Project.reference_id).like(like))),
+        exists().where(PaymentReceipt.payment_id == Payment.id,
+                       func.lower(PaymentReceipt.receipt_number).like(like)),
+    ]
+    reference = payments.normalize_reference(text)
+    if reference:
+        conditions.append(Payment.reference_normalized.like(f"%{reference}%"))
+    return or_(*conditions)
+
+
+def _rows_json(db: Session, rows: list) -> list[dict]:
+    """List rows with their receipts, projects and customers loaded in two queries."""
+    from app.memory.models import PaymentReceipt
+    ids = [p.id for p in rows]
+    receipts_by_payment = {r.payment_id: r for r in db.execute(
+        select(PaymentReceipt).where(PaymentReceipt.payment_id.in_(ids))).scalars()} if ids else {}
+    who = _who_many(db, [p.project_id for p in rows])
+    return [{**payments.payment_json(db, p, receipt=receipts_by_payment.get(p.id)), **who[p.project_id]}
+            for p in rows]
 
 
 @router.get("/payments")
 def list_payments(status: Optional[PaymentStatus] = None, mode: Optional[PaymentMode] = None,
                   needs_attention: Optional[bool] = None, onboarding_id: Optional[int] = None,
                   date_from: Optional[date] = None, date_to: Optional[date] = None,
+                  q: Optional[str] = Query(default=None, max_length=100),
                   page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
                   db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """`needs_attention=true`: awaiting verification past the threshold, a cheque past
-    its hold, proof missing, or a receipt held / not emailed / failed.
-    date_from/date_to filter on recorded_at (inclusive, UTC dates)."""
+    its hold, proof missing, or a receipt held / not emailed / failed / waiting too long.
+    date_from/date_to filter on recorded_at (inclusive, UTC dates). `q`: customer name,
+    payment reference, project reference (GNE-…) or receipt number (GNR-…).
+    Filtering, counting and paging happen in SQL — except `needs_attention`, which is
+    computed per payment, so with it set the filtered rows are checked in Python."""
+    from sqlalchemy import func
+
     if not employee.can_view_payments():
         raise HTTPException(status_code=403, detail="Your role cannot view payments.")
-    q = _visible(db, employee, select(Payment))
+    q_filter = _visible(db, employee, select(Payment))
     if status:
-        q = q.where(Payment.status == status)
+        q_filter = q_filter.where(Payment.status == status)
     if mode:
-        q = q.where(Payment.mode == mode)
+        q_filter = q_filter.where(Payment.mode == mode)
     if onboarding_id:
-        q = q.where(Payment.onboarding_id == onboarding_id)
+        q_filter = q_filter.where(Payment.onboarding_id == onboarding_id)
     if date_from:
-        q = q.where(Payment.recorded_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
+        q_filter = q_filter.where(Payment.recorded_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
     if date_to:
-        q = q.where(Payment.recorded_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc))
-    rows = list(db.execute(q.order_by(Payment.recorded_at.desc(), Payment.id.desc())).scalars())
-    items = [{**payments.payment_json(db, p), **_who(db, p.project_id)} for p in rows]
-    if needs_attention is not None:
-        items = [i for i in items if i["needs_attention"] == needs_attention]
+        q_filter = q_filter.where(Payment.recorded_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc))
+    if q and q.strip():
+        q_filter = q_filter.where(_search(q))
+    ordered = q_filter.order_by(Payment.recorded_at.desc(), Payment.id.desc())
+    if needs_attention is None:
+        total = db.execute(select(func.count()).select_from(q_filter.subquery())).scalar_one()
+        rows = list(db.execute(ordered.offset((page - 1) * page_size).limit(page_size)).scalars())
+        return {"items": _rows_json(db, rows), "page": page, "page_size": page_size, "total": total}
+    items = [i for i in _rows_json(db, list(db.execute(ordered).scalars())) if i["needs_attention"] == needs_attention]
     return {"items": items[(page - 1) * page_size: page * page_size], "page": page, "page_size": page_size,
             "total": len(items)}
 
@@ -130,20 +180,40 @@ def list_milestones(needs_attention: Optional[bool] = None, page: int = Query(de
                     page_size: int = Query(default=25, ge=1, le=100), db: Session = Depends(get_db),
                     employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Every scheduled milestone with its computed due status. `needs_attention=true`:
-    due and unpaid past payments.thresholds.milestone_overdue_days."""
+    due and unpaid past payments.thresholds.milestone_overdue_days. Without the filter
+    the page and the count come from SQL (statuses are computed only for the page's
+    customers); with it, every milestone's status is computed first."""
+    from sqlalchemy import func
+
     if not employee.can_view_payments():
         raise HTTPException(status_code=403, detail="Your role cannot view payments.")
     from app.memory.models import PaymentMilestone
-    q = select(CustomerOnboarding).where(CustomerOnboarding.id.in_(select(PaymentMilestone.onboarding_id)))
+    scoped = select(PaymentMilestone)
     if employee.role == EmployeeRole.sales:
-        q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
+        scoped = scoped.join(CustomerOnboarding, CustomerOnboarding.id == PaymentMilestone.onboarding_id) \
+                       .join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
+    ordered = scoped.order_by(PaymentMilestone.onboarding_id, PaymentMilestone.number)
+    if needs_attention is None:
+        total = db.execute(select(func.count()).select_from(scoped.subquery())).scalar_one()
+        page_rows = list(db.execute(ordered.offset((page - 1) * page_size).limit(page_size)).scalars())
+        wanted = {m.id for m in page_rows}
+        onboarding_ids = list(dict.fromkeys(m.onboarding_id for m in page_rows))
+    else:
+        total, wanted = None, None
+        onboarding_ids = list(dict.fromkeys(m.onboarding_id for m in db.execute(ordered).scalars()))
+    onboardings = {o.id: o for o in db.execute(select(CustomerOnboarding).where(
+        CustomerOnboarding.id.in_(onboarding_ids))).scalars()} if onboarding_ids else {}
+    who = _who_many(db, [o.project_id for o in onboardings.values()])
     items = []
-    for onboarding in db.execute(q.order_by(CustomerOnboarding.id)).scalars():
-        who = _who(db, onboarding.project_id)
+    for oid in onboarding_ids:
+        onboarding = onboardings[oid]
         for m in payments.milestone_status(db, onboarding):
-            items.append({**m, "onboarding_id": onboarding.id, **who, "needs_attention": m["overdue"]})
-    if needs_attention is not None:
-        items = [i for i in items if i["needs_attention"] == needs_attention]
+            if wanted is None or m["milestone_id"] in wanted:
+                items.append({**m, "onboarding_id": onboarding.id, **who[onboarding.project_id],
+                              "needs_attention": m["overdue"]})
+    if needs_attention is None:
+        return {"items": items, "page": page, "page_size": page_size, "total": total}
+    items = [i for i in items if i["needs_attention"] == needs_attention]
     return {"items": items[(page - 1) * page_size: page * page_size], "page": page, "page_size": page_size,
             "total": len(items)}
 
@@ -161,12 +231,12 @@ def get_proof(payment_id: int, db: Session = Depends(get_db),
 
 
 @router.post("/payments/{payment_id}/proof")
-async def upload_proof(payment_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
-                       employee: AuthenticatedEmployee = Depends(get_current_employee)):
+def upload_proof(payment_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                 employee: AuthenticatedEmployee = Depends(get_current_employee)):
     if not employee.can_record_payment():
         raise HTTPException(status_code=403, detail="Your role cannot record payments.")
     payment = _payment(db, employee, payment_id)
-    await store_proof(db, payment, file, employee.employee_id)
+    store_proof(db, payment, file, employee.employee_id)
     return _detail(db, payment)
 
 

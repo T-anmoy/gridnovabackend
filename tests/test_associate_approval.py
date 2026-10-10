@@ -503,8 +503,10 @@ class TestVerifyEndpoint:
         assert client.get(f"/api/v1/public/verify/{bad}").status_code == 404
 
     def test_rate_limited(self, client, territories):
-        codes = [client.get("/api/v1/public/verify/GNA-WB-26-00001").status_code for _ in range(31)]
-        assert codes[-1] == 429 and set(codes[:30]) == {404}
+        from app.api.routes.public_associates import _VERIFY_LIMIT
+        assert _VERIFY_LIMIT == 10
+        codes = [client.get("/api/v1/public/verify/GNA-WB-26-00001").status_code for _ in range(11)]
+        assert codes[-1] == 429 and set(codes[:10]) == {404}
 
 
 class TestTerritoryAdmin:

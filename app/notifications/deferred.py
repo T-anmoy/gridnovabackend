@@ -33,6 +33,10 @@ def pending_count(session: Session) -> int:
 
 @event.listens_for(Session, "after_commit")
 def _send_pending(session: Session) -> None:
+    # after_commit also fires when a SAVEPOINT (begin_nested) is released — the outer
+    # transaction can still roll back then, so only the outermost commit sends.
+    if session.in_nested_transaction():
+        return
     pending = session.info.pop(_PENDING, [])
     for description, send in pending:
         try:

@@ -705,6 +705,7 @@
           "estimated_total": {
             "anyOf": [
               {
+                "maximum": 10000000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -752,6 +753,7 @@
           "sizing_value": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -838,6 +840,7 @@
           "floors": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -855,6 +858,7 @@
           "monthly_bill_inr": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -918,6 +922,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -1040,11 +1045,13 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
             "title": "Customer Id"
           },
           "email": {
             "anyOf": [
               {
+                "maxLength": 254,
                 "type": "string"
               },
               {
@@ -1062,6 +1069,7 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
             "title": "Lead Id"
           },
           "message": {
@@ -1071,6 +1079,7 @@
           "name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -1078,6 +1087,18 @@
               }
             ],
             "title": "Name"
+          },
+          "session_token": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Token"
           },
           "source": {
             "anyOf": [
@@ -1088,6 +1109,7 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
             "title": "Source"
           }
         },
@@ -1099,31 +1121,9 @@
       },
       "ChatResponse": {
         "properties": {
-          "customer_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Id"
-          },
           "is_qualified": {
             "title": "Is Qualified",
             "type": "boolean"
-          },
-          "lead_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lead Id"
           },
           "meeting_booked": {
             "anyOf": [
@@ -1146,12 +1146,15 @@
           "reply": {
             "title": "Reply",
             "type": "string"
+          },
+          "session_token": {
+            "title": "Session Token",
+            "type": "string"
           }
         },
         "required": [
           "reply",
-          "lead_id",
-          "customer_id",
+          "session_token",
           "is_qualified",
           "missing_fields"
         ],
@@ -1668,6 +1671,7 @@
           "floors": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -1691,6 +1695,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -1703,6 +1708,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -1752,6 +1758,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
+                "maximum": 10000000.0,
                 "type": "number"
               },
               {
@@ -3767,6 +3774,7 @@
           "avg_monthly_bill_inr": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -3778,6 +3786,7 @@
           "avg_monthly_units_kwh": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -3854,6 +3863,7 @@
           "desired_output_kw": {
             "anyOf": [
               {
+                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -3919,6 +3929,7 @@
           "floors": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "type": "integer"
               },
               {
@@ -4014,6 +4025,7 @@
           "peak_load_kw": {
             "anyOf": [
               {
+                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -4032,6 +4044,7 @@
           "roof_age_years": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "type": "number"
               },
               {
@@ -4043,6 +4056,7 @@
           "roof_area_sqft": {
             "anyOf": [
               {
+                "maximum": 10000000.0,
                 "type": "number"
               },
               {
@@ -4087,6 +4101,7 @@
           "sanctioned_load_kw": {
             "anyOf": [
               {
+                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -4229,6 +4244,7 @@
           "floors": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -4251,6 +4267,7 @@
           "monthly_bill_inr": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -4291,6 +4308,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
                 "type": "number"
               },
               {
@@ -5391,6 +5409,7 @@
           "bill_inr": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -5406,6 +5425,7 @@
           "units_kwh": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "type": "number"
               },
               {
@@ -5423,9 +5443,22 @@
       },
       "app__api__routes__public_intake__EstimateRequest": {
         "properties": {
+          "access_difficulty": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Difficulty"
+          },
           "average_bill": {
             "anyOf": [
               {
+                "maximum": 100000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -5471,6 +5504,18 @@
             ],
             "title": "Customer Type"
           },
+          "discom": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discom"
+          },
           "email": {
             "maxLength": 254,
             "minLength": 3,
@@ -5480,6 +5525,7 @@
           "floors": {
             "anyOf": [
               {
+                "maximum": 200.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -5488,6 +5534,32 @@
               }
             ],
             "title": "Floors"
+          },
+          "indicative_total_inr": {
+            "anyOf": [
+              {
+                "maximum": 10000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indicative Total Inr"
+          },
+          "monthly_units": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Units"
           },
           "name": {
             "maxLength": 200,
@@ -5507,9 +5579,22 @@
             ],
             "title": "Phone"
           },
+          "pin_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pin Code"
+          },
           "roof_area": {
             "anyOf": [
               {
+                "maximum": 10000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -5531,6 +5616,30 @@
             ],
             "title": "Roof Type"
           },
+          "shading": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shading"
+          },
+          "sizing_method": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizing Method"
+          },
           "state": {
             "anyOf": [
               {
@@ -5542,6 +5651,21 @@
               }
             ],
             "title": "State"
+          },
+          "subsidy_interest": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subsidy Interest"
           }
         },
         "required": [
@@ -6249,7 +6373,7 @@
     },
     "/api/v1/associate/onboardings/{onboarding_id}/execution/files/{file_ref}": {
       "get": {
-        "description": "A short-lived signed link to one execution file.",
+        "description": "A short-lived signed link to one execution file — the owner (a territory viewer\nonly when territory_viewers_see_documents is on). Every link is audited.",
         "operationId": "file_link_api_v1_associate_onboardings__onboarding_id__execution_files__file_ref__get",
         "parameters": [
           {
@@ -6766,7 +6890,7 @@
     },
     "/api/v1/associate/onboardings/{onboarding_id}/files/{file_ref}": {
       "get": {
-        "description": "A short-lived signed link to one uploaded file (anyone who can view the customer).",
+        "description": "A short-lived signed link to one uploaded file — the owner (a territory viewer\nonly when territory_viewers_see_documents is on). Every link is audited.",
         "operationId": "file_link_api_v1_associate_onboardings__onboarding_id__files__file_ref__get",
         "parameters": [
           {
@@ -6818,7 +6942,7 @@
     },
     "/api/v1/associate/onboardings/{onboarding_id}/formal-proposal": {
       "get": {
-        "description": "The latest formal proposal for this customer, if Grid Nova has prepared one —\nwith a download link once it is approved, so it can be delivered in person.",
+        "description": "The latest formal proposal for this customer, if Grid Nova has prepared one —\nwith a download link once it is approved, so it can be delivered in person. A\nterritory viewer sees its status only: no price (money is owner-only) and no PDF\nunless territory_viewers_see_documents is on.",
         "operationId": "get_formal_proposal_api_v1_associate_onboardings__onboarding_id__formal_proposal_get",
         "parameters": [
           {
@@ -7667,6 +7791,7 @@
     },
     "/api/v1/chat/message": {
       "post": {
+        "description": "One customer message → Nova's reply. A plain function on purpose: the agent\nand the model client are synchronous, so FastAPI runs this in its threadpool and\na slow reply never holds up any other request.",
         "operationId": "chat_message_api_v1_chat_message_post",
         "requestBody": {
           "content": {
@@ -8975,7 +9100,7 @@
     },
     "/api/v1/dashboard/employees/me/calendar/connect": {
       "get": {
-        "description": "Start the Google OAuth consent flow for the authenticated employee.",
+        "description": "Start the Google OAuth consent flow for the authenticated employee. The `state`\nis single-use and expires after 10 minutes (app/scheduling/oauth_state.py).",
         "operationId": "calendar_connect_api_v1_dashboard_employees_me_calendar_connect_get",
         "responses": {
           "200": {
@@ -9763,6 +9888,7 @@
     },
     "/api/v1/dashboard/leads": {
       "get": {
+        "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.",
         "operationId": "list_leads_api_v1_dashboard_leads_get",
         "parameters": [
           {
@@ -9795,6 +9921,46 @@
                 }
               ],
               "title": "Assigned"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
             }
           }
         ],
@@ -12098,7 +12264,7 @@
     },
     "/api/v1/dashboard/payment-milestones": {
       "get": {
-        "description": "Every scheduled milestone with its computed due status. `needs_attention=true`:\ndue and unpaid past payments.thresholds.milestone_overdue_days.",
+        "description": "Every scheduled milestone with its computed due status. `needs_attention=true`:\ndue and unpaid past payments.thresholds.milestone_overdue_days. Without the filter\nthe page and the count come from SQL (statuses are computed only for the page's\ncustomers); with it, every milestone's status is computed first.",
         "operationId": "list_milestones_api_v1_dashboard_payment_milestones_get",
         "parameters": [
           {
@@ -12193,7 +12359,7 @@
     },
     "/api/v1/dashboard/payments": {
       "get": {
-        "description": "`needs_attention=true`: awaiting verification past the threshold, a cheque past\nits hold, proof missing, or a receipt held / not emailed / failed.\ndate_from/date_to filter on recorded_at (inclusive, UTC dates).",
+        "description": "`needs_attention=true`: awaiting verification past the threshold, a cheque past\nits hold, proof missing, or a receipt held / not emailed / failed / waiting too long.\ndate_from/date_to filter on recorded_at (inclusive, UTC dates). `q`: customer name,\npayment reference, project reference (GNE-…) or receipt number (GNR-…).\nFiltering, counting and paging happen in SQL — except `needs_attention`, which is\ncomputed per payment, so with it set the filtered rows are checked in Python.",
         "operationId": "list_payments_api_v1_dashboard_payments_get",
         "parameters": [
           {
@@ -12292,6 +12458,23 @@
                 }
               ],
               "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           },
           {
@@ -14108,7 +14291,7 @@
     },
     "/api/v1/health": {
       "get": {
-        "description": "Liveness: the process is up. Touches nothing else.",
+        "description": "Liveness: the process is up. Touches nothing else. `environment` and\n`llm_mode` are included only for a caller with a valid X-Internal-Key — they tell\nan outsider which deployment (and whether it has a model) they are probing.",
         "operationId": "health_api_v1_health_get",
         "responses": {
           "200": {
@@ -14258,7 +14441,7 @@
     },
     "/api/v1/pricing/packages": {
       "get": {
-        "description": "Public — the two packages as Grid Nova's master data describes them: makes\n(\"or equivalent\", never models), panel technology, commercial terms, phase ranges\nand the price-list version. The price table is included only when the pricing\npolicy's `public_price_display` is `exact`.",
+        "description": "Public — the two packages as Grid Nova's master data describes them: makes\n(\"or equivalent\", never models), panel technology, commercial terms, phase ranges\nand the price-list version. The price table is included only when the pricing\npolicy's `public_price_display` is `exact`. Built once per process: it depends only\non the two config files, which are themselves loaded once.",
         "operationId": "packages_api_v1_pricing_packages_get",
         "responses": {
           "200": {
@@ -14548,6 +14731,7 @@
     },
     "/api/v1/proposal-inputs/{inputs_id}/upload": {
       "post": {
+        "description": "One site-assessment file. Typed by its bytes (PDF, JPEG, PNG or WEBP — the\nContent-Type the browser claims is not trusted), with a sanitised filename, like\nevery other upload route (app/associates/uploads.py).",
         "operationId": "upload_proposal_input_file_api_v1_proposal_inputs__inputs_id__upload_post",
         "parameters": [
           {

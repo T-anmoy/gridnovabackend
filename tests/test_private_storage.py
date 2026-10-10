@@ -24,7 +24,11 @@ def _proposal(memory, db_session, *, pdf_url=None, email="st@example.com", send=
     memory.transition_proposal_status(proposal_id=p.id, new_status=ProposalStatus.approved,
                                       performed_by="emp-1", approved_by_employee_id="emp-admin-1",
                                       pdf_url=pdf_url)
-    token = memory.generate_accept_token(p.id, performed_by="emp-1") if send else None
+    token = None
+    if send:  # tokens exist only for a sent proposal (BE-1 S5: nothing else is on offer)
+        memory.transition_proposal_status(proposal_id=p.id, new_status=ProposalStatus.sent, performed_by="emp-1",
+                                          date_sent=datetime.now(timezone.utc))
+        token = memory.generate_accept_token(p.id, performed_by="emp-1")
     db_session.commit()
     return p.id, token
 

@@ -149,12 +149,13 @@ class TestMilestones:
             )
             session.commit()
             customer_id, lead_id = customer.id, lead.id
+            from tests.chat_support import token_for
+            token = token_for(mem, session, lead_id)
         finally:
             session.close()
 
         response = client.post("/api/v1/chat/message", json={
-            "message": "We're looking at a 60kW rooftop system.",
-            "customer_id": customer_id, "lead_id": lead_id,
+            "message": "We're looking at a 60kW rooftop system.", "session_token": token,
         })
         assert response.status_code == 200
         assert response.json()["is_qualified"] is True
@@ -174,10 +175,11 @@ class TestMilestones:
             "message": "hi, just browsing about solar",
         })
         assert response.status_code == 200
-        customer_id = response.json()["customer_id"]
 
         session = _isolated_db()
         try:
+            from tests.chat_support import customer_of
+            customer_id = customer_of(session, response.json()["session_token"]).id
             mem = MemoryManager(session)
             assert mem.count_customer_memories(customer_id) == 0
         finally:
@@ -861,7 +863,11 @@ class TestReturningCustomerIdentity:
 
     def test_returning_customer_is_not_asked_for_their_name_again(self, client, _isolated_db):
         """The stage machine has to see a known person, not a blank slate —
-        otherwise it drives the agent to ask for a name its memory already holds."""
+        otherwise it drives the agent to ask for a name its memory already holds.
+
+        The public chat can no longer name a customer (BE-1 S2: customer_id from the
+        browser is ignored), so this drives the seeding step directly on a new lead
+        for the known customer — the path a staff-created or resumed lead takes."""
         from app.agents.sales_agent import determine_conversation_stage
 
         session = _isolated_db()
@@ -877,17 +883,13 @@ class TestReturningCustomerIdentity:
         finally:
             session.close()
 
-        response = client.post("/api/v1/chat/message", json={
-            "message": "Hi, we're looking at another rooftop site",
-            "customer_id": customer_id,
-        })
-        assert response.status_code == 200
-        new_lead_id = response.json()["lead_id"]
-
         session = _isolated_db()
         try:
             mem = MemoryManager(session)
-            fields = dict(mem.get_lead(new_lead_id).collected_fields or {})
+            new_lead = mem.create_lead(customer_id=customer_id, performed_by="test")
+            assert set(mem.seed_lead_identity_from_history(new_lead.id)) >= {"name", "email"}
+            session.commit()
+            fields = dict(mem.get_lead(new_lead.id).collected_fields or {})
             assert fields.get("name") == "Priya Sharma"
             assert fields.get("email") == "priya@sunrisetextiles.in"
             # Identity known, project not — so the agent explores the new project

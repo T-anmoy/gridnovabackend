@@ -20,12 +20,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api import input_bounds as lim
 from app.config import settings
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import LeadSource
+from app.memory.models import Customer, Lead, LeadSource
+from app.rules import sales_policy
 from app.scheduling import availability, booking, google_calendar
 from app.security.client_ip import client_ip
 from app.timezones import format_ist_datetime
@@ -82,6 +85,34 @@ def _check_email_cooldown(email: str) -> None:
     _recent_emails[key] = now
 
 
+def _duration(requested: Optional[int]) -> int:
+    """The meeting length: the default unless asked, never above the configured cap
+    (config/sales_policy.yaml booking.max_duration_minutes)."""
+    duration = requested or settings.scheduling_default_duration_minutes
+    cap = sales_policy.max_booking_duration_minutes()
+    if duration > cap:
+        raise HTTPException(status_code=422, detail={
+            "code": "duration_too_long", "field": "duration_minutes",
+            "message": f"A call can be at most {cap} minutes.", "max_duration_minutes": cap})
+    return duration
+
+
+def _check_daily_cap(db: Session, email: str) -> None:
+    """At most booking.daily_cap_per_email public bookings per email per IST day."""
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(settings.business_timezone)
+    day_start = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    count = db.execute(select(func.count(Lead.id)).join(Customer, Customer.id == Lead.customer_id).where(
+        func.lower(Customer.email) == email.strip().lower(), Lead.source == LeadSource.website_booking,
+        Lead.created_at >= day_start)).scalar_one()
+    cap = sales_policy.booking_daily_cap_per_email()
+    if count >= cap:
+        raise HTTPException(status_code=429, detail={
+            "code": "daily_booking_limit",
+            "message": f"This email has already booked {cap} calls today. Please try again tomorrow."})
+
+
 def _nearby_alternatives(memory: MemoryManager, requested_slot: datetime, duration_minutes: int) -> list[dict]:
     """Genuinely-free slots closest in time to the one that was just refused.
 
@@ -135,7 +166,7 @@ def get_public_availability(
     _check_rate_limit(request, _availability_request_log, _AVAILABILITY_RATE_LIMIT)
 
     memory = MemoryManager(db)
-    duration = duration_minutes or settings.scheduling_default_duration_minutes
+    duration = _duration(duration_minutes)
 
     try:
         slots = availability.get_available_slots(
@@ -172,9 +203,9 @@ class BookingRequest(BaseModel):
     # /book-a-call page already shows this to the visitor) — no dedicated
     # columns exist for these, so they land in Lead.collected_fields, the same
     # free-form store public_intake.py's own extra fields use.
-    estimated_total: Optional[float] = Field(default=None, ge=0)
+    estimated_total: Optional[float] = lim.bounded(ge=0, le=lim.MAX_PROJECT_INR)
     sizing_method: Optional[str] = Field(default=None, max_length=50)
-    sizing_value: Optional[float] = Field(default=None, ge=0)
+    sizing_value: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_INR)
     source: Optional[str] = Field(default=None, max_length=100)
 
     @field_validator("email")
@@ -201,15 +232,23 @@ def create_public_booking(
     db: Session = Depends(get_db),
 ):
     _check_rate_limit(request, _booking_request_log, _BOOKING_RATE_LIMIT)
-    _check_email_cooldown(body.email)
 
     scheduled_at = body.scheduled_at
     if scheduled_at.tzinfo is None:
-        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        raise HTTPException(status_code=422, detail={
+            "code": "timezone_required", "field": "scheduled_at",
+            "message": "scheduled_at must carry a timezone offset (e.g. 2026-10-12T04:30:00+00:00)."})
     if scheduled_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=422, detail="scheduled_at must be in the future.")
-
-    duration = body.duration_minutes or settings.scheduling_default_duration_minutes
+    duration = _duration(body.duration_minutes)
+    # Only a slot the availability query could have offered: business hours, the
+    # booking window, the slot grid. Whether it is still free is checked below.
+    if not availability.on_slot_grid(scheduled_at, duration, MAX_DAYS_AHEAD):
+        raise HTTPException(status_code=422, detail={
+            "code": "slot_not_offered", "field": "scheduled_at",
+            "message": "That time is not one of the bookable slots. Pick a time from the availability list."})
+    _check_daily_cap(db, body.email)
+    _check_email_cooldown(body.email)
 
     memory = MemoryManager(db)
 

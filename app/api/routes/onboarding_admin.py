@@ -278,23 +278,29 @@ def get_agreement(onboarding_id: int, db: Session = Depends(get_db),
 
     if not employee.can_view_onboardings():
         raise HTTPException(status_code=403, detail="Your role cannot view associate-sourced customers.")
-    record = agreement.get(db, _load(db, employee, onboarding_id))
-    return {**agreement.serialize(record), "links": agreement.links(record)}
+    onboarding = _load(db, employee, onboarding_id)
+    record = agreement.get(db, onboarding)
+    links = agreement.links(record)
+    if links:
+        from app.onboarding.service import audit_document_link
+        audit_document_link(db, onboarding, employee.employee_id, "agreement", ",".join(sorted(links)))
+        db.commit()
+    return {**agreement.serialize(record), "links": links}
 
 
 @router.post("/onboardings/{onboarding_id}/agreement/signed")
-async def upload_signed_agreement(onboarding_id: int, file: UploadFile = File(...),
-                                  stamp_paper_number: str = Form(..., max_length=50),
-                                  stamp_paper_date: str = Form(...),
-                                  db: Session = Depends(get_db),
-                                  employee: AuthenticatedEmployee = Depends(get_current_employee)):
+def upload_signed_agreement(onboarding_id: int, file: UploadFile = File(...),
+                            stamp_paper_number: str = Form(..., max_length=50),
+                            stamp_paper_date: str = Form(...),
+                            db: Session = Depends(get_db),
+                            employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Upload the signed agreement scan with the stamp paper's number and date."""
     from app.api.routes.associate_onboarding import _signed_upload
 
     if not employee.can_record_project_stage():
         raise HTTPException(status_code=403, detail="Your role cannot record signed agreements.")
     onboarding = _load(db, employee, onboarding_id)
-    return await _signed_upload(db, onboarding, employee.employee_id, file, stamp_paper_number, stamp_paper_date)
+    return _signed_upload(db, onboarding, employee.employee_id, file, stamp_paper_number, stamp_paper_date)
 
 
 

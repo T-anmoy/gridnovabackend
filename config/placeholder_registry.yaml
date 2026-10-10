@@ -860,6 +860,72 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  # ── BE-1: sales, booking and chat policy (config/sales_policy.yaml) ────────────
+  - id: BE1-1
+    area: proposals
+    location: {file: config/sales_policy.yaml, key: proposal_validity_days}
+    description: A sent proposal can be accepted (online or in person) for 30 days, and the proposal PDF says so. Grid Nova never supplied a validity period.
+    dummy_value: 30
+    needed_from_grid_nova: For how many days after it is sent should a proposal stay open for the customer to accept? This number is printed on every proposal.
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: BE1-2
+    area: policies
+    location: {file: config/sales_policy.yaml, key: require_different_approver_for_all_leads}
+    description: Only proposals for associate-sourced customers must be approved by a different employee from the drafter; a Sales user may approve their own website-lead proposal under the manager threshold.
+    dummy_value: false
+    needed_from_grid_nova: Must every proposal be approved by someone other than the employee who drafted it, or only proposals for associate-sourced customers?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: BE1-3
+    area: policies
+    location: {file: config/sales_policy.yaml, key: booking.max_duration_minutes}
+    description: The longest call a website visitor may book; null means the default meeting length (SCHEDULING_DEFAULT_DURATION_MINUTES, 30 minutes today).
+    dummy_value: null
+    needed_from_grid_nova: What is the longest call a website visitor may book with the team?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: BE1-4
+    area: policies
+    location: {file: config/sales_policy.yaml, key: booking.daily_cap_per_email}
+    description: Most calls one email address may book from the website in one day (IST); the next attempt is refused with 429.
+    dummy_value: 3
+    needed_from_grid_nova: How many calls may one email address book from the website in a single day?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: BE1-5
+    area: policies
+    location: {file: app/scheduling/google_calendar.py, symbols: [insert_event]}
+    description: "A public booking sends the Google Calendar invite (sendUpdates=all) to whatever email the visitor typed, unverified: anyone can make Grid Nova's calendar email an invite to any address. Kept as is; documented in docs/api/be1_public_contracts.md."
+    dummy_value: sendUpdates=all to the unverified booking email
+    needed_from_grid_nova: Is it acceptable that a website booking emails a calendar invite to the address the visitor typed without checking it first, or should the email be verified before the invite goes out?
+    blocking: tunable
+    probe: manual
+  - id: BE1-6
+    area: policies
+    location: {file: config/sales_policy.yaml, key: chat.session_ttl_days}
+    description: A website chat resumes its conversation for 30 days after its last message; after that a new conversation (new lead) starts.
+    dummy_value: 30
+    needed_from_grid_nova: After how many days without a message should the website chat start a fresh conversation instead of continuing the old one?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: BE1-7
+    area: associates
+    location: {file: config/associate_onboarding.yaml, key: territory_viewers_see_documents}
+    description: A Preferred Associate viewing a downline customer (not one they onboarded) cannot open that customer's uploaded documents, agreement or execution files; contact details are masked for them.
+    dummy_value: false
+    needed_from_grid_nova: Should a State Head or District Head be able to open a downline customer's ID proof, bills and agreement?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: BE1-8
+    area: payments
+    location: {file: config/execution_payments.yaml, key: payments.receipt.pending_alert_minutes}
+    description: A receipt still not emailed 60 minutes after it was numbered is flagged for Accounts (receipt_pending_stale).
+    dummy_value: 60
+    needed_from_grid_nova: How long after a payment is verified should Accounts be alerted if its receipt has still not been emailed?
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.

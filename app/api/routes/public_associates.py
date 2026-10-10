@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.associates import service, texts, uploads, validation
 from app.config import settings
@@ -41,8 +42,10 @@ from app.security.client_ip import client_ip
 router = APIRouter(prefix="/api/v1/public")
 
 # Per-IP limits, one bucket per purpose. A registration is a deliberate one-off
-# action with four document uploads, so its limit is the tightest.
-_APPLY_LIMIT, _VERIFY_LIMIT, _LOOKUP_LIMIT = 5, 30, 60
+# action with four document uploads, so its limit is the tightest. Verification is one
+# QR scan per card; Associate IDs are sequential and printed on the cards, so its limit
+# is kept low to slow down walking through them (BE-1 S10).
+_APPLY_LIMIT, _VERIFY_LIMIT, _LOOKUP_LIMIT = 5, 10, 60
 _WINDOW_SECONDS = 60
 _apply_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
 _verify_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
@@ -206,7 +209,15 @@ async def _submit(request: Request, db: Session, application_type: AssociateType
     specific = parse_specific(form, common)
     documents = await _read_documents(form)
     form.check()
+    # Everything after reading the request is database and storage work: run it in
+    # the threadpool, never on the event loop.
+    return await run_in_threadpool(_persist_application, db, application_type, common, specific, documents,
+                                   build, seat_check)
 
+
+def _persist_application(db: Session, application_type: AssociateType, common: dict, specific: dict,
+                         documents: dict, build: Callable[[dict, dict, service.Place], object],
+                         seat_check: Optional[Callable[[dict], None]]):
     try:
         place = service.resolve_place(
             db, state_code=common["state_code"], district_code=common["district_code"],

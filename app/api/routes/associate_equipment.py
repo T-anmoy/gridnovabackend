@@ -56,7 +56,7 @@ def list_equipment(category: Optional[EquipmentCategory] = None,
     `q`: case-insensitive match on brand or model name."""
     _check_rate_limit(f"associate:{current.associate_pk}")
     stmt = select(Equipment).where(Equipment.is_active.is_(True))
-    if settings.is_production:
+    if settings.is_production_like:
         stmt = stmt.where(Equipment.is_placeholder.is_(False))
     if category is not None:
         stmt = stmt.where(Equipment.category == category)

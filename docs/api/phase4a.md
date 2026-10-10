@@ -207,7 +207,7 @@ enabled_modes[], proof_required}`.
 
 | Method | Path | Roles |
 |---|---|---|
-| GET | `/payments` (filters `status, mode, needs_attention, onboarding_id, date_from, date_to, page, page_size`) | PAY_READERS |
+| GET | `/payments` (filters `status, mode, needs_attention, onboarding_id, date_from, date_to, q, page, page_size`) | PAY_READERS |
 | GET | `/payment-milestones` (`needs_attention, page, page_size`) | PAY_READERS |
 | GET | `/payments/{pid}` | PAY_READERS |
 | GET / POST | `/payments/{pid}/proof` | PAY_READERS / PAY_RECORDERS |
@@ -225,6 +225,14 @@ enabled_modes[], proof_required}`.
 
 Operations and engineers get 403 on every payment route.
 
+**`q` on `/payments`** (BE-1, ≤ 100 chars): matches the customer's name (case-insensitive,
+substring), the payment reference (normalised exactly as at entry: spaces removed,
+upper-cased), the project reference (`GNE-…`) or the receipt number (`GNR-…`). It is
+applied inside the caller's scope (Sales: own or unassigned leads) and before paging;
+`total` is the filtered count. Paging and the count run in SQL; with `needs_attention`
+set (computed per payment) the filtered rows are checked in Python first.
+`/payment-milestones` pages in SQL the same way when `needs_attention` is absent.
+
 **Payment object (staff):** `{payment_id, onboarding_id, milestone_id,
 previous_payment_id, amount, mode, reference, bank_name, instrument_date, payer_name,
 status, has_proof, proof_filename, recorded_by, recorded_at, deposited_at, verified_at,
@@ -232,7 +240,8 @@ dishonoured_at, dishonour_reason, cancelled_at, cancel_reason, receipt|null,
 deposited_by, verified_by, dishonoured_by, cancelled_by, needs_attention,
 attention_reasons[]}`. Associates get the same without the `*_by` fields and attention.
 `attention_reasons`: `awaiting_verification`, `cheque_hold_exceeded`, `proof_missing`,
-`receipt_held`, `receipt_pending_email`, `receipt_failed`. Detail adds `project: {onboarding_id,
+`receipt_held`, `receipt_pending_email`, `receipt_failed`, `receipt_pending_stale` (BE-1: still `pending` more than
+`payments.receipt.pending_alert_minutes` after numbering — 60, unconfirmed). Detail adds `project: {onboarding_id,
 customer_name, customer_email, project_reference_id, current_stage, accepted_total,
 paid_verified, awaiting_verification, balance}`. HF-C adds `customer_name` and
 `project_reference_id` to every list row.
@@ -249,10 +258,18 @@ GET/PUT return `{onboarding_id, totals, milestones[]}`. PUT body `{milestones: [
 live payment has been recorded.
 
 **Receipt object:** `{receipt_number, email_status (pending|sent|skipped|held|failed),
-emailed_at, pdf_available, receipt_pending_email, held, url}`; staff add
-`email_skipped_reason, held_reason, render_error`. A receipt with placeholder content is
-held, never sent. Public download: `GET /api/v1/public/receipts/{token}/pdf` → 302 to a
-signed link (404 unknown, 503 storage unavailable).
+emailed_at, pdf_available, receipt_pending_email, held, voided, url}`; staff add
+`email_skipped_reason, held_reason, render_error, voided_at, void_reason`. A receipt with
+placeholder content is held, never sent — and (BE-1) never rendered while held: it is
+rendered on release. `url` is null while held or void. Dishonouring a verified payment
+voids its receipt (`voided: true`; any later render is watermarked VOID). Public download:
+`GET /api/v1/public/receipts/{token}/pdf` → 302 to a signed link (404 unknown, not yet
+rendered, held, or void; 503 storage unavailable).
+
+**`POST /payment-receipts/release-held`** → `{released, failed, still_held, reason}`. Each
+released receipt is rendered and delivered on its own; one that fails is marked
+`email_status: failed` (`email_skipped_reason: release_failed: <error>`, or `voided`) and
+the rest carry on. Before BE-1 the body had no `failed` key.
 
 **Work queues:** `{execution?: {pending_stage_verifications, stuck_projects,
 dcr_mismatch}, payments?: {awaiting_verification, dishonoured, receipts_held,
@@ -264,7 +281,7 @@ Payment errors: `invalid_amount`, `mode_not_enabled`, `reference_required`,
 `not_accepted`, `unknown_milestone`, `proof_required`, `invalid_transition`,
 `payment_not_open`, `not_yours`, `reason_required`, `invalid_schedule`,
 `schedule_locked`, `self_verification` (follow-ups), `no_receipt`, `resend_too_soon`,
-`storage_not_configured` (503).
+`receipt_voided` (BE-1: resend of a dishonoured payment's receipt), `storage_not_configured` (503).
 
 ---
 

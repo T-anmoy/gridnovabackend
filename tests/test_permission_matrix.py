@@ -185,7 +185,7 @@ ASSOCIATE = {
     ("PATCH", "/api/v1/associate/onboardings/{onboarding_id}"): ("write", {"json": {"floors": 1}}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/files"):
         ("write", upload_form(kind="document", document_type="noc")),
-    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/files/{file_ref}"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/files/{file_ref}"): ("documents", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/submit"): ("write", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey"): ("read", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey/results"): ("read", {}),
@@ -200,13 +200,13 @@ ASSOCIATE = {
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/formal-proposal"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/proposal/in-person-acceptance"):
         ("write", {"json": {"proposal_id": 1, "delivered_on": "2026-09-01", "note": "x", "reference": "x"}}),
-    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/agreement"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/agreement"): ("documents", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/agreement/signed"):
         ("write", upload_form(stamp_paper_number="WB 1", stamp_paper_date="2026-09-01")),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/execution"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/execution/files"):
         ("write", upload_form(kind="document", document_type="dispatch_challan")),
-    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/execution/files/{file_ref}"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/execution/files/{file_ref}"): ("documents", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/execution/submissions"):
         ("write", {"json": {"stage": "material_dispatched", "text": {"dispatch_reference": "x"}}}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/execution/submissions"): ("read", {}),
@@ -363,6 +363,8 @@ def test_associate_route(client, scenario, route):
     r = _call(client, method, path, headers(scenario["territory"]), kwargs, scenario["values"])
     if kind == "owner":   # money: the owner only — never a territory Preferred Associate
         assert r.status_code == 403, f"territory Preferred reached a payment route: {r.status_code}"
+    elif kind == "documents":  # BE-1 S9: owner only while territory_viewers_see_documents is false
+        assert r.status_code == 403, f"territory Preferred opened a document: {r.status_code}"
     elif kind == "read":
         assert r.status_code not in (401, 403), f"territory Preferred refused: {r.text[:200]}"
     else:

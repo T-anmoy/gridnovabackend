@@ -76,9 +76,14 @@ def test_no_connection_details_ever(client, db_session):
         assert secret not in body
 
 
-def test_liveness_is_unchanged_and_cheap(client):
+def test_liveness_is_cheap_and_reveals_nothing_publicly(client, monkeypatch):
     r = client.get("/api/v1/health")
-    assert r.status_code == 200 and set(r.json()) == {"status", "environment", "llm_mode"}
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    from app.config import settings
+    monkeypatch.setattr(settings, "internal_api_key", "k" * 32)
+    assert client.get("/api/v1/health", headers={"X-Internal-Key": "wrong"}).json() == {"status": "ok"}
+    r = client.get("/api/v1/health", headers={"X-Internal-Key": "k" * 32})
+    assert set(r.json()) == {"status", "environment", "llm_mode"}
 
 
 class TestTerritories:

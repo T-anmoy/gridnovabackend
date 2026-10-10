@@ -95,6 +95,8 @@ def _validate(data: dict) -> dict:
     th = pay.get("thresholds") or {}
     for key in ("awaiting_verification_hours", "cheque_hold_days", "milestone_overdue_days"):
         need(isinstance(th.get(key), int) and th[key] > 0, f"payments.thresholds.{key} must be a positive whole number")
+    pending = (pay.get("receipt") or {}).get("pending_alert_minutes")
+    need(isinstance(pending, int) and pending > 0, "payments.receipt.pending_alert_minutes must be a positive whole number")
     try:
         need(Decimal(str(th.get("overpayment_tolerance_inr"))) >= 0, "payments.thresholds.overpayment_tolerance_inr >= 0")
     except InvalidOperation:

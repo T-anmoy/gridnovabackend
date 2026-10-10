@@ -9,31 +9,35 @@ from app.memory.models import LeadSource, PipelineStage, ProposalStatus
 from tests.conftest import admin_headers
 
 
-class TestLeadLevelDedup:
-    def test_second_message_same_email_no_lead_id_reuses_open_lead(self, client, db_session):
+class TestSessionContinuity:
+    """BE-1 S2: a conversation continues only through its session_token."""
+
+    def test_the_token_continues_the_same_lead(self, client, db_session):
+        from tests.chat_support import lead_of
         r1 = client.post("/api/v1/chat/message", json={
             "message": "first message", "email": "dedup-lead@example.com", "name": "Dedup Test",
         })
         assert r1.status_code == 200
-        lead_id_1 = r1.json()["lead_id"]
-
-        # A second "first message" with the same identity and no lead_id — as if the
-        # frontend hasn't stored the lead_id from the first response yet.
-        r2 = client.post("/api/v1/chat/message", json={
-            "message": "second message", "email": "dedup-lead@example.com", "name": "Dedup Test",
-        })
+        token = r1.json()["session_token"]
+        r2 = client.post("/api/v1/chat/message", json={"message": "second message", "session_token": token})
         assert r2.status_code == 200
-        assert r2.json()["lead_id"] == lead_id_1
+        assert r2.json()["session_token"] == token
+        assert lead_of(db_session, token).id == lead_of(db_session, r2.json()["session_token"]).id
 
-    # Genuine multi-threaded concurrency (several near-simultaneous first-messages
-    # racing for the same customer) is exercised live against a real, file-backed
-    # server/DB rather than here — pytest's TestClient shares a single in-memory
-    # SQLite DBAPI connection (StaticPool) across threads, which isn't reliably
-    # thread-safe at the driver level regardless of application logic, unlike a
-    # real deployment's separate per-session connections. See the fix's live
-    # re-verification notes for the actual concurrent-request reproduction.
+    def test_a_message_without_a_token_starts_a_new_conversation(self, client, db_session):
+        """No more folding into "the customer's open lead" by email: an email cannot
+        prove who is typing, so a tokenless message never joins an existing lead."""
+        from tests.chat_support import lead_of
+        r1 = client.post("/api/v1/chat/message", json={
+            "message": "first message", "email": "fold@example.com", "name": "Fold"})
+        r2 = client.post("/api/v1/chat/message", json={
+            "message": "second message", "email": "fold@example.com", "name": "Fold"})
+        assert r1.status_code == r2.status_code == 200
+        assert r1.json()["session_token"] != r2.json()["session_token"]
+        assert lead_of(db_session, r1.json()["session_token"]).id != lead_of(db_session, r2.json()["session_token"]).id
 
     def test_won_lead_does_not_block_a_new_inquiry(self, client, memory, db_session):
+        from tests.chat_support import lead_of
         customer = memory.get_or_create_customer(email="repeat-customer@example.com", name="Repeat Customer")
         db_session.commit()
         old_lead = memory.create_lead(customer_id=customer.id, source=LeadSource.website_chat)
@@ -45,38 +49,45 @@ class TestLeadLevelDedup:
             "message": "new inquiry", "email": "repeat-customer@example.com", "name": "Repeat Customer",
         })
         assert r.status_code == 200
-        assert r.json()["lead_id"] != old_lead.id
+        assert lead_of(db_session, r.json()["session_token"]).id != old_lead.id
 
 
-class TestLeadIdValidatedBeforeWrites:
-    def test_nonexistent_lead_id_rejected_cleanly(self, client, db_session):
-        from sqlalchemy import func, select
-        from app.memory.models import Customer
+class TestClientIdsAreIgnored:
+    """lead_id / customer_id in the body are deprecated and ignored (BE-1 S2) — they
+    used to be trusted, and they are sequential."""
 
-        before = db_session.execute(select(func.count(Customer.id))).scalar_one()
+    def test_unknown_lead_id_just_starts_a_new_conversation(self, client, db_session):
+        from tests.chat_support import lead_of
         r = client.post("/api/v1/chat/message", json={"message": "hi", "lead_id": 999999})
-        assert r.status_code == 404
-        after = db_session.execute(select(func.count(Customer.id))).scalar_one()
-        # No orphan customer created as a side effect of the rejected request.
-        assert after == before
+        assert r.status_code == 200
+        assert lead_of(db_session, r.json()["session_token"]).id != 999999
 
-    def test_nonexistent_lead_id_rejected_even_with_customer_id_also_supplied(self, client, memory, db_session):
+    def test_someone_elses_lead_and_customer_ids_are_ignored(self, client, memory, db_session):
+        from tests.chat_support import customer_of, lead_of
         customer = memory.get_or_create_customer(email="lead-id-check@example.com", name="Check")
         db_session.commit()
+        lead = memory.create_lead(customer_id=customer.id, source=LeadSource.website_chat)
+        db_session.commit()
         r = client.post("/api/v1/chat/message", json={
-            "message": "hi", "lead_id": 999999, "customer_id": customer.id,
+            "message": "hi it's me", "lead_id": lead.id, "customer_id": customer.id,
         })
-        assert r.status_code == 404
+        assert r.status_code == 200
+        token = r.json()["session_token"]
+        assert lead_of(db_session, token).id != lead.id
+        assert customer_of(db_session, token).id != customer.id
+        assert memory.get_lead_context(lead.id)["messages"] == []
 
-    def test_valid_lead_id_still_works(self, client, memory, db_session):
+    def test_a_token_for_an_existing_lead_continues_it(self, client, memory, db_session):
+        from tests.chat_support import customer_of, lead_of, token_for
         customer = memory.get_or_create_customer(email="lead-id-valid@example.com", name="Valid")
         db_session.commit()
         lead = memory.create_lead(customer_id=customer.id, source=LeadSource.website_chat)
         db_session.commit()
-        r = client.post("/api/v1/chat/message", json={"message": "hi", "lead_id": lead.id})
+        token = token_for(memory, db_session, lead.id)
+        r = client.post("/api/v1/chat/message", json={"message": "hi", "session_token": token})
         assert r.status_code == 200
-        assert r.json()["lead_id"] == lead.id
-        assert r.json()["customer_id"] == customer.id
+        assert lead_of(db_session, token).id == lead.id
+        assert customer_of(db_session, token).id == customer.id
 
 
 class TestRevisionReasonValidation:

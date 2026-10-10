@@ -23,7 +23,7 @@ uvicorn app.main:app --reload --port 8000
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-It never deletes a database and refuses to run when `ENVIRONMENT=production`. If it cannot continue (for example the database was created by an earlier `uvicorn` start and has no recorded schema revision), it stops and prints exactly what to do by hand.
+It never deletes a database and refuses to run when `ENVIRONMENT` is `staging` or `production`. If it cannot continue (for example the database was created by an earlier `uvicorn` start and has no recorded schema revision), it stops and prints exactly what to do by hand.
 
 Check it worked: `http://localhost:8000/api/v1/health` (the process is up) and `http://localhost:8000/api/v1/health/ready` (database, schema revision and `territories: {seeded, states, districts, blocks}`).
 
@@ -53,7 +53,7 @@ LLM mock mode activates automatically when `LLM_API_KEY` is unset.
 ## Database schema: first deploy and subsequent deploys
 
 The schema is owned by `scripts/bootstrap_db.py` + Alembic. With `ENVIRONMENT=production`
-the app does **not** create tables on startup, so run the bootstrap (e.g. as a Cloud Run
+(or `staging`) the app does **not** create tables on startup, so run the bootstrap (e.g. as a Cloud Run
 job, with the same `DATABASE_URL`) **before** the service's first boot.
 
 ### First deploy / fresh database
@@ -179,7 +179,7 @@ proposals and are blocked from analytics, employees, and the audit log.
 ## Architecture
 
 ```
-Customer → POST /api/v1/chat/message
+Customer → POST /api/v1/chat/message   (conversation = session_token, see docs/api/be1_public_contracts.md)
               └─ Orchestrator (LangGraph StateGraph)
                     └─ Sales Agent (field extraction + reply)
                           └─ MemoryManager (single DB gateway)

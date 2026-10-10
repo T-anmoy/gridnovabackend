@@ -163,6 +163,20 @@ def require_onboarding_edit(associate, onboarding) -> None:
         raise HTTPException(status_code=403, detail="Only the associate who onboarded this customer can change it.")
 
 
+DOCUMENTS_OWNER_ONLY = "Only the associate who onboarded this customer can open its documents."
+
+
+def require_onboarding_documents(associate, onboarding) -> None:
+    """Uploaded documents, the agreement and execution files: the owner — and a
+    territory viewer only when config/associate_onboarding.yaml
+    territory_viewers_see_documents is true (an unconfirmed default: false)."""
+    from app.onboarding import config as onboarding_config
+
+    require_onboarding_view(associate, onboarding)
+    if not can_edit_onboarding(associate, onboarding) and not onboarding_config.territory_viewers_see_documents():
+        raise HTTPException(status_code=403, detail=DOCUMENTS_OWNER_ONLY)
+
+
 # ── Preferred Associate visibility over other associates (territory roster) ─────
 #
 # The same territory rule applied to associates instead of customer sites: every

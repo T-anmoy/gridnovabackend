@@ -35,8 +35,7 @@ class TestHealth:
     def test_health_ok(self, client):
         r = client.get("/api/v1/health")
         assert r.status_code == 200
-        assert r.json()["status"] == "ok"
-        assert r.json()["llm_mode"] == "mock"
+        assert r.json() == {"status": "ok"}  # environment / llm_mode need X-Internal-Key
 
 
 class TestChat:
@@ -49,8 +48,8 @@ class TestChat:
         assert r.status_code == 200
         data = r.json()
         assert "reply" in data
-        assert data["lead_id"] is not None
-        assert data["customer_id"] is not None
+        assert data["session_token"]
+        assert "lead_id" not in data and "customer_id" not in data
 
     def test_chat_message_too_long(self, client):
         r = client.post("/api/v1/chat/message", json={
@@ -65,8 +64,7 @@ class TestChat:
         r = client.post("/api/v1/chat/message", json={"message": "Hello"})
         assert r.status_code == 200
         data = r.json()
-        assert data["lead_id"] is not None
-        assert data["customer_id"] is not None
+        assert data["session_token"]
 
     def test_chat_prompt_injection_stays_scoped(self, client):
         """Injected instruction must not change downstream behavior."""
@@ -95,7 +93,7 @@ class TestDashboardLeads:
 
         r = client.get("/api/v1/dashboard/leads", headers=admin_headers())
         assert r.status_code == 200
-        assert len(r.json()) >= 1
+        assert r.json()["total"] >= 1 and len(r.json()["items"]) >= 1
 
     def test_get_lead_detail(self, client, memory, db_session):
         cid, lid = _seed_qualified_lead(client, memory, db_session)

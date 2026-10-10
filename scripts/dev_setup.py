@@ -103,9 +103,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"dev_setup: unknown option(s): {' '.join(unknown)}\nusage: python scripts/dev_setup.py [--dummy-data]",
               file=sys.stderr)
         return EXIT_REFUSED
-    if settings.environment == "production":
-        print("dev_setup: REFUSED — ENVIRONMENT=production. This script is for local development only; "
-              "production is migrated by scripts/bootstrap_db.py on deploy.", file=sys.stderr)
+    if settings.is_production_like:
+        print(f"dev_setup: REFUSED — ENVIRONMENT={settings.environment}. This script is for local development "
+              "only; staging and production are migrated by scripts/bootstrap_db.py on deploy.", file=sys.stderr)
         return EXIT_REFUSED
 
     os.chdir(REPO_ROOT)   # a relative sqlite path in DATABASE_URL then means the same here as for uvicorn

@@ -11,10 +11,15 @@ verification leaves no gap.
 
 Never sent with placeholder content: a receipt whose company block or wording still
 contains DUMMY text is HELD (held_reason = placeholder_content) in every environment,
-and in production also while registry entries P5/P6 are unresolved. Verification still
-succeeds; held receipts are visible, filterable, and released in bulk once resolved.
-No customer email → email_skipped_reason = no_customer_email. Every stall emails
-Accounts (receipt_blocked) after the commit.
+and in staging/production also while registry entries P5/P6 are unresolved. A held
+receipt is not rendered at all (so no dummy-content PDF exists to be reused or served);
+it is rendered when released. Verification still succeeds; held receipts are visible,
+filterable, and released in bulk once resolved. No customer email →
+email_skipped_reason = no_customer_email. Every stall emails Accounts (receipt_blocked)
+after the commit.
+
+Void: dishonouring a verified payment voids its receipt (voided_at). A void receipt is
+never resent, its public link answers 404, and any later render is watermarked VOID.
 """
 from __future__ import annotations
 
@@ -158,7 +163,7 @@ def hold_reason(db: Session) -> Optional[str]:
 
     if _content_has_dummy():
         return "placeholder_content"
-    if settings.is_production and registry.unresolved_ids(list(HOLD_REGISTRY_ENTRIES), db):
+    if settings.is_production_like and registry.unresolved_ids(list(HOLD_REGISTRY_ENTRIES), db):
         return "placeholder_content"
     return None
 
@@ -183,6 +188,21 @@ def _ledger_position(db: Session, payment: Payment) -> tuple[Decimal, Optional[D
     onboarding = db.get(CustomerOnboarding, payment.onboarding_id) if payment.onboarding_id is not None else None
     total = accepted_total(db, onboarding) if onboarding is not None else None
     return total_paid, (total - total_paid if total is not None else None)
+
+
+def void(db: Session, payment: Payment, actor: str, reason: str) -> Optional[PaymentReceipt]:
+    """The payment was dishonoured after verification: void its receipt. Caller commits."""
+    from app.memory.models import AuditLog
+
+    receipt = for_payment(db, payment.id)
+    if receipt is None or receipt.voided_at is not None:
+        return receipt
+    receipt.voided_at, receipt.void_reason = _now(), reason
+    db.add(AuditLog(entity_type="payment_receipt", entity_id=str(receipt.id), action="voided", performed_by=actor,
+                    after_value={"payment_id": payment.id, "receipt_number": receipt.receipt_number,
+                                 "reason": reason}))
+    db.flush()
+    return receipt
 
 
 def receipt_html(db: Session, receipt: PaymentReceipt) -> str:
@@ -216,11 +236,17 @@ def receipt_html(db: Session, receipt: PaymentReceipt) -> str:
     if balance is not None:
         rows.append(("Balance", indian_figures(balance)))
     body = "".join(f"<tr><th>{e(k)}</th><td>{e(v)}</td></tr>" for k, v in rows)
+    void_mark = ('<div class="void">VOID</div><p class="void-note">This receipt is void: the payment was '
+                 f'dishonoured on {e(format_ist_date(receipt.voided_at))}.</p>') if receipt.voided_at else ""
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
 body {{ font-family: sans-serif; font-size: 11pt; margin: 20mm; }}
 h1 {{ font-size: 16pt; margin: 0 0 4mm; }} th {{ text-align: left; padding: 2mm 6mm 2mm 0; vertical-align: top; }}
 .company {{ margin-bottom: 8mm; }} .footer {{ margin-top: 10mm; font-size: 9pt; color: #444; }}
+.void {{ position: fixed; top: 90mm; left: 0; right: 0; text-align: center; font-size: 96pt; font-weight: bold;
+         color: rgba(200, 0, 0, 0.25); transform: rotate(-30deg); }}
+.void-note {{ color: #a00; font-weight: bold; }}
 </style></head><body>
+{void_mark}
 <div class="company"><strong>{e(company["legal_name"])}</strong><br>{e(company["address"])}<br>
 {e(company["phone"])} · {e(company["email"])}<br>GSTIN: {e(company["gstin"])}</div>
 <h1>{e(wording["heading"])}</h1>
@@ -237,15 +263,23 @@ def generate_and_deliver(receipt_id: int) -> None:
     db = SessionLocal()
     try:
         receipt = db.get(PaymentReceipt, receipt_id)
-        if receipt is None:
+        if receipt is None or receipt.voided_at is not None:
+            return
+        from app.notifications import associate_emails
+        payment = db.get(Payment, receipt.payment_id)
+        reason = hold_reason(db)
+        if reason:
+            # Decided BEFORE rendering: a held receipt must not leave a placeholder-
+            # content PDF behind for release/resend to reuse or the public link to serve.
+            _hold(db, receipt, reason)
+            associate_emails.payment_verified(db, payment, None)
+            db.commit()
             return
         if receipt.pdf_key is None and not _render(db, receipt):
             db.commit()
             _blocked(db, receipt, "render_failed")
             return
         deliver(db, receipt)
-        from app.notifications import associate_emails
-        payment = db.get(Payment, receipt.payment_id)
         held = receipt.email_status == ReceiptEmailStatus.held
         associate_emails.payment_verified(db, payment, None if held else public_url(receipt))
         db.commit()
@@ -283,9 +317,7 @@ def deliver(db: Session, receipt: PaymentReceipt) -> None:
     customer = db.get(Customer, db.get(Project, payment.project_id).customer_id)
     reason = hold_reason(db)
     if reason:
-        receipt.email_status, receipt.held_reason = ReceiptEmailStatus.held, reason
-        db.commit()
-        _blocked(db, receipt, "held")
+        _hold(db, receipt, reason)
         return
     email = customer.email if customer else None
     if not email or is_placeholder_email(email):
@@ -311,6 +343,12 @@ def deliver(db: Session, receipt: PaymentReceipt) -> None:
         _blocked(db, receipt, why or "send_failed")
 
 
+def _hold(db: Session, receipt: PaymentReceipt, reason: str) -> None:
+    receipt.email_status, receipt.held_reason = ReceiptEmailStatus.held, reason
+    db.commit()
+    _blocked(db, receipt, "held")
+
+
 def _blocked(db: Session, receipt: PaymentReceipt, reason: str) -> None:
     from app.notifications import notifier as notifier_module
     payment = db.get(Payment, receipt.payment_id)
@@ -323,21 +361,45 @@ def _blocked(db: Session, receipt: PaymentReceipt, reason: str) -> None:
 
 
 def release_held(db: Session, actor: str) -> dict:
-    """Accounts' one bulk action once the placeholders are resolved."""
+    """Accounts' one bulk action once the placeholders are resolved. Each receipt is
+    re-rendered now — with the real content — and delivered on its own: one failure
+    marks that receipt failed (with the reason) and the rest carry on."""
     from app.memory.models import AuditLog
 
     if hold_reason(db):
-        return {"released": 0, "still_held": _count_held(db), "reason": "placeholder_content"}
+        return {"released": 0, "failed": 0, "still_held": _count_held(db), "reason": "placeholder_content"}
     held = list(db.execute(select(PaymentReceipt).where(
         PaymentReceipt.email_status == ReceiptEmailStatus.held)).scalars())
     for receipt in held:
         receipt.email_status, receipt.held_reason = ReceiptEmailStatus.pending, None
+        # Anything rendered while held (older builds rendered first) carries the
+        # placeholder content: render again.
+        receipt.pdf_key = None
         db.add(AuditLog(entity_type="payment_receipt", entity_id=str(receipt.id), action="released",
                         performed_by=actor))
     db.commit()
+    failed = 0
     for receipt in held:
-        deliver(db, receipt)
-    return {"released": len(held), "still_held": _count_held(db), "reason": None}
+        try:
+            if receipt.voided_at is not None:
+                receipt.email_status, receipt.email_skipped_reason = ReceiptEmailStatus.failed, "voided"
+                db.commit()
+                continue
+            if not _render(db, receipt):
+                db.commit()
+                failed += 1
+                _blocked(db, receipt, "render_failed")
+                continue
+            deliver(db, receipt)
+        except Exception as exc:
+            logger.exception("Receipt %s: release failed", receipt.id)
+            db.rollback()
+            receipt = db.get(PaymentReceipt, receipt.id)
+            receipt.email_status = ReceiptEmailStatus.failed
+            receipt.email_skipped_reason = f"release_failed: {type(exc).__name__}"[:200]
+            db.commit()
+            failed += 1
+    return {"released": len(held), "failed": failed, "still_held": _count_held(db), "reason": None}
 
 
 def _count_held(db: Session) -> int:
@@ -351,6 +413,10 @@ def resend(db: Session, payment_id: int, actor: str) -> PaymentReceipt:
     receipt = for_payment(db, payment_id)
     if receipt is None:
         raise AssociateError("This payment has no receipt (it is not verified).", code="no_receipt", status_code=409)
+    from app.memory.models import PaymentStatus
+    if receipt.voided_at is not None or db.get(Payment, payment_id).status != PaymentStatus.verified:
+        raise AssociateError("This receipt is void: the payment is no longer verified.", code="receipt_voided",
+                             status_code=409)
     if receipt.emailed_at and _now() - (receipt.emailed_at if receipt.emailed_at.tzinfo
                                         else receipt.emailed_at.replace(tzinfo=timezone.utc)) \
             < timedelta(minutes=RESEND_MIN_MINUTES):
@@ -369,9 +435,17 @@ def resend(db: Session, payment_id: int, actor: str) -> PaymentReceipt:
 
 # ── Read ─────────────────────────────────────────────────────────────────────────
 
-def attention(receipt: PaymentReceipt) -> list[str]:
-    return {ReceiptEmailStatus.held: ["receipt_held"], ReceiptEmailStatus.skipped: ["receipt_pending_email"],
-            ReceiptEmailStatus.failed: ["receipt_failed"]}.get(receipt.email_status, [])
+def attention(receipt: PaymentReceipt, now: Optional[datetime] = None) -> list[str]:
+    if receipt.voided_at is not None:
+        return []
+    reasons = {ReceiptEmailStatus.held: ["receipt_held"], ReceiptEmailStatus.skipped: ["receipt_pending_email"],
+               ReceiptEmailStatus.failed: ["receipt_failed"]}.get(receipt.email_status, [])
+    if receipt.email_status == ReceiptEmailStatus.pending and receipt.created_at is not None:
+        created = receipt.created_at if receipt.created_at.tzinfo else receipt.created_at.replace(tzinfo=timezone.utc)
+        minutes = config.payments()["receipt"]["pending_alert_minutes"]
+        if (now or _now()) - created > timedelta(minutes=minutes):
+            reasons = reasons + ["receipt_pending_stale"]
+    return reasons
 
 
 def receipt_json(receipt: PaymentReceipt, *, staff: bool) -> dict:
@@ -380,8 +454,12 @@ def receipt_json(receipt: PaymentReceipt, *, staff: bool) -> dict:
             "pdf_available": receipt.pdf_key is not None,
             "receipt_pending_email": receipt.email_status == ReceiptEmailStatus.skipped,
             "held": receipt.email_status == ReceiptEmailStatus.held,
-            "url": public_url(receipt) if receipt.pdf_key else None}
+            "voided": receipt.voided_at is not None,
+            "url": public_url(receipt) if receipt.pdf_key and not receipt.voided_at
+            and receipt.email_status != ReceiptEmailStatus.held else None}
     if staff:
         body.update(email_skipped_reason=receipt.email_skipped_reason, held_reason=receipt.held_reason,
-                    render_error=receipt.render_error)
+                    render_error=receipt.render_error,
+                    voided_at=receipt.voided_at.isoformat() if receipt.voided_at else None,
+                    void_reason=receipt.void_reason)
     return body

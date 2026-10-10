@@ -199,20 +199,23 @@ class SalesAgent:
             score=score,
         )
 
-        # Fill in the customer record in place once we learn who they are. If the
-        # extracted email OR phone turns out to belong to a different existing
-        # customer, this merges into that record (and returns it), so we adopt
-        # its id going forward.
+        # Fill in the customer record in place once we learn who they are. This is
+        # the anonymous website chat, so it never merges: an email or phone that
+        # belongs to a different existing customer stays a CLAIM — kept in this
+        # lead's collected_fields, noted on the timeline for staff ("possible
+        # returning customer #id (unverified)") — and the conversation stays on its
+        # own customer. Anyone can type someone else's email; adopting that
+        # customer would load their profile and memories into this reply.
         if new_fields.get("name") or new_fields.get("email") or new_fields.get("phone"):
-            surviving = memory.update_customer_details(
+            memory.update_customer_details(
                 customer_id=customer_id,
                 name=new_fields.get("name"),
                 email=new_fields.get("email"),
                 phone=new_fields.get("phone"),
                 performed_by="sales_agent",
+                allow_merge=False,
+                lead_id=lead_id,
             )
-            if surviving is not None:
-                customer_id = surviving.id
 
         if stage == PipelineStage.qualified:
             memory.add_timeline_event(
@@ -234,11 +237,10 @@ class SalesAgent:
         # Deterministic conversation stage — decides HOW Nova talks, never the LLM.
         conv_stage = determine_conversation_stage(merged)
 
-        # What we remember about this person from earlier conversations, including
-        # the agent's own note on what it handled badly last time. Loaded AFTER the
-        # identity step above, because a mid-chat email match can move us onto a
-        # different customer record — and their memory, not the placeholder's, is
-        # the one that matters.
+        # What we remember about THIS conversation's customer from earlier
+        # conversations, including the agent's own note on what it handled badly
+        # last time. Always the customer the chat session is bound to — never one a
+        # typed email or phone happens to match.
         memory_context = self._recall_context(memory, customer_id, message)
 
         # Meeting scheduling — detect intent / confirmation, offer real slots (also
@@ -284,8 +286,11 @@ class SalesAgent:
                 user_message=message,
                 fallback=llm_client._fallback_reply(conv_stage, missing, available_human),
                 approved_equipment=memory.active_equipment_terms(),
+                # Everything the customer typed in THIS conversation (every customer
+                # message on this lead, not just the recent window): a contact detail
+                # the reply repeats must come from here.
                 customer_text="\n".join(
-                    [message] + [t.get("content", "") for t in history if t.get("role") == "user"]
+                    [message] + [m.content for m in ctx["messages"] if m.role == MessageRole.customer]
                 ),
             )
             reply = checked.reply

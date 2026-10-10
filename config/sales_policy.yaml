@@ -1,0 +1,29 @@
+# Grid Nova Energy — sales, booking and chat policy.
+#
+# Values Grid Nova has not supplied: each is the developer's working default, carries
+# an [UNCONFIRMED] marker and has an entry in config/placeholder_registry.yaml until
+# Grid Nova confirms or replaces it. Read by app/rules/sales_policy.py and validated
+# at startup (a malformed file stops the boot).
+
+# How long a sent proposal can be accepted (online link or in person), in days from
+# the day it was sent or handed over. Also printed in the proposal PDF footer.
+proposal_validity_days: 30                       # [UNCONFIRMED]
+
+# true = every proposal (not only associate-sourced ones) must be approved by a
+# different employee from the one who drafted it. false = only associate-sourced
+# proposals need a different approver (the behaviour before this setting existed).
+require_different_approver_for_all_leads: false  # [UNCONFIRMED]
+
+# Public booking (POST /api/v1/public/booking and its availability query).
+booking:
+  # Longest meeting a website visitor may book, in minutes. null = the default
+  # meeting length (SCHEDULING_DEFAULT_DURATION_MINUTES).
+  max_duration_minutes: null                     # [UNCONFIRMED]
+  # Most public bookings one email address may make in a day (IST calendar day).
+  daily_cap_per_email: 3                         # [UNCONFIRMED]
+
+# The website chat (POST /api/v1/chat/message).
+chat:
+  # A chat session token stops resuming its conversation after this many days without
+  # a message; the next message starts a new conversation.
+  session_ttl_days: 30                           # [UNCONFIRMED]

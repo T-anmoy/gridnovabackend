@@ -53,5 +53,6 @@ class TestAutomaticProjectCreation:
         Project creation before this change."""
         r = client.post("/api/v1/chat/message", json={"message": "hi, thinking about solar"})
         assert r.status_code == 200
-        lead = memory.get_lead(r.json()["lead_id"])
+        from tests.chat_support import lead_of
+        lead = lead_of(db_session, r.json()["session_token"])
         assert lead.project_id is not None

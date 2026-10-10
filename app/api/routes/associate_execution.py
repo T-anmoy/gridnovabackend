@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.associates import uploads
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedAssociate, get_current_associate
-from app.auth.scoping import require_onboarding_edit, require_onboarding_view
+from app.auth.scoping import require_onboarding_documents, require_onboarding_edit, require_onboarding_view
 from app.execution import files as execution_files
 from app.execution import register
 from app.execution import service as execution
@@ -70,24 +70,24 @@ def _editable(db: Session, onboarding: CustomerOnboarding):
 
 
 @router.post("/files", status_code=201)
-async def upload_file(onboarding_id: int, file: UploadFile = File(...),
-                      kind: Literal["document", "photo"] = Form(...),
-                      document_type: Optional[str] = Form(default=None),
-                      photo_slot: Optional[str] = Form(default=None),
-                      latitude: Optional[float] = Form(default=None, ge=-90, le=90),
-                      longitude: Optional[float] = Form(default=None, ge=-180, le=180),
-                      captured_at: Optional[str] = Form(default=None, max_length=40),
-                      capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
-                      exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
-                      db: Session = Depends(get_db),
-                      current: AuthenticatedAssociate = Depends(get_current_associate)):
+def upload_file(onboarding_id: int, file: UploadFile = File(...),
+                kind: Literal["document", "photo"] = Form(...),
+                document_type: Optional[str] = Form(default=None),
+                photo_slot: Optional[str] = Form(default=None),
+                latitude: Optional[float] = Form(default=None, ge=-90, le=90),
+                longitude: Optional[float] = Form(default=None, ge=-180, le=180),
+                captured_at: Optional[str] = Form(default=None, max_length=40),
+                capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
+                exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
+                db: Session = Depends(get_db),
+                current: AuthenticatedAssociate = Depends(get_current_associate)):
     """One execution photo (a slot from photo_slots) or document (a type from
     document_types). Replaces the earlier file in that slot/type; a submission that
     already used the earlier one keeps it."""
     associate, onboarding = _load(db, current, onboarding_id, edit=True)
     record = _editable(db, onboarding)
     try:
-        await execution_files.store(db, onboarding, record, file, kind=kind,
+        execution_files.store(db, onboarding, record, file, kind=kind,
                                     name=photo_slot if kind == "photo" else document_type,
                                     uploaded_by=onboarding_service.actor(associate), latitude=latitude,
                                     longitude=longitude, captured_at=captured_at, capture_method=capture_method,
@@ -104,10 +104,12 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
 @router.get("/files/{file_ref}")
 def file_link(onboarding_id: int, file_ref: str, db: Session = Depends(get_db),
               current: AuthenticatedAssociate = Depends(get_current_associate)):
-    """A short-lived signed link to one execution file."""
+    """A short-lived signed link to one execution file — the owner (a territory viewer
+    only when territory_viewers_see_documents is on). Every link is audited."""
     from app.storage import r2
 
-    _, onboarding = _load(db, current, onboarding_id)
+    associate, onboarding = _load(db, current, onboarding_id)
+    require_onboarding_documents(associate, onboarding)
     try:
         record = execution.require(db, onboarding)
     except AssociateError as exc:
@@ -119,6 +121,9 @@ def file_link(onboarding_id: int, file_ref: str, db: Session = Depends(get_db),
         url, expires_at = r2.signed_get_url(item["storage_key"], filename=item["filename"])
     except r2.StorageNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    onboarding_service.audit_document_link(db, onboarding, onboarding_service.actor(associate), "execution_file",
+                                           file_ref, item["filename"])
+    db.commit()
     return {"url": url, "expires_at": expires_at.isoformat(), "filename": item["filename"], "file_ref": file_ref}
 
 

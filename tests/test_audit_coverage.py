@@ -71,10 +71,6 @@ def test_every_new_mutation_is_audited(client, db_session, onboarding_ready, stu
     client.post(f"{PAY}/{pid}/dishonour", json={"reason": "Returned."}, headers=ACCOUNTS)
     other = record(client, headers(gna2), oid2, neft(reference="UTR-AUD")).json()["payment"]["payment_id"]
     client.post(f"{pay_url(oid2)}/{other}/cancel", json={"reason": "Duplicate."}, headers=headers(gna2))
-    receipt = db_session.execute(select(PaymentReceipt)).scalar_one()
-    receipt.emailed_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
-    db_session.commit()
-    client.post(f"{PAY}/{pid}/receipt/resend", headers=ACCOUNTS)
     from app.execution import config
     receipt_cfg = config.payments()["receipt"]
     monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "G", "bank_name": "B",
@@ -93,6 +89,13 @@ def test_every_new_mutation_is_audited(client, db_session, onboarding_ready, stu
     own = client.post(f"{DASH}/onboardings/{oid2}/payments", headers=ADMIN, json=neft(reference="UTR-OWN"))
     assert client.post(f"{PAY}/{own.json()['payment_id']}/verify", headers=ADMIN,
                        json={"reason": "Paid in person."}).status_code == 200
+    # Resend a still-verified payment's receipt (a dishonoured one is void and refused —
+    # BE-1 C3, tests/test_receipts.py).
+    receipt = db_session.execute(select(PaymentReceipt).where(
+        PaymentReceipt.payment_id == own.json()["payment_id"])).scalar_one()
+    receipt.emailed_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    db_session.commit()
+    assert client.post(f"{PAY}/{own.json()['payment_id']}/receipt/resend", headers=ACCOUNTS).status_code == 200
 
     seen = {(a.entity_type, a.action) for a in db_session.execute(select(AuditLog)).scalars()}
     assert EXPECTED <= seen, f"not audited: {sorted(EXPECTED - seen)}"

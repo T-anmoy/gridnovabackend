@@ -198,8 +198,8 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
     commits. Applies every guard the online path has: staff approval (incl. manager
     sign-off where required), the send-guard, the latest version only, and validity."""
     import app.notifications.notifier as notifier_module
-    from app.api.routes.public_proposals import PROPOSAL_VALIDITY_DAYS
     from app.memory import reflection
+    from app.proposals import acceptance
     from app.proposals.send_guard import placeholder_problem
 
     note, reference = (note or "").strip(), (reference or "").strip()
@@ -217,12 +217,18 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
     if proposal is None or proposal.lead_id != onboarding.lead_id:
         raise AssociateError("That proposal is not this customer's.", code="proposal_not_found", status_code=404,
                              field="proposal_id")
+    # Same lock as the online accept link (app/proposals/acceptance.py): everything
+    # below is decided on what is true under it.
+    proposal = acceptance.lock(db, proposal.id)
     latest = db.execute(select(func.max(Proposal.version)).where(Proposal.lead_id == onboarding.lead_id)).scalar_one()
     if proposal.version != latest:
         raise AssociateError(f"Only the latest version (v{latest}) can be accepted.", code="not_latest_version",
                              status_code=409, field="proposal_id")
     if proposal.accepted_at is not None:
         raise AssociateError("This proposal has already been accepted.", code="already_accepted", status_code=409)
+    if acceptance.superseded(db, proposal):
+        raise AssociateError("Another proposal for this customer has already been accepted.",
+                             code=acceptance.SUPERSEDED, status_code=409)
     if proposal.status not in (ProposalStatus.approved, ProposalStatus.sent):
         raise AssociateError(f"Only a proposal approved by Grid Nova can be handed over (this one is "
                              f"{proposal.status.value}).", code="not_approved", status_code=409)
@@ -234,8 +240,9 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
     handed_over = datetime.combine(delivered_on, time(0, 0), tzinfo=timezone.utc)
     issued = proposal.date_sent or handed_over
     issued = issued if issued.tzinfo else issued.replace(tzinfo=timezone.utc)
-    if (datetime.combine(today, time(0, 0), tzinfo=timezone.utc) - issued).days > PROPOSAL_VALIDITY_DAYS:
-        raise AssociateError(f"This proposal is more than {PROPOSAL_VALIDITY_DAYS} days old and has expired.",
+    days = acceptance.validity_days()
+    if (datetime.combine(today, time(0, 0), tzinfo=timezone.utc) - issued).days > days:
+        raise AssociateError(f"This proposal is more than {days} days old and has expired.",
                              code="expired", status_code=409)
     details = {"delivered_on": delivered_on.isoformat(), "reference": reference}
     if proposal.status == ProposalStatus.approved:
@@ -263,9 +270,9 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
 
 
 
-def serialize_latest(db: Session, onboarding: CustomerOnboarding) -> dict:
+def serialize_latest(db: Session, onboarding: CustomerOnboarding, *, with_pdf: bool = True) -> dict:
     """The latest formal proposal (or {"prepared": false}). A download link is included
-    once Grid Nova has approved it — never for a draft."""
+    once Grid Nova has approved it — never for a draft — and only when `with_pdf`."""
     proposal = db.execute(select(Proposal).where(Proposal.lead_id == onboarding.lead_id)
                           .order_by(Proposal.version.desc())).scalars().first()
     if proposal is None:
@@ -279,7 +286,7 @@ def serialize_latest(db: Session, onboarding: CustomerOnboarding) -> dict:
             "ready_to_hand_over": proposal.status in (ProposalStatus.approved, ProposalStatus.sent)
                                   and proposal.accepted_at is None,
             "pdf": None}
-    if handed_out:
+    if handed_out and with_pdf:
         key = MemoryManager.proposal_pdf_key(proposal)
         if key:
             from app.storage import r2

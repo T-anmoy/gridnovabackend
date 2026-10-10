@@ -174,19 +174,20 @@ class TestTheSavingIsMeasured:
 
 class TestGatesDoNotChangeBehaviour:
     def test_qualification_still_completes_with_the_gates_on(self, client, _isolated_db):
-        lead = cust = None
+        token = None
         for message in ["hi, thinking about solar", "ok", "thanks",
                         "my name is Priya, priya@sunrise.in",
                         "rooftop, 50 kW, in Surat"]:
             body = {"message": message}
-            if lead:
-                body.update({"lead_id": lead, "customer_id": cust})
+            if token:
+                body["session_token"] = token
             r = client.post("/api/v1/chat/message", json=body).json()
-            lead, cust = r["lead_id"], r["customer_id"]
+            token = r["session_token"]
 
         session = _isolated_db()
         try:
-            fields = dict(MemoryManager(session).get_lead(lead).collected_fields or {})
+            from tests.chat_support import lead_of
+            fields = dict(lead_of(session, token).collected_fields or {})
         finally:
             session.close()
         # The acknowledgement turns skipped extraction; the informative ones did not.

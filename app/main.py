@@ -1,7 +1,10 @@
+import math
 from contextlib import asynccontextmanager
 
 import sentry_sdk
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -45,7 +48,7 @@ async def lifespan(app: FastAPI):
     # (a) build an unversioned schema if the service booted before the bootstrap ran,
     # which the bootstrap then has to refuse, and (b) pre-create a new model's table
     # before its migration runs, so that migration's create_table would fail.
-    if not settings.is_production:
+    if not settings.is_production_like:
         Base.metadata.create_all(bind=engine)
     # Fail loudly at startup if the proposal content config is structurally invalid
     # (overlapping pricing tiers, a rule referencing a missing section, etc.) rather
@@ -67,6 +70,10 @@ async def lifespan(app: FastAPI):
     from app.pricing.policy import load as load_pricing_policy
     load_price_list()
     load_pricing_policy()
+    # And proposal validity, approver rule, booking limits, chat sessions
+    # (config/sales_policy.yaml).
+    from app.rules.sales_policy import load as load_sales_policy
+    load_sales_policy()
     # And the placeholder registry (config/placeholder_registry.yaml).
     from app.placeholders.registry import load as load_placeholder_registry
     load_placeholder_registry()
@@ -79,11 +86,20 @@ if settings.sentry_dsn:
     from app.security.sentry_scrub import sentry_init_options
     sentry_sdk.init(**sentry_init_options(settings.sentry_dsn, settings.environment))
 
+def docs_urls(s) -> dict:
+    """Interactive docs and the live schema are for development and test only; in
+    staging and production docs/api/openapi.json (committed) is the contract."""
+    if s.is_production_like:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
+
+
 app = FastAPI(
     title="Grid Nova AI Operations Platform",
     description="AI-powered lead qualification and proposal management for Grid Nova Energy",
     version="1.0.0",
     lifespan=lifespan,
+    **docs_urls(settings),
 )
 
 # Oversized site-assessment uploads are refused while they arrive. Added before CORS
@@ -127,6 +143,24 @@ app.include_router(execution_admin_router)
 app.include_router(associate_payments_router)
 app.include_router(payments_admin_router)
 app.include_router(public_receipts_router)
+
+
+def _json_safe(value):
+    """Non-finite floats (a rejected Infinity / NaN echoed back as the error's `input`)
+    as strings — JSON cannot carry them, and the default handler would 500."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """FastAPI's standard 422 body, made safe for non-finite input values."""
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 
 @app.exception_handler(Exception)

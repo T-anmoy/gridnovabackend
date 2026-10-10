@@ -12,6 +12,7 @@ these files disagree, the code wins — fix the file.
 | [pma_pricing.md](pma_pricing.md) | Grid Nova's price list: instant estimate, `/pricing/packages`, proposal pricing content, payment schedule, Nova, catalogue-from-nameplate |
 | [hf_c_equipment.md](hf_c_equipment.md) | Associate equipment catalogue, unmatched units and the staff match action, customer name on payment lists |
 | [site_survey.md](site_survey.md) | S1 on-site site survey: survey fields on the onboarding, status, live results and warnings, signatures, the survey part of the submit gate |
+| [be1_public_contracts.md](be1_public_contracts.md) | BE-1: website chat sessions (`session_token`), paged leads list, accept-link codes, public booking limits, estimate-request calculator fields, health, auth changes, territory documents, validation, CSV, PDFs |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)
@@ -25,8 +26,10 @@ these files disagree, the code wins — fix the file.
 - Production: a Clerk session token. Staff tokens resolve through `get_current_employee`,
   associate tokens (Clerk `public_metadata.principal = "associate"`) through
   `get_current_associate` (`app/auth/dependencies.py`).
-- Development only: header pairs `X-Employee-Id` + `X-Employee-Role`, or `X-Associate-Id`
-  (refused in production: 403 "Dev auth headers are not permitted in production.").
+- Development and test only (`ENVIRONMENT` exactly `development` or `test`): header pairs
+  `X-Employee-Id` + `X-Employee-Role`, or `X-Associate-Id` (refused everywhere else: 403
+  "Dev auth headers are only accepted in development and test.").
+- A verified token without `public_metadata`: 403 `session_token_missing_claims` (BE-1).
 
 **401 vs 403** (corrects earlier reports that said "401 for a wrong-audience token"):
 - **401** — missing or invalid credentials. In dev-header mode a request carrying only
@@ -39,6 +42,9 @@ these files disagree, the code wins — fix the file.
   `"Your role cannot view payments."`, `"Only Operations or Admin can change the serial register."`.
   An inactive associate gets 403 (`"This associate account is suspended."` etc.), so
   "active associates only" holds on every associate route.
+
+**Lists.** Paged lists return `{items, page, page_size, total}` — including, since BE-1,
+`GET /dashboard/leads`.
 
 **Errors.** Business errors use a structured detail:
 `{"detail": {"code": "<code>", "message": "<English>", "field"?: "<field>", ...extra}}`.

@@ -162,12 +162,13 @@ class TestUploadLimit:
 
     def _upload(self, client, inputs_id, size):
         return client.post(f"{INPUTS}/{inputs_id}/upload", headers=sales_headers(),
-                           data={"target": "document", "document_type": "bill"},
-                           files={"file": ("f.pdf", io.BytesIO(b"x" * size), "application/pdf")})
+                           data={"target": "document", "document_type": "electricity_bill"},
+                           files={"file": ("f.pdf", io.BytesIO(b"%PDF-" + b"x" * (size - 5)), "application/pdf")})
 
     def test_file_one_byte_over_ten_mb_is_413(self, client, memory, db_session, fake_storage):
         r = self._upload(client, self._inputs(client, memory, db_session), self.LIMIT + 1)
-        assert r.status_code == 413 and r.json() == {"detail": "File exceeds the 10MB limit."}
+        assert r.status_code == 413
+        assert r.json() == {"detail": {"code": "invalid_file", "message": "File exceeds the 10MB limit."}}
         assert not any(c.put for c in fake_storage)
 
     def test_file_of_exactly_ten_mb_is_accepted(self, client, memory, db_session, fake_storage):

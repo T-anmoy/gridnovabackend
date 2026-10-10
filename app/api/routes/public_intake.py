@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 import re
 
@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.api import input_bounds as lim
 from app.memory.db import get_db
 from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import MemoryManager
@@ -118,11 +119,21 @@ class EstimateRequest(BaseModel):
     customer_type: Optional[str] = Field(default=None, max_length=50)
     state: Optional[str] = Field(default=None, max_length=100)
     city: Optional[str] = Field(default=None, max_length=100)
-    average_bill: Optional[float] = Field(default=None, ge=0)
+    average_bill: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_INR)
     roof_type: Optional[str] = Field(default=None, max_length=50)
-    roof_area: Optional[float] = Field(default=None, ge=0)
-    floors: Optional[int] = Field(default=None, ge=1)
+    roof_area: Optional[float] = lim.bounded(ge=0, le=lim.MAX_AREA_SQFT)
+    floors: Optional[int] = Field(default=None, ge=1, le=lim.MAX_FLOORS)
     connection_phase: Optional[str] = Field(default=None, max_length=20)
+    # The website Solar Calculator's own fields (the configurator-lead mirror). All
+    # optional and bounded; kept on the lead's collected_fields under these names.
+    pin_code: Optional[str] = Field(default=None, pattern=r"^\d{6}$")
+    discom: Optional[str] = Field(default=None, max_length=100)
+    monthly_units: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_KWH)
+    sizing_method: Optional[str] = Field(default=None, max_length=50)
+    access_difficulty: Optional[str] = Field(default=None, max_length=50)
+    shading: Optional[str] = Field(default=None, max_length=50)
+    subsidy_interest: Optional[Literal["yes", "no"]] = None
+    indicative_total_inr: Optional[float] = lim.bounded(ge=0, le=lim.MAX_PROJECT_INR)
 
 
 class EstimateResponse(BaseModel):
@@ -187,6 +198,14 @@ def submit_estimate_request(
             "roof_area_sqft": body.roof_area,
             "floors": body.floors,
             "connection_phase": body.connection_phase,
+            "pin_code": body.pin_code,
+            "discom": body.discom,
+            "monthly_units": body.monthly_units,
+            "sizing_method": body.sizing_method,
+            "access_difficulty": body.access_difficulty,
+            "shading": body.shading,
+            "subsidy_interest": body.subsidy_interest,
+            "indicative_total_inr": body.indicative_total_inr,
         }.items()
         if v is not None
     }

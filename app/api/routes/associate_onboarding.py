@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 from app.associates import uploads, validation
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedAssociate, get_current_associate
-from app.auth.scoping import onboarding_scope, require_onboarding_edit, require_onboarding_view
+from app.auth.scoping import (
+    onboarding_scope, require_onboarding_documents, require_onboarding_edit, require_onboarding_view,
+)
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
@@ -317,18 +319,18 @@ def update_onboarding(onboarding_id: int, body: OnboardingUpdate, db: Session = 
 
 
 @router.post("/{onboarding_id}/files", status_code=201)
-async def upload_file(onboarding_id: int, file: UploadFile = File(...),
-                      kind: Literal["document", "photo"] = Form(...),
-                      document_type: Optional[str] = Form(default=None),
-                      photo_slot: Optional[str] = Form(default=None),
-                      latitude: Optional[float] = Form(default=None, ge=-90, le=90),
-                      longitude: Optional[float] = Form(default=None, ge=-180, le=180),
-                      captured_at: Optional[str] = Form(default=None, max_length=40),
-                      capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
-                      exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
-                      accuracy_m: Optional[float] = Form(default=None, gt=0, le=100_000),
-                      db: Session = Depends(get_db),
-                      current: AuthenticatedAssociate = Depends(get_current_associate)):
+def upload_file(onboarding_id: int, file: UploadFile = File(...),
+                kind: Literal["document", "photo"] = Form(...),
+                document_type: Optional[str] = Form(default=None),
+                photo_slot: Optional[str] = Form(default=None),
+                latitude: Optional[float] = Form(default=None, ge=-90, le=90),
+                longitude: Optional[float] = Form(default=None, ge=-180, le=180),
+                captured_at: Optional[str] = Form(default=None, max_length=40),
+                capture_method: Optional[Literal["camera", "gallery"]] = Form(default=None),
+                exif_taken_at_client: Optional[str] = Form(default=None, max_length=40),
+                accuracy_m: Optional[float] = Form(default=None, gt=0, le=100_000),
+                db: Session = Depends(get_db),
+                current: AuthenticatedAssociate = Depends(get_current_associate)):
     """Upload one checklist document or one site photo. The server records when it
     received the file; GPS and the client's capture time are stored if supplied.
     Photos record their provenance (app/execution/photos.py): `capture_method` camera
@@ -355,8 +357,8 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
                                                          "message": f"photo_slot must be one of {list(INSTALLATION_PHOTO_SLOTS)}."})
         target, allowed = "installation_photo", uploads.IMAGE_TYPES
     try:
-        document = await uploads.read_document(file, document_type or photo_slot, allowed=allowed,
-                                               max_bytes=MAX_FILE_BYTES)
+        document = uploads.read_document_sync(file, document_type or photo_slot, allowed=allowed,
+                                              max_bytes=MAX_FILE_BYTES)
     except uploads.UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
     provenance = None
@@ -405,13 +407,14 @@ async def upload_file(onboarding_id: int, file: UploadFile = File(...),
 @router.get("/{onboarding_id}/files/{file_ref}")
 def file_link(onboarding_id: int, file_ref: str, db: Session = Depends(get_db),
               current: AuthenticatedAssociate = Depends(get_current_associate)):
-    """A short-lived signed link to one uploaded file (anyone who can view the customer)."""
+    """A short-lived signed link to one uploaded file — the owner (a territory viewer
+    only when territory_viewers_see_documents is on). Every link is audited."""
     from app.api.routes.proposal_inputs import uploaded_files
     from app.storage import r2
 
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
-    require_onboarding_view(associate, onboarding)
+    require_onboarding_documents(associate, onboarding)
     match = next((f for f in uploaded_files(db.get(ProposalInputs, onboarding.proposal_inputs_id))
                   if f["file_ref"] == file_ref), None)
     if match is None:
@@ -420,6 +423,9 @@ def file_link(onboarding_id: int, file_ref: str, db: Session = Depends(get_db),
         url, expires_at = r2.signed_get_url(match["storage_key"], filename=match["filename"])
     except r2.StorageNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
+    service.audit_document_link(db, onboarding, service.actor(associate), "onboarding_file", file_ref,
+                                match["filename"])
+    db.commit()
     return {"url": url, "expires_at": expires_at.isoformat(), "filename": match["filename"], "file_ref": file_ref}
 
 
@@ -600,13 +606,24 @@ def list_estimates(onboarding_id: int, db: Session = Depends(get_db),
 def get_formal_proposal(onboarding_id: int, db: Session = Depends(get_db),
                         current: AuthenticatedAssociate = Depends(get_current_associate)):
     """The latest formal proposal for this customer, if Grid Nova has prepared one —
-    with a download link once it is approved, so it can be delivered in person."""
-    from app.onboarding import formal
+    with a download link once it is approved, so it can be delivered in person. A
+    territory viewer sees its status only: no price (money is owner-only) and no PDF
+    unless territory_viewers_see_documents is on."""
+    from app.onboarding import config as onboarding_config, formal
 
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
     require_onboarding_view(associate, onboarding)
-    return formal.serialize_latest(db, onboarding)
+    owner = onboarding.owner_associate_id == associate.id
+    data = formal.serialize_latest(db, onboarding,
+                                   with_pdf=owner or onboarding_config.territory_viewers_see_documents())
+    if not owner:
+        data["total_value"] = None
+    if data.get("pdf"):
+        service.audit_document_link(db, onboarding, service.actor(associate), "formal_proposal_pdf",
+                                    str(data.get("proposal_id")))
+        db.commit()
+    return data
 
 
 class InPersonAcceptanceRequest(BaseModel):
@@ -652,27 +669,30 @@ def get_agreement(onboarding_id: int, db: Session = Depends(get_db),
 
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
-    require_onboarding_view(associate, onboarding)
+    require_onboarding_documents(associate, onboarding)
     record = agreement.get(db, onboarding)
-    return {**agreement.serialize(record), "links": agreement.links(record)}
+    links = agreement.links(record)
+    if links:
+        service.audit_document_link(db, onboarding, service.actor(associate), "agreement", ",".join(sorted(links)))
+        db.commit()
+    return {**agreement.serialize(record), "links": links}
 
 
 @router.post("/{onboarding_id}/agreement/signed")
-async def upload_signed_agreement(onboarding_id: int, file: UploadFile = File(...),
-                                  stamp_paper_number: str = Form(..., max_length=50),
-                                  stamp_paper_date: str = Form(...),
-                                  db: Session = Depends(get_db),
-                                  current: AuthenticatedAssociate = Depends(get_current_associate)):
+def upload_signed_agreement(onboarding_id: int, file: UploadFile = File(...),
+                            stamp_paper_number: str = Form(..., max_length=50),
+                            stamp_paper_date: str = Form(...),
+                            db: Session = Depends(get_db),
+                            current: AuthenticatedAssociate = Depends(get_current_associate)):
     """Upload the signed agreement scan with the stamp paper's number and date (owner)."""
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
     require_onboarding_edit(associate, onboarding)
-    return await _signed_upload(db, onboarding, service.actor(associate), file, stamp_paper_number,
-                                stamp_paper_date)
+    return _signed_upload(db, onboarding, service.actor(associate), file, stamp_paper_number, stamp_paper_date)
 
 
-async def _signed_upload(db: Session, onboarding: CustomerOnboarding, performed_by: str, file: UploadFile,
-                         stamp_paper_number: str, stamp_paper_date: str) -> dict:
+def _signed_upload(db: Session, onboarding: CustomerOnboarding, performed_by: str, file: UploadFile,
+                   stamp_paper_number: str, stamp_paper_date: str) -> dict:
     """Shared by the associate and staff upload routes."""
     from datetime import date as _date
 
@@ -685,8 +705,8 @@ async def _signed_upload(db: Session, onboarding: CustomerOnboarding, performed_
         raise HTTPException(status_code=422, detail={"code": "invalid_stamp_paper_date", "field": "stamp_paper_date",
                                                      "message": "stamp_paper_date must be YYYY-MM-DD."})
     try:
-        document = await uploads.read_document(file, "signed agreement", allowed=uploads.DOCUMENT_TYPES,
-                                               max_bytes=MAX_FILE_BYTES)
+        document = uploads.read_document_sync(file, "signed agreement", allowed=uploads.DOCUMENT_TYPES,
+                                              max_bytes=MAX_FILE_BYTES)
     except uploads.UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
     from app.storage import r2

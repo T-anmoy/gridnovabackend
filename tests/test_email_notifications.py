@@ -138,7 +138,7 @@ class TestStaffEvents:
         email_on()
         r1 = client.post("/api/v1/chat/message", json={"message": "Hi, I want solar for my home."})
         assert sent == []  # a first message is not a lead worth an email yet
-        ids = {"lead_id": r1.json()["lead_id"], "customer_id": r1.json()["customer_id"]}
+        ids = {"session_token": r1.json()["session_token"]}
         r2 = client.post("/api/v1/chat/message", json={
             "message": ("My name is Rohan Mehta, email rohan.mehta@example.com. I need a "
                         "rooftop solar system, about 8kW capacity, located in Pune, Maharashtra."),
@@ -162,7 +162,8 @@ class TestStaffEvents:
         monkeypatch.setattr(google_calendar, "get_busy_intervals", lambda *a, **k: [])
         monkeypatch.setattr(google_calendar, "insert_event",
                             lambda **k: {"google_event_id": "ev", "meet_link": "https://meet.google.com/x"})
-        slot = datetime.now(timezone.utc) + timedelta(days=1)
+        from tests.booking_support import grid_slot
+        slot = grid_slot()
         r = client.post("/api/v1/public/booking",
                         json={"name": "Booker", "email": "booker@example.com", "scheduled_at": slot.isoformat()})
         assert r.status_code == 200, r.text

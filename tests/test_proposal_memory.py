@@ -24,6 +24,14 @@ QUALIFIED_FIELDS = {
 }
 
 
+def _approve_and_send(memory, proposal_id):
+    """The real path to a customer acceptance (BE-1 S5: no status may be skipped)."""
+    from app.memory.models import ProposalStatus
+    memory.transition_proposal_status(proposal_id, ProposalStatus.approved, performed_by="emp-sales-1",
+                                      approved_by_employee_id="emp-sales-1")
+    memory.transition_proposal_status(proposal_id, ProposalStatus.sent, performed_by="emp-sales-1")
+
+
 def _qualified_lead(memory: MemoryManager, email="priya@sunrisetextiles.in"):
     customer = memory.get_or_create_customer(
         email=email, name="Priya Sharma", performed_by="test"
@@ -296,6 +304,7 @@ class TestDraftingNotes:
             requires_manager_signoff=False, reason="negotiated",
             performed_by="emp-sales-1",
         )
+        _approve_and_send(memory, proposal.id)
         memory.mark_customer_accepted(proposal.id)
         db_session.commit()
 
@@ -431,6 +440,7 @@ class TestValueLookups:
             proposal_id=proposal.id, new_value=444_000.0,
             requires_manager_signoff=False, reason="agreed", performed_by="emp-sales-1",
         )
+        _approve_and_send(memory, proposal.id)
         memory.mark_customer_accepted(proposal.id)  # placeholder rates mean the draft
         # itself has no value, so the accepted figure comes from the adjustment above
         db_session.commit()

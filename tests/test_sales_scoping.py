@@ -45,6 +45,7 @@ def world(memory, db_session):
 
 
 def _ids(rows, key="id"):
+    rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows  # paged lists (BE-1 C8)
     return {r[key] for r in rows}
 
 
@@ -73,13 +74,13 @@ class TestLeadList:
         assert ids == {world[n]["lead"] for n in expected}
 
     def test_engineer_list_unchanged(self, client, world):
-        assert len(client.get(f"{DASH}/leads", headers=engineer_headers()).json()) == 3
+        assert client.get(f"{DASH}/leads", headers=engineer_headers()).json()["total"] == 3
 
     def test_invalid_filter_is_422(self, client, world):
         assert client.get(f"{DASH}/leads", params={"assigned": "theirs"}, headers=SALES).status_code == 422
 
     def test_operations_sees_none(self, client, world):
-        assert client.get(f"{DASH}/leads", headers=SUB).json() == []
+        assert client.get(f"{DASH}/leads", headers=SUB).json()["items"] == []
         assert client.get(f"{DASH}/proposals", headers=SUB).json()["items"] == []
         assert client.get(f"{INPUTS}/", headers=SUB).json()["items"] == []
         assert client.get(f"{DASH}/activity/recent", headers=SUB).json()["items"] == []
@@ -190,8 +191,8 @@ class TestSingleRecordMatrix:
 class TestAssessmentFiles:
     def _upload(self, client, inputs_id):
         r = client.post(f"{INPUTS}/{inputs_id}/upload", headers=admin_headers(),
-                        data={"target": "document", "document_type": "bill"},
-                        files={"file": ("b.pdf", io.BytesIO(b"%PDF"), "application/pdf")})
+                        data={"target": "document", "document_type": "electricity_bill"},
+                        files={"file": ("b.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")})
         return r.json()["files"][0]["file_ref"]
 
     def test_file_download_follows_the_lead(self, client, world):
@@ -204,8 +205,8 @@ class TestAssessmentFiles:
 
     def test_upload_to_another_reps_assessment_is_403(self, client, world):
         r = client.post(f"{INPUTS}/{world['other']['inputs']}/upload", headers=SALES,
-                        data={"target": "document", "document_type": "bill"},
-                        files={"file": ("b.pdf", io.BytesIO(b"%PDF"), "application/pdf")})
+                        data={"target": "document", "document_type": "electricity_bill"},
+                        files={"file": ("b.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")})
         assert r.status_code == 403
 
 

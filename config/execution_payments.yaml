@@ -151,6 +151,9 @@ payments:
     # P4 — receipt numbering. {YYYY} is the year of verification, {SEQ:06} a per-year
     # sequence padded to six digits.
     numbering: "GNR-{YYYY}-{SEQ:06}"    # [UNCONFIRMED]
+    # A receipt still waiting to be emailed this long after it was numbered is flagged
+    # for Accounts (attention reason receipt_pending_stale).
+    pending_alert_minutes: 60           # [UNCONFIRMED]
     # P5 — company block printed on every receipt and on the "pay only here" reminder.
     company:
       legal_name: "Grid Nova Energy"    # [UNCONFIRMED] — legal form pending

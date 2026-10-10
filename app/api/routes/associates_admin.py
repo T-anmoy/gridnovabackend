@@ -219,6 +219,17 @@ class ApproveRequest(BaseModel):
     verification_call_note: str = Field(max_length=2000)
 
 
+def _approval_conflict(db: Session, application_type: AssociateType, application_id: int) -> HTTPException:
+    """After a refused insert: re-read what is true now and say which conflict it was —
+    the application was approved meanwhile, or the seat was taken."""
+    application = service.get_application(db, application_type, application_id)
+    if application is not None and application.status == ApplicationStatus.approved:
+        return HTTPException(status_code=409, detail={
+            "code": "invalid_transition", "message": "This application was just approved by someone else."})
+    return HTTPException(status_code=409, detail={"code": "seat_full",
+                                                 "message": "That seat was just filled by another approval."})
+
+
 @router.post("/associate-applications/{application_type}/{application_id}/approve")
 def approve_application(application_type: AssociateType, application_id: int, body: ApproveRequest,
                         db: Session = Depends(get_db),
@@ -237,7 +248,12 @@ def approve_application(application_type: AssociateType, application_id: int, bo
             "code": "verification_call_required", "field": "verification_call_completed",
             "message": "Complete the verification call before approving.",
         })
-    application = _load_application(db, application_type, application_id)
+    _load_application(db, application_type, application_id)
+    # Lock the application row: a second, simultaneous approval waits here and then
+    # sees it approved (invalid_transition) instead of racing to insert a duplicate.
+    model = service.APPLICATION_MODELS[application_type]
+    application = db.execute(select(model).where(model.id == application_id).with_for_update()
+                             .execution_options(populate_existing=True)).scalar_one()
     today = service.today_ist()
     try:
         associate = service.approve(db, application, application_type, employee.employee_id,
@@ -245,6 +261,9 @@ def approve_application(application_type: AssociateType, application_id: int, bo
     except service.AssociateError as exc:
         db.rollback()
         raise _error(exc)
+    except IntegrityError:
+        db.rollback()
+        raise _approval_conflict(db, application_type, application_id)
 
     payload = {"associate_id": associate.associate_id, "associate_type": application_type.value,
                "name": associate.full_name, "level": associate.level.value if associate.level else None,
@@ -256,8 +275,7 @@ def approve_application(application_type: AssociateType, application_id: int, bo
     except IntegrityError:
         # The seat index is the last line of defence against two approvals racing.
         db.rollback()
-        raise HTTPException(status_code=409, detail={"code": "seat_full",
-                                                     "message": "That seat was just filled by another approval."})
+        raise _approval_conflict(db, application_type, application_id)
 
     issuance.send_clerk_invite(db, associate, employee.employee_id)
     issuance.generate_documents(db, associate, employee.employee_id, today)

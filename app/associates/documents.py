@@ -139,6 +139,8 @@ def welcome_letter_html(details: CardDetails, body_text: str) -> str:
 
 
 def render_pdf(html_doc: str) -> bytes:
-    from weasyprint import HTML
+    """The render choke point for ID cards, welcome letters, receipts and agreements —
+    through the data-only URL fetcher (app/pdf/fetcher.py)."""
+    from app.pdf.fetcher import render_pdf as render_with_safe_fetcher
 
-    return HTML(string=html_doc).write_pdf()
+    return render_with_safe_fetcher(html_doc)

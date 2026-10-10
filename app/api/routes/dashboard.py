@@ -26,7 +26,7 @@ from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
 from app.memory.db import get_db
 from app.memory.lead_fields import apply_lead_fields
-from app.memory.memory_manager import TERMINAL_STAGES, MemoryManager
+from app.memory.memory_manager import TERMINAL_STAGES, MemoryManager, ProposalTransitionError
 from app.memory.models import (
     EmployeeRole, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
 )
@@ -34,6 +34,7 @@ from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
 from app.rules.project_types import family_for_project_type
 from app.scheduling import availability, booking, google_calendar
+from app.security.csv_cells import safe_cell
 from app.security.internal_key import has_valid_internal_key
 from app.notifications.notifier import notifier
 from app.orchestrator.orchestrator import orchestrator
@@ -143,13 +144,22 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
 
 # ── Leads ─────────────────────────────────────────────────────────────────────
 
+LEADS_MAX_PAGE_SIZE = 200
+
+
 @router.get("/leads")
 def list_leads(
     source: Optional[str] = Query(default=None),
     assigned: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=LEADS_MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
+    """A page of leads, newest first: {items, page, page_size, total}. `q` matches the
+    customer's name, email or phone, or a lead id — for an Engineer (who never sees
+    contact details) only a lead id. Every filter runs in SQL."""
     source_enum: Optional[LeadSource] = None
     if source:
         try:
@@ -160,8 +170,11 @@ def list_leads(
     memory = MemoryManager(db)
     # One visibility rule (app/auth/scoping.py): Sales sees its own and unassigned
     # leads; ?assigned=me|unassigned|any narrows it for every role.
-    leads = memory.list_leads(source=source_enum, scope=lead_scope(employee, assigned))
-    return [
+    if employee.is_engineer and q and not q.strip().isdigit():
+        return {"items": [], "page": page, "page_size": page_size, "total": 0}
+    leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q,
+                                         page=page, page_size=page_size)
+    items = [
         {
             "id": l.id,
             "customer_id": l.customer_id,
@@ -174,6 +187,7 @@ def list_leads(
         }
         for l in leads
     ]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
 # ── CSV exports (Admin / Management only) ─────────────────────────────────────
@@ -182,6 +196,8 @@ def list_leads(
 # as an {id} path segment and fail int-parsing.
 
 def _csv_response(rows: list[list], header: list[str], filename: str) -> StreamingResponse:
+    """Every cell through the CSV-injection guard (app/security/csv_cells.py): customer
+    names here are typed into public forms and the website chat."""
     def _generate():
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -189,7 +205,7 @@ def _csv_response(rows: list[list], header: list[str], filename: str) -> Streami
         yield buffer.getvalue()
         buffer.seek(0); buffer.truncate(0)
         for row in rows:
-            writer.writerow(row)
+            writer.writerow([safe_cell(v) for v in row])
             yield buffer.getvalue()
             buffer.seek(0); buffer.truncate(0)
 
@@ -675,17 +691,24 @@ def approve_proposal(
             detail="This proposal exceeds the standard threshold and requires manager sign-off. Use /manager-sign-off instead.",
         )
 
-    # Associate-sourced customers only: standard approval must come from a different
-    # employee than the one who drafted this version (four eyes on commission-bearing
-    # work). Every other proposal keeps the existing 2-tier rules unchanged.
+    # Standard approval must come from a different employee than the one who drafted
+    # this version: always for associate-sourced customers (four eyes on commission-
+    # bearing work), and for every lead when config/sales_policy.yaml
+    # require_different_approver_for_all_leads is true (an unconfirmed default: false).
+    from app.rules import sales_policy
+
     approving_lead = memory.get_lead(proposal.lead_id)
-    if (approving_lead is not None
-            and approving_lead.source in (LeadSource.associate, LeadSource.preferred_associate)
-            and proposal.drafted_by == employee.employee_id):
-        raise HTTPException(
-            status_code=403,
-            detail="You drafted this proposal. For an associate-sourced customer a different employee must approve it.",
-        )
+    associate_sourced = approving_lead is not None and approving_lead.source in (
+        LeadSource.associate, LeadSource.preferred_associate)
+    if proposal.drafted_by == employee.employee_id:
+        if associate_sourced:
+            raise HTTPException(
+                status_code=403,
+                detail="You drafted this proposal. For an associate-sourced customer a different employee must approve it.",
+            )
+        if approving_lead is not None and sales_policy.require_different_approver_for_all_leads():
+            raise HTTPException(status_code=403,
+                                detail="You drafted this proposal. A different employee must approve it.")
 
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot approve.")
@@ -797,12 +820,15 @@ def request_revision(
         raise HTTPException(status_code=404, detail="Proposal not found")
     require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
-    memory.transition_proposal_status(
-        proposal_id=proposal_id,
-        new_status=ProposalStatus.revision_requested,
-        performed_by=employee.employee_id,
-        revision_reason=body.reason,
-    )
+    try:
+        memory.transition_proposal_status(
+            proposal_id=proposal_id,
+            new_status=ProposalStatus.revision_requested,
+            performed_by=employee.employee_id,
+            revision_reason=body.reason,
+        )
+    except ProposalTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)})
     memory.add_timeline_event(
         lead_id=proposal.lead_id,
         event_type=TimelineEventType.revision_requested,
@@ -1587,48 +1613,25 @@ def overview_stats(
 
 # ── Calendar connection + meeting scheduling ──────────────────────────────────
 
-def _sign_state(employee_id: str) -> str:
-    """Sign the OAuth state so the callback can trust which employee it belongs to
-    (the browser redirect from Google carries no auth header)."""
-    import base64
-    import hashlib
-    import hmac
-
-    from app.config import settings as _settings
-
-    secret = (_settings.clerk_secret_key or _settings.fernet_encryption_key or "dev-insecure").encode()
-    sig = hmac.new(secret, employee_id.encode(), hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(f"{employee_id}:{sig}".encode()).decode()
-
-
-def _verify_state(state: str) -> Optional[str]:
-    import base64
-    import hashlib
-    import hmac
-
-    from app.config import settings as _settings
-
-    try:
-        raw = base64.urlsafe_b64decode(state.encode()).decode()
-        employee_id, sig = raw.rsplit(":", 1)
-    except Exception:
-        return None
-    secret = (_settings.clerk_secret_key or _settings.fernet_encryption_key or "dev-insecure").encode()
-    expected = hmac.new(secret, employee_id.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
-        return None
-    return employee_id
-
-
 @router.get("/employees/me/calendar/connect")
 def calendar_connect(
+    db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    """Start the Google OAuth consent flow for the authenticated employee."""
+    """Start the Google OAuth consent flow for the authenticated employee. The `state`
+    is single-use and expires after 10 minutes (app/scheduling/oauth_state.py)."""
+    from app.scheduling import oauth_state
+
     try:
-        auth_url = google_calendar.build_authorization_url(state=_sign_state(employee.employee_id))
+        state = oauth_state.issue(db, employee.employee_id)
+        auth_url = google_calendar.build_authorization_url(state=state)
+    except oauth_state.OAuthStateNotConfiguredError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail={"code": "oauth_state_not_configured", "message": str(exc)})
     except google_calendar.GoogleCalendarNotConfiguredError as exc:
+        db.rollback()
         raise HTTPException(status_code=503, detail=str(exc))
+    db.commit()
     return {"authorization_url": auth_url}
 
 
@@ -1653,9 +1656,13 @@ def calendar_callback(
     """OAuth callback — identifies the employee from the signed `state` (no bearer on
     a browser redirect), exchanges the code, and stores the refresh token encrypted.
     Always ends in a 303 back to the dashboard (see _calendar_redirect)."""
-    employee_id = _verify_state(state) if state else None
+    from app.scheduling import oauth_state
+
+    employee_id = oauth_state.consume(db, state) if state else None
     if not employee_id:
         return _calendar_redirect("invalid_state")
+    # The state is spent whatever happens next: a retry starts a new consent flow.
+    db.commit()
     if error:
         # Google redirects here with ?error=... when consent is declined or fails.
         return _calendar_redirect("access_denied" if error == "access_denied" else "consent_failed")
@@ -1809,7 +1816,7 @@ def list_meetings(
 
 # ── Internal jobs ─────────────────────────────────────────────────────────────
 
-async def _require_admin_or_internal_key(
+def _require_admin_or_internal_key(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -1819,7 +1826,7 @@ async def _require_admin_or_internal_key(
     same as no key, so it falls through to that path (401 without a token)."""
     if has_valid_internal_key(request):
         return
-    employee = await get_current_employee(request, credentials, db)
+    employee = get_current_employee(request, credentials, db)
     if not employee.is_admin:
         raise HTTPException(status_code=403, detail="Only Admin can run the stale-lead check.")
 
@@ -1856,20 +1863,14 @@ class MemoryQuestionRequest(BaseModel):
 def _assert_may_read_customer_memory(
     memory: MemoryManager, customer_id: int, employee: AuthenticatedEmployee
 ) -> None:
-    """Same scoping as the rest of the Sales-role surface: unassigned leads are fair
-    game, a customer whose every lead belongs to another rep is not. Admin and
-    Management see everything, as they do elsewhere.
+    """Same scoping as the rest of the Sales-role surface: a customer with at least
+    one lead that is the caller's or unassigned. A customer whose every lead belongs to
+    another rep — or who has no lead at all — is not. Admin and Management see
+    everything, as they do elsewhere.
     """
     if not employee.is_sales:
         return
-    dossier = memory.get_customer_dossier(customer_id)
-    leads = dossier.get("leads") or []
-    if not leads:
-        return
-    if all(
-        lead.assigned_employee_id and lead.assigned_employee_id != employee.employee_id
-        for lead in leads
-    ):
+    if not memory.customer_visible_to_sales(customer_id, employee.employee_id):
         raise HTTPException(
             status_code=403, detail="This customer's leads are assigned to another rep."
         )
@@ -1895,10 +1896,13 @@ def ask_customer_memory(
             raise HTTPException(status_code=404, detail="Customer not found")
         _assert_may_read_customer_memory(memory, body.customer_id, employee)
 
+    # Sales: name matches outside the caller's lead scope are dropped before anything
+    # is listed, resolved or handed to the model.
     result = orchestrator.answer_customer_question(
         question=body.question,
         performed_by=employee.employee_id,
         customer_id=body.customer_id,
+        scope_employee_id=employee.employee_id if employee.is_sales else None,
     )
 
     # A question that resolved by name still has to pass the same scoping check —

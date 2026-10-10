@@ -45,6 +45,8 @@ class OrchestratorState(TypedDict, total=False):
     candidates: Optional[list]
     citations: Optional[list]
     recall_mode: Optional[str]
+    # A Sales employee's id when recall must stay inside their lead scope.
+    scope_employee_id: Optional[str]
     # Correlates one turn across the agent, the harness and the audit trail.
     agent_run_id: Optional[str]
 
@@ -226,6 +228,7 @@ def _recall_node(state: OrchestratorState) -> OrchestratorState:
                 question=state.get("question", ""),
                 customer_id=state.get("customer_id"),
                 performed_by=state.get("performed_by", "employee"),
+                scope_employee_id=state.get("scope_employee_id"),
             ),
             memory=memory,
             customer_id=state.get("customer_id"),
@@ -340,6 +343,7 @@ class Orchestrator:
         question: str,
         performed_by: str,
         customer_id: Optional[int] = None,
+        scope_employee_id: Optional[str] = None,
     ) -> dict:
         """Answer an employee's question about a customer from stored memory.
 
@@ -350,6 +354,7 @@ class Orchestrator:
             "question": question,
             "customer_id": customer_id,
             "performed_by": performed_by,
+            "scope_employee_id": scope_employee_id,
             "channel": "dashboard",
             "message": "",
             "resolved": False,

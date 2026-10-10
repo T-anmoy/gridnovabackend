@@ -19,12 +19,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.api import input_bounds as lim
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
@@ -38,11 +40,11 @@ router = APIRouter(prefix="/api/v1/pricing")
 
 class _BaseEstimateRequest(BaseModel):
     segment: str = Field(min_length=1)
-    size_kw: Optional[float] = Field(default=None, gt=0)
-    monthly_bill_inr: Optional[float] = Field(default=None, ge=0)
+    size_kw: Optional[float] = lim.bounded(gt=0, le=lim.MAX_KW)
+    monthly_bill_inr: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_INR)
     state: str = Field(min_length=1)
     roof_type: Optional[str] = None
-    floors: Optional[int] = Field(default=None, ge=1)
+    floors: Optional[int] = Field(default=None, ge=1, le=lim.MAX_FLOORS)
     shading: Optional[str] = None
     is_remote: bool = False
 
@@ -95,6 +97,7 @@ def _pricing_inputs(body: _BaseEstimateRequest) -> PricingInputs:
 @router.post("/estimate")
 def public_estimate(
     body: PublicEstimateRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Public, unauthenticated. The list price for the size given (or the size the
@@ -104,6 +107,7 @@ def public_estimate(
     a list price has no category breakdown."""
     from app.pricing import list_pricing, price_list
 
+    _check_rate_limit(request, _estimate_request_log)
     if body.segment.strip().lower() not in pricing_engine.KNOWN_SEGMENTS:
         raise HTTPException(status_code=422, detail=f"Unknown segment: {body.segment!r}.")
     lp = list_pricing.evaluate(state=body.state, segment=body.segment, is_housing_society=body.is_housing_society,
@@ -177,28 +181,36 @@ def full_breakdown(
 _INSTANT_ESTIMATE_RATE_LIMIT = 20
 _INSTANT_ESTIMATE_RATE_WINDOW_SECONDS = 60
 _instant_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+# /estimate and /packages are public too and get the same per-IP limit, in their own
+# buckets (BE-1 S10).
+_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_packages_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
 
 
-def _check_instant_estimate_rate_limit(request: Request) -> None:
+def _check_rate_limit(request: Request, log: defaultdict) -> None:
     ip = client_ip(request)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
-    _instant_estimate_request_log[ip] = [t for t in _instant_estimate_request_log[ip] if t > cutoff]
-    if len(_instant_estimate_request_log[ip]) >= _INSTANT_ESTIMATE_RATE_LIMIT:
+    log[ip] = [t for t in log[ip] if t > cutoff]
+    if len(log[ip]) >= _INSTANT_ESTIMATE_RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before trying again.")
-    _instant_estimate_request_log[ip].append(now)
+    log[ip].append(now)
+
+
+def _check_instant_estimate_rate_limit(request: Request) -> None:
+    _check_rate_limit(request, _instant_estimate_request_log)
 
 
 class InstantEstimateRequest(BaseModel):
     segment: str = Field(min_length=1)
     state: str = Field(min_length=1)
     sizing_method: str = Field(min_length=1)  # "by_units" | "by_bill" | "by_roof_area"
-    monthly_units_kwh: Optional[float] = Field(default=None, gt=0)
-    monthly_bill_inr: Optional[float] = Field(default=None, gt=0)
-    usable_roof_area_sqft: Optional[float] = Field(default=None, gt=0)
+    monthly_units_kwh: Optional[float] = lim.bounded(gt=0, le=lim.MAX_MONTHLY_KWH)
+    monthly_bill_inr: Optional[float] = lim.bounded(gt=0, le=lim.MAX_MONTHLY_INR)
+    usable_roof_area_sqft: Optional[float] = lim.bounded(gt=0, le=lim.MAX_AREA_SQFT)
     connection_phase: Optional[str] = None
     roof_type: Optional[str] = None
-    floors: Optional[int] = Field(default=None, ge=1)
+    floors: Optional[int] = Field(default=None, ge=1, le=lim.MAX_FLOORS)
     shading: Optional[str] = None
     access_difficulty: Optional[str] = None
     is_remote: bool = False
@@ -263,11 +275,18 @@ def instant_estimate(
 
 
 @router.get("/packages")
-def packages():
+def packages(request: Request):
     """Public — the two packages as Grid Nova's master data describes them: makes
     ("or equivalent", never models), panel technology, commercial terms, phase ranges
     and the price-list version. The price table is included only when the pricing
-    policy's `public_price_display` is `exact`."""
+    policy's `public_price_display` is `exact`. Built once per process: it depends only
+    on the two config files, which are themselves loaded once."""
+    _check_rate_limit(request, _packages_request_log)
+    return _packages_body()
+
+
+@lru_cache(maxsize=1)
+def _packages_body() -> dict:
     from app.pricing import policy, price_list
 
     data = price_list.load()

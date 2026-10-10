@@ -180,7 +180,8 @@ class TestKillSwitch:
         session = _isolated_db()
         try:
             mem = MemoryManager(session)
-            messages = mem.get_lead_context(body["lead_id"])["messages"]
+            from tests.chat_support import lead_of
+            messages = mem.get_lead_context(lead_of(session, body["session_token"]).id)["messages"]
             # The customer's own words are never lost because the agent stood down.
             assert any(
                 m.role == MessageRole.customer and "factory" in m.content for m in messages
@@ -199,11 +200,12 @@ class TestKillSwitch:
             "message": "my name is Raj, 50kW rooftop in Pune, raj@example.com",
         })
         assert response.status_code == 200
-        lead_id = response.json()["lead_id"]
+        token = response.json()["session_token"]
 
         session = _isolated_db()
         try:
-            lead = MemoryManager(session).get_lead(lead_id)
+            from tests.chat_support import lead_of
+            lead = lead_of(session, token)
             assert dict(lead.collected_fields or {}) == {}
             assert lead.pipeline_stage == PipelineStage.new
         finally:

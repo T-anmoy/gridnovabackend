@@ -15,6 +15,8 @@ share the matching logic via MemoryManager._find_matching_customer().
 """
 import uuid
 
+import pytest
+
 from app.memory.models import Customer
 from app.memory.memory_manager import PLACEHOLDER_EMAIL_DOMAIN, _normalize_email, _normalize_phone
 
@@ -57,12 +59,12 @@ class TestEmailCaseAndWhitespaceNormalization:
             json={"message": "hi", "email": "endpointtest@example.com", "name": "Endpoint Test"},
         )
         assert r2.status_code == 200
-        # Same customer resolved on the second call, regardless of casing —
-        # separately, chat.py correctly reuses the customer's still-open lead
-        # from the first call rather than minting a second one, which is why
-        # lead_id also matches here (that reuse behaviour predates this fix
-        # and isn't what this test is checking).
-        assert r2.json()["customer_id"] is not None
+        # The email (any casing) is recognised as the existing customer's — and,
+        # because a chat cannot prove who is typing, recorded as a claim rather than
+        # attached (BE-1 S2): the chat gets its own placeholder customer.
+        from tests.chat_support import customer_of
+        from app.memory.memory_manager import is_placeholder_email
+        assert is_placeholder_email(customer_of(memory._db, r2.json()["session_token"]).email)
 
         rows = memory._db.execute(
             __import__("sqlalchemy").select(Customer).where(
@@ -169,9 +171,8 @@ class TestNormalizationHelpers:
 
 class TestUpdateCustomerDetailsPhoneMatching:
     """The same phone-fallback matching Phase 1 added to get_or_create_customer,
-    now applied to update_customer_details() too — the Sales Agent's
-    mid-conversation path (app/agents/sales_agent.py), which initially only
-    got the email-normalization fix and still had the same phone-dedup gap."""
+    applied to update_customer_details() too. A match merges only on the staff
+    paths (allow_merge=True); the chat records it as a claim instead (BE-1 S2)."""
 
     def test_placeholder_customer_matched_by_phone_during_update(self, memory, db_session):
         known = memory.get_or_create_customer(
@@ -183,7 +184,7 @@ class TestUpdateCustomerDetailsPhoneMatching:
 
         surviving = memory.update_customer_details(
             customer_id=placeholder.id, name="Known Person", email=None,
-            phone="9876500010", performed_by="sales_agent",
+            phone="9876500010", performed_by="staff", allow_merge=True,
         )
         db_session.commit()
         assert surviving is not None
@@ -199,7 +200,7 @@ class TestUpdateCustomerDetailsPhoneMatching:
 
         surviving = memory.update_customer_details(
             customer_id=placeholder.id, name="A", email=None,
-            phone="+91 98765 00011", performed_by="sales_agent",
+            phone="+91 98765 00011", performed_by="staff", allow_merge=True,
         )
         db_session.commit()
         assert surviving.id == known.id
@@ -219,7 +220,7 @@ class TestUpdateCustomerDetailsPhoneMatching:
 
         surviving = memory.update_customer_details(
             customer_id=person_two.id, name="Person Two", email=None,
-            phone="9876500012", performed_by="sales_agent",
+            phone="9876500012", performed_by="staff", allow_merge=True,
         )
         db_session.commit()
         assert surviving is not None
@@ -227,8 +228,9 @@ class TestUpdateCustomerDetailsPhoneMatching:
         assert person_one.id != person_two.id
 
     def test_live_through_the_real_chat_endpoint(self, client, memory):
-        """The actual call site: app/agents/sales_agent.py now passes phone
-        through to update_customer_details(), not just name/email."""
+        """The actual call site: app/agents/sales_agent.py passes the phone through
+        to update_customer_details(), which recognises the match — and, from the
+        anonymous chat, records it for staff instead of attaching (BE-1 S2)."""
         r1 = client.post(
             "/api/v1/public/estimate-request",
             json={"name": "Chat Phone Match", "email": "chat-phone-match@example.com", "phone": "9876500013"},
@@ -243,4 +245,30 @@ class TestUpdateCustomerDetailsPhoneMatching:
             json={"message": "hi, my number is 9876500013, thinking about solar"},
         )
         assert r2.status_code == 200
-        assert r2.json()["customer_id"] == known_customer_id
+        from tests.chat_support import customer_of, lead_of
+        token = r2.json()["session_token"]
+        assert customer_of(memory._db, token).id != known_customer_id
+        notes = [e.description for e in memory.get_lead_context(lead_of(memory._db, token).id)["timeline"]]
+        assert any(f"Possible returning customer #{known_customer_id} (unverified" in (n or "") for n in notes)
+
+
+class TestCalculatorFieldsOnEstimateRequest:
+    """BE-1 C7: the configurator-lead mirror's calculator fields are kept."""
+
+    def test_calculator_fields_land_in_collected_fields(self, client, memory):
+        body = {"name": "Calc", "email": "calc@example.com", "pin_code": "700091", "discom": "CESC",
+                "monthly_units": 450, "sizing_method": "by_units", "floors": 2, "access_difficulty": "easy",
+                "shading": "partial", "subsidy_interest": "yes", "indicative_total_inr": 245000.0}
+        r = client.post("/api/v1/public/estimate-request", json=body)
+        assert r.status_code == 200, r.text
+        fields = memory.get_lead(r.json()["lead_id"]).collected_fields
+        for key in ("pin_code", "discom", "monthly_units", "sizing_method", "floors", "access_difficulty",
+                    "shading", "subsidy_interest", "indicative_total_inr"):
+            assert fields[key] == body[key], key
+
+    @pytest.mark.parametrize("field, value", [("pin_code", "7000"), ("subsidy_interest", "maybe"),
+                                              ("discom", "x" * 101), ("indicative_total_inr", -1)])
+    def test_bounded(self, client, field, value):
+        r = client.post("/api/v1/public/estimate-request",
+                        json={"name": "Calc", "email": "calc2@example.com", field: value})
+        assert r.status_code == 422

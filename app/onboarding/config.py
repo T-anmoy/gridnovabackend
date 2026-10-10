@@ -27,6 +27,8 @@ def _validate(data: dict) -> dict:
 
     versions = data.get("notice_versions") or {}
     need(data.get("current_notice_version") in versions, "current_notice_version must name one of notice_versions")
+    need(isinstance(data.get("territory_viewers_see_documents"), bool),
+         "territory_viewers_see_documents must be true/false")
     days = data.get("attribution_lock_days")
     need(isinstance(days, int) and days > 0, "attribution_lock_days must be a positive whole number")
     docs = data.get("required_documents") or []
@@ -107,6 +109,10 @@ def current_notice() -> tuple[str, str]:
     data = load()
     version = data["current_notice_version"]
     return version, str(data["notice_versions"][version]["text"]).strip()
+
+
+def territory_viewers_see_documents() -> bool:
+    return load()["territory_viewers_see_documents"]
 
 
 def notice_is_placeholder() -> bool:

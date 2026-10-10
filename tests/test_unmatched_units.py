@@ -59,7 +59,7 @@ class TestAssociateCatalogue:
         _equipment(db_session, brand="DUMMY", model_name="DUMMY-M540", is_placeholder=True)
         assert client.get(CATALOGUE, headers=headers(gna)).json()["items"][0]["is_placeholder"] is True
         # Only the route's view of the environment changes (auth keeps its dev headers).
-        monkeypatch.setattr(mod, "settings", SimpleNamespace(is_production=True))
+        monkeypatch.setattr(mod, "settings", SimpleNamespace(is_production=True, is_production_like=True))
         assert client.get(CATALOGUE, headers=headers(gna)).json()["items"] == []
 
     def test_auth(self, client, db_session, onboarding_ready):

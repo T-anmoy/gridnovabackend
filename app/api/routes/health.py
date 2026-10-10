@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -18,13 +18,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @router.get("/api/v1/health")
-def health():
-    """Liveness: the process is up. Touches nothing else."""
-    return {
-        "status": "ok",
-        "environment": settings.environment,
-        "llm_mode": "mock" if settings.llm_mock_mode else "live",
-    }
+def health(request: Request):
+    """Liveness: the process is up. Touches nothing else. `environment` and
+    `llm_mode` are included only for a caller with a valid X-Internal-Key — they tell
+    an outsider which deployment (and whether it has a model) they are probing."""
+    from app.security.internal_key import has_valid_internal_key
+
+    body = {"status": "ok"}
+    if has_valid_internal_key(request):
+        body.update(environment=settings.environment, llm_mode="mock" if settings.llm_mock_mode else "live")
+    return body
 
 
 @lru_cache(maxsize=1)
@@ -85,7 +88,7 @@ def ready(db: Session = Depends(get_db)):
         logger.exception("Readiness check: could not count the territory master")
         territories = {"seeded": False, "states": 0, "districts": 0, "blocks": 0}
     body = {"status": "ready", "db": "ok", "schema": "at_head", "territories": territories}
-    if settings.is_production and not territories["seeded"]:
+    if settings.is_production_like and not territories["seeded"]:
         # A deploy must not go live with empty registration forms. Development stays
         # ready (and says seeded: false) so a half-set-up machine still starts.
         return JSONResponse(status_code=503, content={**body, "status": "not_ready"})

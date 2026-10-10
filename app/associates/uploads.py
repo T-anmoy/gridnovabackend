@@ -65,18 +65,7 @@ def _safe_filename(name: Optional[str]) -> str:
     return base[:120]
 
 
-async def read_document(upload, doc: str, allowed: Optional[tuple] = None,
-                        max_bytes: Optional[int] = None) -> Document:
-    """Read one uploaded file in chunks, stopping as soon as it passes the limit.
-    `allowed` / `max_bytes` default to the registration document's own rules."""
-    limit = MAX_DOCUMENT_BYTES if max_bytes is None else max_bytes
-    chunks, size = [], 0
-    while chunk := await upload.read(_READ_CHUNK):
-        size += len(chunk)
-        if size > limit:
-            raise UploadRejected(f"{doc} exceeds the {limit // (1024 * 1024)}MB limit.", 413)
-        chunks.append(chunk)
-    content = b"".join(chunks)
+def _checked(content: bytes, doc: str, allowed: Optional[tuple], filename: Optional[str]) -> Document:
     if not content:
         raise UploadRejected(f"{doc} is empty.")
     content_type = sniff(content[:16])
@@ -87,4 +76,39 @@ async def read_document(upload, doc: str, allowed: Optional[tuple] = None,
     if content_type not in allowed:
         kinds = "a JPEG, PNG or WEBP image" if allowed == IMAGE_TYPES else "a JPEG, PNG or WEBP image, or a PDF"
         raise UploadRejected(f"{doc} must be {kinds}.")
-    return Document(content=content, content_type=content_type, filename=_safe_filename(upload.filename))
+    return Document(content=content, content_type=content_type, filename=_safe_filename(filename))
+
+
+def _too_big(doc: str, limit: int) -> UploadRejected:
+    return UploadRejected(f"{doc} exceeds the {limit // (1024 * 1024)}MB limit.", 413)
+
+
+async def read_document(upload, doc: str, allowed: Optional[tuple] = None,
+                        max_bytes: Optional[int] = None) -> Document:
+    """Read one uploaded file in chunks, stopping as soon as it passes the limit.
+    `allowed` / `max_bytes` default to the registration document's own rules. For a
+    route that must await the request itself (request.form())."""
+    limit = MAX_DOCUMENT_BYTES if max_bytes is None else max_bytes
+    chunks, size = [], 0
+    while chunk := await upload.read(_READ_CHUNK):
+        size += len(chunk)
+        if size > limit:
+            raise _too_big(doc, limit)
+        chunks.append(chunk)
+    return _checked(b"".join(chunks), doc, allowed, upload.filename)
+
+
+def read_document_sync(upload, doc: str, allowed: Optional[tuple] = None,
+                       max_bytes: Optional[int] = None) -> Document:
+    """The same, for plain (threadpool) route functions: FastAPI has already spooled
+    the upload to `upload.file` before the route runs, so it is read synchronously,
+    off the event loop."""
+    limit = MAX_DOCUMENT_BYTES if max_bytes is None else max_bytes
+    upload.file.seek(0)
+    chunks, size = [], 0
+    while chunk := upload.file.read(_READ_CHUNK):
+        size += len(chunk)
+        if size > limit:
+            raise _too_big(doc, limit)
+        chunks.append(chunk)
+    return _checked(b"".join(chunks), doc, allowed, upload.filename)

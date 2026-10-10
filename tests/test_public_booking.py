@@ -37,8 +37,9 @@ def _connect_employee(memory, db_session, emp_id="emp-sales-1", role="sales"):
     return emp_id
 
 
-def _slot():
-    return datetime.now(timezone.utc) + timedelta(days=1)
+def _slot(index: int = 0):
+    from tests.booking_support import grid_slot
+    return grid_slot(index)
 
 
 class TestAvailabilityEndpoint:
@@ -240,7 +241,7 @@ class TestBookingEndpoint:
         # should resolve to the SAME customer (dedup by email), not a duplicate.
         from app.api.routes import public_booking
         public_booking._recent_emails.clear()  # simulate the cooldown window elapsing
-        later_slot = _slot() + timedelta(days=1)
+        later_slot = _slot(20)
         r2 = client.post(
             "/api/v1/public/booking",
             json={"name": "Repeat Booker", "email": email, "scheduled_at": later_slot.isoformat()},
@@ -267,6 +268,6 @@ class TestBookingEndpoint:
         assert r1.status_code == 200, r1.text
         r2 = client.post(
             "/api/v1/public/booking",
-            json={"name": "N", "email": email, "scheduled_at": (_slot() + timedelta(days=1)).isoformat()},
+            json={"name": "N", "email": email, "scheduled_at": _slot(20).isoformat()},
         )
         assert r2.status_code == 429

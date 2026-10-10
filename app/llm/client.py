@@ -573,6 +573,12 @@ class LLMClient:
         system_prompt = self._build_reply_system_prompt(
             stage, collected_fields, missing_fields, available_slots, memory_context
         )
+        if self._mock and not settings.allows_mock_replies:
+            # No model configured outside development/test: the customer gets the
+            # warm deterministic reply, never "[MOCK] Mock response …".
+            logger.warning("LLM mock mode outside development/test — sending the deterministic fallback reply",
+                           extra={"lead_id": lead_id, "stage": stage})
+            return self._fallback_reply(stage, missing_fields, available_slots)
         messages = [{"role": "system", "content": system_prompt}]
         for h in conversation_history[-6:]:
             messages.append(h)

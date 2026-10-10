@@ -43,15 +43,21 @@ class MemoryAgent:
         question: str,
         customer_id: Optional[int] = None,
         performed_by: str = "employee",
+        scope_employee_id: Optional[str] = None,
     ) -> dict:
         # Authorisation happens in the harness before this method is entered.
+        # `scope_employee_id` (a Sales caller): only customers with a lead that
+        # employee may see are ever matched, listed or read.
         question = (question or "").strip()
         if not question:
             return {"answer": "Ask me something about a customer and I'll check what we have on file.",
                     "resolved": False, "candidates": [], "citations": [], "mode": "none"}
         question = question[:MAX_QUESTION_CHARS]
 
-        customer, candidates = recall.resolve_customer(memory, question, customer_id)
+        visible = None
+        if scope_employee_id is not None:
+            visible = lambda c: memory.customer_visible_to_sales(c.id, scope_employee_id)  # noqa: E731
+        customer, candidates = recall.resolve_customer(memory, question, customer_id, visible=visible)
 
         if customer is None and len(candidates) > 1:
             names = ", ".join(self._label(c) for c in candidates)

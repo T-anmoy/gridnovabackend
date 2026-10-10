@@ -339,6 +339,10 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
         raise AssociateError("That milestone is not on this project.", code="unknown_milestone", status_code=422,
                              field="milestone_id")
     tolerance = Decimal(str(_cfg()["thresholds"]["overpayment_tolerance_inr"]))
+    # Lock the project row before summing: two payments recorded at the same moment
+    # must not both pass the overpayment check (SELECT … FOR UPDATE on PostgreSQL;
+    # SQLite serialises writers anyway). Held until this transaction ends.
+    db.execute(select(Project.id).where(Project.id == onboarding.project_id).with_for_update())
     counted = sum((p.amount for p in _live_payments(db, onboarding.project_id)
                    if p.status != PaymentStatus.dishonoured), Decimal(0))
     if counted + amount > total + tolerance:
@@ -485,6 +489,9 @@ def dishonour(db: Session, payment_id: int, actor: str, reason: str) -> Payment:
             raise AssociateError("This payment is already dishonoured.", code="invalid_transition", status_code=409)
     payment.status, payment.dishonoured_by, payment.dishonoured_at = PaymentStatus.dishonoured, actor, _now()
     payment.dishonour_reason = reason
+    if reversal is not None:
+        from app.payments import receipts
+        receipts.void(db, payment, actor, reason)
     db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="dishonoured", performed_by=actor,
                     before_value={"status": before},
                     after_value={"status": "dishonoured", "reason": reason,
@@ -537,10 +544,16 @@ def attention(payment: Payment, now: Optional[datetime] = None, receipt=None) ->
     return reasons
 
 
-def payment_json(db: Session, payment: Payment, *, staff: bool = True) -> dict:
+_LOOKUP = object()
+
+
+def payment_json(db: Session, payment: Payment, *, staff: bool = True, receipt=_LOOKUP) -> dict:
+    """`receipt` may be passed in (a list page loads every row's receipt in one query);
+    by default it is looked up."""
     from app.payments import receipts
 
-    receipt = receipts.for_payment(db, payment.id)
+    if receipt is _LOOKUP:
+        receipt = receipts.for_payment(db, payment.id)
     body = {
         "payment_id": payment.id, "onboarding_id": payment.onboarding_id, "milestone_id": payment.milestone_id,
         "previous_payment_id": payment.previous_payment_id,

@@ -52,8 +52,8 @@ class TestLLMFallback:
         data = r.json()
         # Must return a reply (fallback question), not crash
         assert len(data["reply"]) > 0
-        # Lead still created
-        assert data["lead_id"] is not None
+        # Lead still created (the conversation's session token comes back)
+        assert data["session_token"]
 
     def test_chat_still_works_in_mock_mode(self, client):
         """Default test config has LLM_API_KEY unset → mock mode active."""
@@ -118,3 +118,28 @@ class TestRateLimiting:
 
         # At least one 429 must appear in the responses
         assert 429 in responses, f"Expected at least one 429, got: {set(responses)}"
+
+
+class TestMockNeverReachesACustomer:
+    """BE-1 C1: with no LLM_API_KEY, a customer outside development/test gets the
+    deterministic fallback, never the "[MOCK] …" string."""
+
+    @pytest.mark.parametrize("environment", ["staging", "production"])
+    def test_production_like_mock_mode_sends_the_fallback(self, client, monkeypatch, environment):
+        from app.config import settings
+        from app.llm.client import llm_client
+        assert llm_client._mock
+        monkeypatch.setattr(settings, "environment", environment)
+        reply = llm_client.generate_reply(user_message="hi", stage="opening", collected_fields={},
+                                          missing_fields=["project_type"], conversation_history=[])
+        assert "[MOCK]" not in reply
+        assert reply == llm_client._fallback_reply("opening", ["project_type"], None)
+
+    @pytest.mark.parametrize("environment", ["development", "test"])
+    def test_development_keeps_the_marked_mock(self, monkeypatch, environment):
+        from app.config import settings
+        from app.llm.client import llm_client
+        monkeypatch.setattr(settings, "environment", environment)
+        reply = llm_client.generate_reply(user_message="hi", stage="opening", collected_fields={},
+                                          missing_fields=[], conversation_history=[])
+        assert reply.startswith("[MOCK]")

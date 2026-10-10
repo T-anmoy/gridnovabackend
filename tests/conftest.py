@@ -140,7 +140,10 @@ def reset_chat_inmemory_state():
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
-    pricing._instant_estimate_request_log.clear()
+    for log in (pricing._instant_estimate_request_log, pricing._estimate_request_log,
+                pricing._packages_request_log):
+        log.clear()
+    pricing._packages_body.cache_clear()
     public_intake._request_log.clear()
     public_intake._recent_emails.clear()
     public_intake._contact_request_log.clear()
@@ -158,7 +161,10 @@ def reset_chat_inmemory_state():
     public_booking._availability_request_log.clear()
     public_booking._booking_request_log.clear()
     public_booking._recent_emails.clear()
-    pricing._instant_estimate_request_log.clear()
+    for log in (pricing._instant_estimate_request_log, pricing._estimate_request_log,
+                pricing._packages_request_log):
+        log.clear()
+    pricing._packages_body.cache_clear()
     public_intake._request_log.clear()
     public_intake._recent_emails.clear()
     public_intake._contact_request_log.clear()
