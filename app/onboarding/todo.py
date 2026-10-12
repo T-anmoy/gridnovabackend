@@ -12,6 +12,11 @@ into English, Hindi or Bengali.
     site_location_unconfirmed todo.site_location_unconfirmed      1  (draft only)
     ready_to_submit           todo.ready_to_submit                1  (documents, confirmed location AND — unless
                                                                      grandfathered — a complete, signed survey)
+    survey_revisit_needed     todo.survey_revisit_needed          1  (params: revisit_items, notes, via — "edit"
+                                                                     for a draft/submitted customer, "correction"
+                                                                     for a verified one; until the survey changes)
+    survey_resign_needed      todo.survey_resign_needed           1  (params: unsigned — a verified customer whose
+                                                                     signatures a correction cleared)
     upload_signed_agreement   todo.upload_signed_agreement        2
     formal_proposal_ready     todo.formal_proposal_ready          2
     execution_next_step       todo.execution_next_step            2  (params: stage, stage_label)
@@ -76,6 +81,7 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
         survey_gaps = survey_status.submit_gaps(onboarding, db.get(ProposalInputs, onboarding.proposal_inputs_id))
         if not missing and not any(gaps.values()) and not any(survey_gaps.values()):
             items.append(_item(onboarding, name, "ready_to_submit", 1))
+    items += _survey(db, onboarding, name)
     done = progress.recorded(db, onboarding.project_id)
     if ProjectStage.proposal_prepared in done and ProjectStage.accepted not in done:
         items.append(_item(onboarding, name, "formal_proposal_ready", 2))
@@ -108,6 +114,25 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
                                message_key="todo.payment_overdue" if m["overdue"] else "todo.payment_due"))
     if include_info:
         items += _receipts(db, onboarding, name)
+    return items
+
+
+def _survey(db: Session, onboarding: CustomerOnboarding, name: Optional[str]) -> list[dict]:
+    """The Engineer asked for a revisit (S1 Step 5), or a correction cleared the
+    signatures of a verified customer (Step 6)."""
+    from app.memory.models import FeasibilityOutcome, ProposalInputs
+    from app.survey import status as survey_status
+
+    inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
+    items = []
+    if inputs.feasibility_outcome == FeasibilityOutcome.revisit_needed and not inputs.survey_revised_after_review:
+        items.append(_item(onboarding, name, "survey_revisit_needed", 1,
+                           {"revisit_items": inputs.revisit_items or [], "notes": inputs.feasibility_notes,
+                            "via": "correction" if onboarding.status == OnboardingStatus.verified else "edit"}))
+    if onboarding.status == OnboardingStatus.verified and survey_status.required_to_submit(onboarding):
+        unsigned = survey_status.unsigned(inputs)
+        if unsigned:
+            items.append(_item(onboarding, name, "survey_resign_needed", 1, {"unsigned": unsigned}))
     return items
 
 

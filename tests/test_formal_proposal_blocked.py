@@ -8,7 +8,7 @@ from app.memory.models import AuditLog, Customer, CustomerOnboarding, Lead, Prop
 from app.notifications.notifier import LogNotifier
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
-    territories, upload_required_documents, complete_survey, confirm_site_location,
+    territories, upload_required_documents, complete_survey, confirm_site_location, review_survey,
 )
 
 
@@ -39,6 +39,7 @@ def _assessed(client, db_session, n=1, **kw):
                 json={"verification_call_completed": True, "note": "ok"}, headers=ADMIN)
     client.patch(f"/api/v1/proposal-inputs/{o['site_assessment']['proposal_inputs_id']}/review",
                  json={"status": "approved_for_proposal"}, headers=ENG)
+    assert review_survey(client, oid).status_code == 200   # the Engineer's feasibility review (S1 Step 5)
     return gna, oid
 
 

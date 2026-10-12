@@ -4,6 +4,10 @@ Approval is internal and may happen on draft copy; what a customer receives may 
 Used by every path that puts a proposal in a customer's hands — the emailed send
 (dashboard /proposals/{id}/send) and in-person delivery by an associate or staff
 (app/onboarding/formal.py) — so neither can bypass the other.
+
+reverification_problem() is the second rule: a proposal flagged after a survey change
+(app/survey/changes.py) waits for staff to re-verify it. It applies to the staff send,
+in-person acceptance and the online accept link alike.
 """
 from __future__ import annotations
 
@@ -28,3 +32,10 @@ def placeholder_problem(proposal) -> Optional[dict]:
         "placeholder_sections": sections,
         "missing_total_value": not proposal.total_value,
     }
+
+
+def reverification_problem(proposal) -> Optional[dict]:
+    """None unless the proposal is flagged for re-verification; otherwise the 409 body
+    {code: needs_reverification, message, fields}."""
+    from app.survey import changes
+    return changes.problem(proposal)

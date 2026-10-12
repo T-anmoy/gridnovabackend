@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.associate_payments import PaymentIn, ReasonIn, proof_link, store_proof
@@ -410,6 +410,14 @@ def work_queues(db: Session = Depends(get_db), employee: AuthenticatedEmployee =
     from app.memory.models import PaymentReceipt, ReceiptEmailStatus
 
     out: dict = {}
+    if employee.can_review_surveys():
+        # Engineer and Admin act on these (S1 Steps 5–6); overdue is part of awaiting.
+        from app.memory.models import SurveyCorrectionRequest, SurveyCorrectionStatus
+        from app.survey import queue as survey_queue
+        out["survey_reviews"] = survey_queue.counts(db)
+        out["survey_corrections"] = {"pending": db.execute(select(func.count()).select_from(SurveyCorrectionRequest)
+                                                           .where(SurveyCorrectionRequest.status ==
+                                                                  SurveyCorrectionStatus.pending)).scalar_one()}
     if employee.can_view_execution():
         from app.api.routes.execution_admin import queue_rows
         rows = queue_rows(db, employee)

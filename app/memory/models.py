@@ -700,6 +700,9 @@ class ProposalInputs(Base):
     # The survey report PDF (S1 Step 7), private storage.
     survey_report_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     survey_report_generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # When the survey started the wait the overdue-review alert already reported
+    # (app/jobs/survey_reviews.py) — a new wait is alerted again. 0046_survey_review.
+    survey_review_alerted_for: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
 
     lead: Mapped["Lead"] = relationship(back_populates="proposal_inputs")
     reviewed_by: Mapped[Optional["Employee"]] = relationship(foreign_keys=[reviewed_by_id])

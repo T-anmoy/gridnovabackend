@@ -99,4 +99,5 @@ def summary(onboarding: CustomerOnboarding, inputs: ProposalInputs, *, staff: bo
         "required_to_submit": required_to_submit(onboarding),
         "grandfathered": bool(onboarding.survey_grandfathered),
         "review": review,
+        "report": {"generated_at": _iso(inputs.survey_report_generated_at)},
     }

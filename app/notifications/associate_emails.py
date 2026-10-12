@@ -2,7 +2,8 @@
 
   * the formal proposal is approved and ready to hand over;
   * an execution stage was sent back, with the reviewer's note;
-  * a payment was verified, with the receipt link.
+  * a payment was verified, with the receipt link;
+  * an Engineer reviewed the customer's site survey (S1), with what to do next.
 
 Sent after the commit, never raising. Skipped cleanly when NOTIFY_ASSOCIATES is off or
 the associate has no email. Each email names only that customer and links to that
@@ -101,3 +102,29 @@ def payment_verified(db: Session, payment, receipt_url: Optional[str]) -> None:
                "Download the receipt" if receipt_url else None, receipt_url)
     except Exception:
         logger.exception("associate payment-verified email not queued")
+
+
+_SURVEY_OUTCOME_LINES = {
+    "feasible": ["An Engineer reviewed the site survey for {name}: the installation is feasible."],
+    "feasible_with_conditions": ["An Engineer reviewed the site survey for {name}: the installation is feasible "
+                                 "with conditions.",
+                                 "The conditions are listed on the customer's page."],
+    "revisit_needed": ["An Engineer reviewed the site survey for {name} and needs parts of it checked again "
+                       "on site.",
+                       "The customer's page lists what to revisit. Update the survey and have it signed again."],
+    "not_feasible": ["An Engineer reviewed the site survey for {name}: the installation is not feasible.",
+                     "The Engineer's notes are on the customer's page."],
+}
+
+
+def survey_reviewed(db: Session, onboarding: CustomerOnboarding, outcome) -> None:
+    try:
+        target = _target(db, onboarding)
+        if not target:
+            return
+        to, name, url = target
+        value = outcome.value if hasattr(outcome, "value") else str(outcome)
+        _queue(db, "associate_survey_reviewed", to, f"Site survey reviewed for {name}",
+               [line.format(name=name) for line in _SURVEY_OUTCOME_LINES[value]], "Open customer", url)
+    except Exception:
+        logger.exception("associate survey-reviewed email not queued")

@@ -256,6 +256,15 @@ class AuthenticatedEmployee:
         limited to its own or unassigned leads."""
         return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales, EmployeeRole.engineer)
 
+    def can_review_surveys(self) -> bool:
+        """The feasibility review of a site survey, applying or rejecting survey
+        corrections, and generating the survey report (S1 Steps 5–7)."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.engineer)
+
+    def can_clear_reverification(self) -> bool:
+        """Clear a proposal flagged for re-verification after a survey change."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.engineer)
+
     def can_verify_onboarding(self) -> bool:
         """The staff verification call on an associate-sourced customer."""
         return self.role in (EmployeeRole.admin, EmployeeRole.sales)

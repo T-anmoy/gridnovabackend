@@ -136,6 +136,7 @@ RESEND_API_URL = "https://api.resend.com/emails"
 STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "manager_signoff_required", "customer_accepted", "stale_lead_digest",
                       "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
+                      "survey_review_overdue",
                       "catalogue_unmatched",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention")
 # Events for one team rather than all staff: sent to that team's own recipients
@@ -289,6 +290,26 @@ def _render_stale_digest(leads: list[dict], base_url: str) -> tuple[str, str, st
     return subject, html_body, text_body
 
 
+def _render_survey_review_overdue(payload: dict, base_url: str) -> tuple[str, str, str]:
+    """(subject, html, text) for site surveys waiting past the review target."""
+    surveys = payload.get("surveys") or []
+    subject = f"{len(surveys)} site survey{'s' if len(surveys) != 1 else ''} waiting for an Engineer's review"
+    intro = (f"These site surveys have waited longer than {payload.get('review_target_hours'):g} hours for an "
+             "Engineer's feasibility review:")
+    rows_html, rows_text = [], []
+    for item in surveys:
+        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        name = item.get("customer_name") or f"Customer #{item.get('onboarding_id')}"
+        detail = f"{item.get('client_code')} · waiting {item.get('hours_waiting')} hours"
+        if item.get("revised_after_review"):
+            detail += " · changed after its last review"
+        rows_html.append(f'<li><a href="{_esc(url)}">{_esc(name)}</a> — {_esc(detail)}</li>')
+        rows_text.append(f"- {name} — {detail}\n  {url}")
+    html_body = f"<div><p>{_esc(intro)}</p><ul>{''.join(rows_html)}</ul></div>"
+    text_body = intro + "\n\n" + "\n".join(rows_text)
+    return subject, html_body, text_body
+
+
 def _render_execution_stuck(projects: list[dict], base_url: str) -> tuple[str, str, str]:
     """(subject, html, text) for projects that have waited past their stage's threshold."""
     subject = f"{len(projects)} project{'s' if len(projects) != 1 else ''} stuck in execution"
@@ -394,6 +415,10 @@ class EmailNotifier(Notifier):
                 if not payload.get("projects"):
                     return
                 subject, html_body, text_body = _render_execution_stuck(payload["projects"], self._base_url)
+            elif event_type == "survey_review_overdue":
+                if not payload.get("surveys"):
+                    return
+                subject, html_body, text_body = _render_survey_review_overdue(payload, self._base_url)
             else:
                 message = _staff_message(event_type, payload, self._base_url)
                 if message is None:

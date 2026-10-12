@@ -40,6 +40,7 @@ from app.notifications.notifier import notifier
 from app.orchestrator.orchestrator import orchestrator
 from app.pdf.generator import generate_and_upload_pdf
 from app.proposals import content_engine
+from app.survey import changes as reverification
 
 router = APIRouter(prefix="/api/v1/dashboard")
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
             "lead_id": p.lead_id,
             "version": p.version,
             "status": p.status,
+            **reverification.serialize(p),
             "technical_fields": {
                 k: v for k, v in (lead.collected_fields or {}).items()
                 if k in _ENGINEER_TECHNICAL_FIELDS
@@ -116,6 +118,7 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
         "total_value": p.total_value,
         "requires_manager_signoff": p.requires_manager_signoff,
         "used_fallback_template": p.used_fallback_template,
+        **reverification.serialize(p),
         "pdf_url": p.pdf_url,
         "pdf_available": bool(p.pdf_url or p.pdf_storage_key),
         "date_created": p.date_created.isoformat() if p.date_created else None,
@@ -647,6 +650,14 @@ def create_proposal_draft(
     draft_lead = MemoryManager(db).get_lead(body.lead_id)
     if draft_lead is not None:
         require_lead_access(employee, draft_lead)
+        # An associate-sourced customer's proposal needs the Engineer's survey review
+        # to allow it, however the draft is started (app/survey/review.py).
+        from app.onboarding import service as onboarding_service
+        from app.survey import review as survey_review
+        onboarding = onboarding_service.for_lead(db, draft_lead.id)
+        problem = survey_review.formal_proposal_problem(db, onboarding) if onboarding is not None else None
+        if problem is not None:
+            raise HTTPException(status_code=problem.status_code, detail=problem.body())
 
     result = orchestrator.request_proposal_draft(
         lead_id=body.lead_id,
@@ -956,8 +967,8 @@ def send_proposal(
 
     # Approval is internal and may happen on draft copy; what reaches the customer
     # may not. Blocked until every section is real and there is a real price.
-    from app.proposals.send_guard import placeholder_problem
-    problem = placeholder_problem(proposal)
+    from app.proposals.send_guard import placeholder_problem, reverification_problem
+    problem = placeholder_problem(proposal) or reverification_problem(proposal)
     if problem:
         raise HTTPException(status_code=409, detail=problem)
 
@@ -1123,6 +1134,7 @@ def get_proposal_detail(
             "status": proposal.status,
             "requires_manager_signoff": proposal.requires_manager_signoff,
             "used_fallback_template": proposal.used_fallback_template,
+            **reverification.serialize(proposal),
             "technical_fields": {
                 k: v for k, v in (lead.collected_fields or {}).items()
                 if k in _ENGINEER_TECHNICAL_FIELDS
@@ -1144,6 +1156,7 @@ def get_proposal_detail(
         "placeholder_sections": content_engine.placeholder_sections(proposal.content),
         "requires_manager_signoff": proposal.requires_manager_signoff,
         "used_fallback_template": proposal.used_fallback_template,
+        **reverification.serialize(proposal),
         "revision_reason": proposal.revision_reason,
         "pdf_url": proposal.pdf_url,
         "pdf_available": bool(proposal.pdf_url or proposal.pdf_storage_key),

@@ -7,7 +7,9 @@ A proposal can be accepted only while it is the one on offer:
   * no newer version exists on the lead, and no other proposal on the lead has been
     accepted (otherwise: proposal_superseded);
   * it is still within the validity period (config/sales_policy.yaml
-    proposal_validity_days — a registered, unconfirmed default).
+    proposal_validity_days — a registered, unconfirmed default);
+  * it is not waiting for re-verification after a survey change (app/survey/changes.py
+    — otherwise: needs_reverification; the customer is not told which fields).
 
 Acceptance locks the lead row and then the proposal row (SELECT … FOR UPDATE on
 PostgreSQL; SQLite has no row locks and serialises writers instead) and re-reads
@@ -26,6 +28,7 @@ from app.memory.models import Lead, Proposal, ProposalStatus
 SUPERSEDED = "proposal_superseded"
 NOT_AVAILABLE = "proposal_not_available"
 EXPIRED = "proposal_expired"
+REVERIFICATION = "needs_reverification"
 
 
 def validity_days() -> int:
@@ -72,4 +75,7 @@ def refusal(db: Session, proposal: Proposal) -> Optional[tuple[str, str]]:
         return SUPERSEDED, "This proposal has been replaced by a newer one. Please use the latest proposal from Grid Nova."
     if proposal.status != ProposalStatus.sent:
         return NOT_AVAILABLE, "This proposal is not open for acceptance right now. Please contact Grid Nova."
+    if proposal.needs_reverification:
+        return REVERIFICATION, ("Grid Nova is checking this proposal again after a change to the site survey. "
+                                "Please wait for Grid Nova to contact you.")
     return None

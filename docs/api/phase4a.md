@@ -306,7 +306,8 @@ totals: {customers, awaiting_grid_nova, needing_action}}`, sorted by priority. K
 (`message_key` = `todo.<kind>` unless noted): `stage_rejected` (1), `payment_due`
 (`todo.payment_overdue` priority 1 when overdue, else `todo.payment_due` 2),
 `documents_missing` (1), `site_location_missing` / `site_location_unconfirmed` (1, 3C-A),
-`ready_to_submit` (1), `upload_signed_agreement` (2), `formal_proposal_ready` (2),
+`ready_to_submit` (1), `survey_revisit_needed` / `survey_resign_needed` (1, S1 — see
+site_survey.md §8), `upload_signed_agreement` (2), `formal_proposal_ready` (2),
 `execution_next_step` (2), `receipt_available` (3, home feed only). List items in
 `GET /associate/onboardings` carry `progress_summary: {current_stage, stage_label,
 next_stage, next_stage_label, needs_action, action_kinds[], blocked, site_location}`.

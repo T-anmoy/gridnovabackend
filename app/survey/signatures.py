@@ -66,21 +66,24 @@ def clear_after_edit(inputs: ProposalInputs, changed: set[str]) -> tuple[dict, d
 def record(db: Session, onboarding: CustomerOnboarding, party: str, *, content: bytes, performed_by: str,
            declaration_name: Optional[str] = None) -> ProposalInputs:
     """Store one signature (bytes already checked to be a PNG within the limit). The
-    customer's needs the declaration name. Draft or submitted only; a submitted customer
-    returns to draft, like any edit. Caller commits."""
+    customer's needs the declaration name. Draft or submitted; a submitted customer
+    returns to draft, like any edit. A verified customer is signed again only where an
+    applied survey correction cleared that signature (app/survey/corrections.py) — it
+    stays verified. Caller commits."""
     from app.onboarding import service
     from app.storage import r2
 
-    if onboarding.status not in service.EDITABLE_STATUSES:
+    inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
+    attr = "customer_signature_ref" if party == "customer" else "associate_signature_ref"
+    resign = onboarding.status == OnboardingStatus.verified and not (getattr(inputs, attr) or {}).get("storage_key")
+    if onboarding.status not in service.EDITABLE_STATUSES and not resign:
         raise AssociateError(f"This customer is {onboarding.status.value} and can no longer be signed here.",
                              code="not_editable", status_code=409)
-    inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
     now = datetime.now(timezone.utc)
     key = f"proposal-inputs/{inputs.id}/signature/{party}_{uuid.uuid4().hex}.png"
     r2.upload_bytes(key, content, PNG)
     ref = {"filename": f"{party}_signature.png", "storage_key": key, "signed_at": now.isoformat(),
            "content_type": PNG, "size_bytes": len(content), "signed_by": performed_by}
-    attr = "customer_signature_ref" if party == "customer" else "associate_signature_ref"
     before = {party: _ref_summary(getattr(inputs, attr))}
     after = {party: _ref_summary(ref)}
     setattr(inputs, attr, ref)

@@ -859,6 +859,22 @@ entries:
     needed_from_grid_nova: "What must the survey record for a housing society and for a commercial roof beyond the house checklist?"
     blocking: tunable
     probe: yaml_contains_marker
+  - id: SRV-15
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: review_required_for_formal_proposal}
+    description: "The formal proposal for a surveyed customer needs an Engineer's feasibility review (feasible or feasible with conditions) first."
+    dummy_value: true
+    needed_from_grid_nova: "Must an Engineer review the site survey and find it feasible before the formal proposal is prepared?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SRV-16
+    area: onboarding
+    location: {file: config/site_survey.yaml, key: reverification_fields}
+    description: "Survey fields whose change after a proposal was drafted blocks sending it until staff re-verify it."
+    dummy_value: [roof_sections, roof_area_sqft, shadow_free_area_sqft, sanctioned_load_kw, connection_phase, survey_variant, consumption_history, avg_monthly_units_kwh, avg_monthly_bill_inr, desired_output_kw]
+    needed_from_grid_nova: "Which survey changes after a proposal is drafted mean the proposal must be checked again before it reaches the customer?"
+    blocking: tunable
+    probe: yaml_contains_marker
 
   # ── BE-1: sales, booking and chat policy (config/sales_policy.yaml) ────────────
   - id: BE1-1

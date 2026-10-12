@@ -1161,6 +1161,20 @@
         "title": "ChatResponse",
         "type": "object"
       },
+      "ClearReverification": {
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "ClearReverification",
+        "type": "object"
+      },
       "ConnectionPhase": {
         "enum": [
           "single_phase",
@@ -1237,6 +1251,43 @@
           "message"
         ],
         "title": "ContactRequest",
+        "type": "object"
+      },
+      "CorrectionDecision": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "CorrectionDecision",
+        "type": "object"
+      },
+      "CorrectionRequest": {
+        "properties": {
+          "changes": {
+            "title": "Changes",
+            "type": "object"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changes",
+          "reason"
+        ],
+        "title": "CorrectionRequest",
         "type": "object"
       },
       "CustomerTimeline": {
@@ -1516,6 +1567,16 @@
           "grid_nova"
         ],
         "title": "ExecutionMode",
+        "type": "string"
+      },
+      "FeasibilityOutcome": {
+        "enum": [
+          "feasible",
+          "feasible_with_conditions",
+          "revisit_needed",
+          "not_feasible"
+        ],
+        "title": "FeasibilityOutcome",
         "type": "string"
       },
       "FormalProposalRequest": {
@@ -4472,6 +4533,38 @@
         "title": "RevisionRequest",
         "type": "object"
       },
+      "RevisitItem": {
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "note": {
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "section": {
+            "maxLength": 40,
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section",
+          "note"
+        ],
+        "title": "RevisitItem",
+        "type": "object"
+      },
       "RoleUpdateRequest": {
         "properties": {
           "role": {
@@ -4794,6 +4887,69 @@
           "stage"
         ],
         "title": "SubmitStageRequest",
+        "type": "object"
+      },
+      "SurveyCorrectionStatus": {
+        "enum": [
+          "pending",
+          "applied",
+          "rejected"
+        ],
+        "title": "SurveyCorrectionStatus",
+        "type": "string"
+      },
+      "SurveyReviewRequest": {
+        "properties": {
+          "conditions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/FeasibilityOutcome"
+          },
+          "revisit_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RevisitItem"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revisit Items"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "SurveyReviewRequest",
         "type": "object"
       },
       "SurveyVariant": {
@@ -7569,6 +7725,143 @@
         "summary": "Get Survey"
       }
     },
+    "/api/v1/associate/onboardings/{onboarding_id}/survey/corrections": {
+      "get": {
+        "description": "Every correction request for this customer, newest first.",
+        "operationId": "list_corrections_api_v1_associate_onboardings__onboarding_id__survey_corrections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Corrections"
+      },
+      "post": {
+        "description": "Ask Grid Nova to change survey fields of a VERIFIED customer (draft and\nsubmitted customers are edited directly). Owner only; one pending request at a time.",
+        "operationId": "request_correction_api_v1_associate_onboardings__onboarding_id__survey_corrections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Correction"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/survey/report": {
+      "get": {
+        "description": "A short-lived signed link to the survey report — a document: the owner (a\nterritory viewer only when territory_viewers_see_documents is on). Audited.",
+        "operationId": "survey_report_link_api_v1_associate_onboardings__onboarding_id__survey_report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Survey Report Link"
+      }
+    },
     "/api/v1/associate/onboardings/{onboarding_id}/survey/results": {
       "get": {
         "description": "Sizes, the suggested size and its limiting factor, the indicative list price for\nboth packages with the subsidy, and warning codes — on the saved data.",
@@ -7614,7 +7907,7 @@
     },
     "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}": {
       "post": {
-        "description": "One on-screen signature (multipart: `file`, a PNG). The customer's also needs\n`declaration_name` (the name the customer typed) and `customer_confirms_data=true`.\nOwner only; draft or submitted (a submitted customer returns to draft).",
+        "description": "One on-screen signature (multipart: `file`, a PNG). The customer's also needs\n`declaration_name` (the name the customer typed) and `customer_confirms_data=true`.\nOwner only; draft or submitted (a submitted customer returns to draft) — or a\nverified customer whose signature an applied survey correction cleared.",
         "operationId": "sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post",
         "parameters": [
           {
@@ -9886,6 +10179,28 @@
         "summary": "Run Check Stale Leads"
       }
     },
+    "/api/v1/dashboard/internal/check-survey-reviews": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY. Emails staff once about each survey that has waited\nlonger than review_target_hours for its review (not again for the same wait).\nIdempotent, also when two runs overlap.",
+        "operationId": "run_survey_review_alerts_api_v1_dashboard_internal_check_survey_reviews_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Survey Review Alerts"
+      }
+    },
     "/api/v1/dashboard/leads": {
       "get": {
         "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.",
@@ -12145,6 +12460,90 @@
         "summary": "Get Survey"
       }
     },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/survey/report": {
+      "get": {
+        "description": "A short-lived signed link to the latest survey report. Every link is audited.",
+        "operationId": "survey_report_link_api_v1_dashboard_onboardings__onboarding_id__survey_report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Survey Report Link"
+      },
+      "post": {
+        "description": "Render and store the survey report (after the review). A new call stores a new\nfile; the earlier one is kept.",
+        "operationId": "generate_survey_report_api_v1_dashboard_onboardings__onboarding_id__survey_report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Survey Report"
+      }
+    },
     "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results": {
       "get": {
         "operationId": "get_survey_results_api_v1_dashboard_onboardings__onboarding_id__survey_results_get",
@@ -12185,6 +12584,59 @@
           }
         ],
         "summary": "Get Survey Results"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/survey/review": {
+      "post": {
+        "description": "Record (or replace) the feasibility review of a complete, signed survey.",
+        "operationId": "review_survey_api_v1_dashboard_onboardings__onboarding_id__survey_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SurveyReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Survey"
       }
     },
     "/api/v1/dashboard/onboardings/{onboarding_id}/verification-call": {
@@ -13598,6 +14050,59 @@
         "summary": "Get Required Approval Tier"
       }
     },
+    "/api/v1/dashboard/proposals/{proposal_id}/reverification/clear": {
+      "post": {
+        "description": "Confirm a flagged proposal still fits the changed survey, so it can be sent or\naccepted again.",
+        "operationId": "clear_reverification_api_v1_dashboard_proposals__proposal_id__reverification_clear_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearReverification"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Reverification"
+      }
+    },
     "/api/v1/dashboard/proposals/{proposal_id}/send": {
       "post": {
         "operationId": "send_proposal_api_v1_dashboard_proposals__proposal_id__send_post",
@@ -13638,6 +14143,258 @@
           }
         ],
         "summary": "Send Proposal"
+      }
+    },
+    "/api/v1/dashboard/survey-corrections": {
+      "get": {
+        "description": "Correction requests, newest first. Sales sees its own or unassigned leads only.",
+        "operationId": "correction_queue_api_v1_dashboard_survey_corrections_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SurveyCorrectionStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Correction Queue"
+      }
+    },
+    "/api/v1/dashboard/survey-corrections/{correction_id}/apply": {
+      "post": {
+        "description": "Write the requested survey change. Open proposals touched by it are flagged for\nre-verification (`flagged_proposal_ids`).",
+        "operationId": "apply_correction_api_v1_dashboard_survey_corrections__correction_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "correction_id",
+            "required": true,
+            "schema": {
+              "title": "Correction Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionDecision",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Correction"
+      }
+    },
+    "/api/v1/dashboard/survey-corrections/{correction_id}/reject": {
+      "post": {
+        "description": "Refuse the change (`note` required); nothing on the survey changes.",
+        "operationId": "reject_correction_api_v1_dashboard_survey_corrections__correction_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "correction_id",
+            "required": true,
+            "schema": {
+              "title": "Correction Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Correction"
+      }
+    },
+    "/api/v1/dashboard/survey-reviews": {
+      "get": {
+        "description": "Complete, signed surveys of submitted or verified customers, newest wait first\n(app/survey/queue.py). Sales sees its own or unassigned leads only.",
+        "operationId": "survey_review_queue_api_v1_dashboard_survey_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "awaiting",
+              "enum": [
+                "awaiting",
+                "overdue",
+                "reviewed",
+                "revised"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Survey Review Queue"
       }
     },
     "/api/v1/dashboard/territories/blocks": {

@@ -381,9 +381,16 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
         onboarding.customer_mobile, onboarding.consumer_number_key = mobile, key
 
     from app.survey import signatures
+    survey_changed = set(after) & signatures.survey_fields()
     cleared_before, cleared_after = signatures.clear_after_edit(inputs, set(after))
     before.update(cleared_before)
     after.update(cleared_after)
+    if survey_changed:
+        # A reviewed survey that changes goes back to the Engineer (S1 Step 5).
+        from app.survey import review as survey_review
+        revised_before, revised_after = survey_review.mark_revised(inputs)
+        before.update(revised_before)
+        after.update(revised_after)
 
     customer_changes = {}
     if "customer_name" in changes and changes["customer_name"] != customer.name:
@@ -402,6 +409,13 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
             onboarding.submitted_at = None
         db.flush()
         _audit(db, onboarding.id, "updated", who, before=_jsonable(before), after=_jsonable(after))
+        # A change to what sizes, prices or designs the system flags any open proposal
+        # for re-verification (S1 Step 6, app/survey/changes.py).
+        from app.memory.models import FeasibilityOutcome
+        from app.survey import changes as reverification
+        reverification.flag(db, onboarding, set(after), performed_by=who,
+                            source="revisit" if inputs.feasibility_outcome == FeasibilityOutcome.revisit_needed
+                            else "edit")
         if location_before is not None:
             site_location._after_change(db, onboarding, location_before, who,
                                         "Site location entered directly (unverified) — awaiting the "

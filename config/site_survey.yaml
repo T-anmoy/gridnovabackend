@@ -52,6 +52,27 @@ resign_after_edit: true              # [UNCONFIRMED]
 # needs_attention.
 review_target_hours: 48              # [UNCONFIRMED]
 
+# The formal proposal for a customer whose survey is required (not grandfathered)
+# needs an Engineer's review with outcome feasible or feasible_with_conditions.
+# not_feasible always blocks it, whatever this says.
+review_required_for_formal_proposal: true   # [UNCONFIRMED]
+
+# Survey fields that change the system's size, price or design. A change to one of
+# them after a proposal was drafted (an applied correction or an associate's edit)
+# flags that proposal for re-verification: it cannot be sent or accepted until staff
+# clear it.
+reverification_fields:               # [UNCONFIRMED]
+  - roof_sections
+  - roof_area_sqft
+  - shadow_free_area_sqft
+  - sanctioned_load_kw
+  - connection_phase
+  - survey_variant
+  - consumption_history
+  - avg_monthly_units_kwh
+  - avg_monthly_bill_inr
+  - desired_output_kw
+
 # DISCOMs the app offers (plus free text under "Other"). Stored as entered.
 discom_options:                      # [UNCONFIRMED]
   - WBSEDCL

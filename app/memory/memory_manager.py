@@ -101,6 +101,16 @@ class ProposalTransitionError(ValueError):
         self.current, self.target = current, target
 
 
+class ProposalReverificationError(ValueError):
+    """A proposal flagged for re-verification after a survey change (app/survey/changes.py)
+    may not be sent or accepted. Every route checks this first (send_guard); this is the
+    last line in the state machine itself."""
+    code = "needs_reverification"
+
+    def __init__(self, proposal_id: int):
+        super().__init__(f"Proposal {proposal_id} needs re-verification after a survey change.")
+
+
 def check_proposal_transition(current, target) -> None:
     current, target = ProposalStatus(current), ProposalStatus(target)
     if target not in PROPOSAL_TRANSITIONS[current]:
@@ -947,6 +957,8 @@ class MemoryManager:
     ) -> Proposal:
         proposal = self._db.get(Proposal, proposal_id)
         check_proposal_transition(proposal.status, new_status)
+        if new_status == ProposalStatus.sent and proposal.needs_reverification:
+            raise ProposalReverificationError(proposal_id)
         before = {"status": proposal.status}
         if ProposalStatus(proposal.status) == ProposalStatus.sent and proposal.accept_token:
             # The link the customer holds stops working the moment the proposal is no
@@ -1050,6 +1062,8 @@ class MemoryManager:
         `details` say so). Audited as 'customer_accepted'."""
         proposal = self._db.get(Proposal, proposal_id)
         check_proposal_transition(proposal.status, ProposalStatus.accepted)
+        if proposal.needs_reverification:
+            raise ProposalReverificationError(proposal_id)
         when = when or datetime.now(timezone.utc)
         before = {"status": proposal.status, "accepted_at": proposal.accepted_at.isoformat() if proposal.accepted_at else None}
         proposal.accepted_at = when

@@ -32,6 +32,7 @@ COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
                    "survey_admin")
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
+SURVEY_REVIEWERS = {"admin", "engineer"}
 PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
@@ -98,6 +99,18 @@ STAFF = {
                                       "reference": "x"}}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/survey"): (SURVEY_READERS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results"): (SURVEY_READERS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/survey/review"):
+        (SURVEY_REVIEWERS, {"json": {"outcome": "feasible"}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/survey/report"): (SURVEY_REVIEWERS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/survey/report"): (SURVEY_READERS, {}),
+    ("GET", "/api/v1/dashboard/survey-corrections"): (SURVEY_READERS, {}),
+    ("GET", "/api/v1/dashboard/survey-reviews"): (SURVEY_READERS, {}),
+    ("POST", "/api/v1/dashboard/internal/check-survey-reviews"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/survey-corrections/{correction_id}/apply"): (SURVEY_REVIEWERS, {"json": {}}),
+    ("POST", "/api/v1/dashboard/survey-corrections/{correction_id}/reject"):
+        (SURVEY_REVIEWERS, {"json": {"note": "x"}}),
+    ("POST", "/api/v1/dashboard/proposals/{proposal_id}/reverification/clear"):
+        ({"admin", "management", "engineer"}, {"json": {"note": "x"}}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
         (ONBOARDING_ACTORS, {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52",
                                       "reason": "Confirmed on the call."}}),
@@ -190,6 +203,10 @@ ASSOCIATE = {
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey"): ("read", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey/results"): ("read", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}"): ("write", PNG_FILE),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/survey/corrections"):
+        ("write", {"json": {"changes": {"floors": 3}, "reason": "x"}}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey/corrections"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/survey/report"): ("documents", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location"):
         ("write", {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52"}}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/site-location/confirm"): ("write", {}),
@@ -277,7 +294,7 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "onboarding_id": oid, "stage": "portal_agreement_approved", "entry_id": "A1", "file_ref": "none",
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
-              "equipment_id": equipment_id}
+              "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 

@@ -576,3 +576,34 @@ class TestSiteSurveyMigration:
         finally:
             conn.close()
         assert _run_alembic("upgrade", "0044_site_survey", db_path=db_at_0025).returncode == 0
+
+
+class TestSurveyReviewMigration:
+    def test_upgrade_and_downgrade(self, db_at_0025):
+        assert _run_alembic("upgrade", "0045_be1_security", db_path=db_at_0025).returncode == 0
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            conn.execute("INSERT INTO proposal_inputs (id, feasibility_outcome) VALUES (1, 'feasible')")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("upgrade", "0046_survey_review", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            assert conn.execute("SELECT feasibility_outcome, survey_review_alerted_for FROM proposal_inputs"
+                                ).fetchone() == ("feasible", None)
+            conn.execute("UPDATE proposal_inputs SET survey_review_alerted_for = '2026-10-12 00:00:00'")
+            conn.commit()
+        finally:
+            conn.close()
+        result = _run_alembic("downgrade", "0045_be1_security", db_path=db_at_0025)
+        assert result.returncode == 0, result.stderr
+        conn = sqlite3.connect(db_at_0025)
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(proposal_inputs)")}
+            assert "survey_review_alerted_for" not in cols and "feasibility_outcome" in cols
+            assert conn.execute("SELECT feasibility_outcome FROM proposal_inputs").fetchone() == ("feasible",)
+        finally:
+            conn.close()
+        assert _run_alembic("upgrade", "0046_survey_review", db_path=db_at_0025).returncode == 0

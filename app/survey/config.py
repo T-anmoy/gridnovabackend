@@ -23,6 +23,12 @@ KNOWN_FIELDS = frozenset({
 })
 
 
+# What reverification_fields may name: the survey fields, the averages derived from the
+# bills, and the size the customer asked for.
+REVERIFIABLE_FIELDS = KNOWN_FIELDS | {"survey_variant", "avg_monthly_units_kwh", "avg_monthly_bill_inr",
+                                      "desired_output_kw"}
+
+
 class SurveyConfigError(RuntimeError):
     pass
 
@@ -36,7 +42,7 @@ def _validate(data: dict) -> dict:
         need(isinstance(data.get(key), (int, float)) and not isinstance(data[key], bool) and data[key] > 0,
              f"{key} must be a positive number")
 
-    for key in ("survey_required_to_submit", "resign_after_edit"):
+    for key in ("survey_required_to_submit", "resign_after_edit", "review_required_for_formal_proposal"):
         need(isinstance(data.get(key), bool), f"{key} must be true/false")
     for key in ("area_sqft_per_kw", "load_cap_ratio", "average_mismatch_ratio", "distance_max_m",
                 "signature_max_kb", "review_target_hours"):
@@ -72,6 +78,9 @@ def _validate(data: dict) -> dict:
              "conditional.when must name one known field")
         need(rule.get("require") and set(rule["require"]) <= KNOWN_FIELDS,
              "conditional.require must name known fields")
+    reverify = data.get("reverification_fields")
+    need(isinstance(reverify, list) and reverify and set(reverify) <= REVERIFIABLE_FIELDS,
+         f"reverification_fields must name fields from {sorted(REVERIFIABLE_FIELDS)}")
     return data
 
 

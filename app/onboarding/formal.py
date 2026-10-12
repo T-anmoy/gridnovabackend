@@ -4,6 +4,9 @@ after the site assessment, never an automatic consequence of onboarding.
   request_formal_proposal   associate (owner) or staff ask Grid Nova to prepare it.
                             Records `proposal_requested` with whether the lead is ready;
                             creates no draft.
+
+Both requesting and drafting need the Engineer's survey review to allow it
+(app/survey/review.py formal_proposal_problem): not_feasible always blocks.
   prepare_formal_proposal   staff (Admin/Sales) draft it through the same Proposal Agent
                             entry point as every other draft — approval tiers, manager
                             sign-off and the send-guard all apply unchanged.
@@ -93,6 +96,8 @@ def request_formal_proposal(db: Session, onboarding: CustomerOnboarding, request
     from app.memory.models import Customer, Project
 
     done = _require_assessed(db, onboarding)
+    from app.survey import review as survey_review
+    survey_review.require_formal_proposal_allowed(db, onboarding)
     if ProjectStage.proposal_requested in done:
         raise AssociateError("The formal proposal has already been requested for this customer.",
                              code="already_requested", status_code=409)
@@ -162,6 +167,8 @@ def prepare_formal_proposal(db: Session, onboarding: CustomerOnboarding, employe
     if ProjectStage.proposal_prepared in done:
         raise AssociateError("The formal proposal is already prepared; revise it from the proposal itself.",
                              code="already_prepared", status_code=409)
+    from app.survey import review as survey_review
+    survey_review.require_formal_proposal_allowed(db, onboarding)
     if customer_email:
         set_customer_email(db, onboarding, customer_email, employee_id)
     missing = readiness(db, onboarding)
@@ -196,11 +203,12 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
                                 today: date) -> Proposal:
     """The formal proposal was handed to the customer and accepted in person. Caller
     commits. Applies every guard the online path has: staff approval (incl. manager
-    sign-off where required), the send-guard, the latest version only, and validity."""
+    sign-off where required), the send-guard (placeholder content and re-verification
+    after a survey change), the latest version only, and validity."""
     import app.notifications.notifier as notifier_module
     from app.memory import reflection
     from app.proposals import acceptance
-    from app.proposals.send_guard import placeholder_problem
+    from app.proposals.send_guard import placeholder_problem, reverification_problem
 
     note, reference = (note or "").strip(), (reference or "").strip()
     if not note:
@@ -235,6 +243,10 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
     problem = placeholder_problem(proposal)
     if problem:
         raise AssociateError(problem["message"], code=problem["code"], status_code=409)
+    problem = reverification_problem(proposal)
+    if problem:
+        raise AssociateError(problem["message"], code=problem["code"], status_code=409,
+                             extra={"fields": problem["fields"]})
 
     memory = MemoryManager(db)
     handed_over = datetime.combine(delivered_on, time(0, 0), tzinfo=timezone.utc)

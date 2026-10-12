@@ -210,3 +210,9 @@ def complete_survey(client, associate_id, onboarding_id, sign: bool = True, **ov
             r = sign_survey(client, associate_id, onboarding_id, party)
             assert r.status_code == 201, r.text
     return client.get(f"{BASE}/{onboarding_id}/survey", headers=headers(associate_id)).json()
+
+
+def review_survey(client, onboarding_id, outcome: str = "feasible", who: dict = ENG, **body):
+    """The Engineer's feasibility review (S1 Step 5) — `feasible` unless told otherwise."""
+    return client.post(f"{DASH}/onboardings/{onboarding_id}/survey/review", json={"outcome": outcome, **body},
+                       headers=who)
