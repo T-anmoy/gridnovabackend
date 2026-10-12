@@ -8,7 +8,9 @@ request that fails and rolls back never emails anyone about a lead, meeting or
 proposal that does not exist.
 
 A queued send runs outside the request's control flow, after the data is safe: it
-must never raise into anything, so each one is isolated and failures are logged.
+must never raise into anything, so each one is isolated and failures are logged. It runs
+on the background runner (app/jobs/runner.py), so an email, a Slack post or a receipt
+render never holds up the response that caused it.
 """
 from __future__ import annotations
 
@@ -37,12 +39,20 @@ def _send_pending(session: Session) -> None:
     # transaction can still roll back then, so only the outermost commit sends.
     if session.in_nested_transaction():
         return
+    from app.jobs import runner
+
     pending = session.info.pop(_PENDING, [])
     for description, send in pending:
+        runner.submit(_isolated(description, send), f"notification {description}")
+
+
+def _isolated(description: str, send: Callable[[], None]) -> Callable[[], None]:
+    def run() -> None:
         try:
             send()
         except Exception:
             logger.exception("Notification %r failed after commit", description)
+    return run
 
 
 @event.listens_for(Session, "after_transaction_end")

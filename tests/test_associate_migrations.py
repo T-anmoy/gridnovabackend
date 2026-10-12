@@ -47,9 +47,14 @@ def db_at_0025(tmp_path):
         -- database has the full tables; SQLite's batch mode reflects the targets).
         CREATE TABLE customers (id INTEGER PRIMARY KEY);
         CREATE TABLE projects (id INTEGER PRIMARY KEY);
-        CREATE TABLE leads (id INTEGER PRIMARY KEY);
+        -- (with the columns 0047_be3_indexes indexes, and the tables it touches)
+        CREATE TABLE leads (id INTEGER PRIMARY KEY, customer_id INTEGER, assigned_employee_id VARCHAR,
+                            pipeline_stage VARCHAR, created_at DATETIME);
         CREATE TABLE proposal_inputs (id INTEGER PRIMARY KEY);
-        CREATE TABLE proposals (id INTEGER PRIMARY KEY);
+        CREATE TABLE proposals (id INTEGER PRIMARY KEY, lead_id INTEGER, status VARCHAR, date_created DATETIME);
+        CREATE TABLE timeline_events (id INTEGER PRIMARY KEY, lead_id INTEGER, created_at DATETIME);
+        CREATE TABLE conversation_messages (id INTEGER PRIMARY KEY, lead_id INTEGER, created_at DATETIME);
+        CREATE TABLE meetings (id INTEGER PRIMARY KEY, lead_id INTEGER, scheduled_at DATETIME);
         CREATE TABLE equipment (id INTEGER PRIMARY KEY, brand VARCHAR);
         INSERT INTO equipment (id, brand) VALUES (1, 'Existing');
         CREATE TABLE audit_logs (

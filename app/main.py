@@ -77,7 +77,16 @@ async def lifespan(app: FastAPI):
     # And the placeholder registry (config/placeholder_registry.yaml).
     from app.placeholders.registry import load as load_placeholder_registry
     load_placeholder_registry()
+    # NeMo Guardrails (when enabled): load the rails before the first customer reply.
+    from app.agents import nemo_guard
+    if nemo_guard.available():
+        from starlette.concurrency import run_in_threadpool
+        await run_in_threadpool(nemo_guard.warm)
     yield
+    # Shutdown (Cloud Run's SIGTERM): let queued background work — emails, receipts,
+    # PDFs — finish inside uvicorn's graceful-shutdown window.
+    from app.jobs import runner
+    runner.shutdown(wait=True)
 
 
 if settings.sentry_dsn:

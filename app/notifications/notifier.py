@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -128,6 +129,20 @@ class SlackWebhookNotifier(Notifier):
 
 
 RESEND_API_URL = "https://api.resend.com/emails"
+RESEND_TIMEOUT_SECONDS = 10
+
+# One HTTP client per process for Resend: its connection pool (and TLS session) is
+# reused across emails instead of a new connection per message.
+_http_lock = threading.Lock()
+_http: Optional[httpx.Client] = None
+
+
+def http_client() -> httpx.Client:
+    global _http
+    with _http_lock:
+        if _http is None:
+            _http = httpx.Client(timeout=RESEND_TIMEOUT_SECONDS)
+        return _http
 
 # Estimate-form and contact-form leads are deliberately absent: the website itself
 # emails info@gridnova.in for both, so a second staff email would be noise. (The
@@ -496,11 +511,11 @@ class EmailNotifier(Notifier):
 
     def _send(self, to: list[str], subject: str, html_body: str, text_body: str, event_type: str) -> bool:
         try:
-            response = httpx.post(
+            response = http_client().post(
                 RESEND_API_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json={"from": self._from, "to": to, "subject": subject, "html": html_body, "text": text_body},
-                timeout=10,
+                timeout=RESEND_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             _report_failure(event_type, f"request error: {exc}", exc)

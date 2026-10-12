@@ -1,0 +1,5 @@
+# Test and CI tooling, on top of the runtime dependencies. Never installed in the image.
+# Locked (with hashes) in requirements-dev.lock — see scripts/lock_requirements.sh.
+-r requirements.txt
+pytest==8.3.4
+pytest-asyncio==0.24.0

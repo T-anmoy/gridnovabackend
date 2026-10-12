@@ -47,7 +47,7 @@ def excluded(path: str) -> bool:
     ".env", ".env.local", ".env.production", "gridnova_dev.db", "gridnova_dev.db.bak-1788503628",
     "gridnova_dev.db-journal", "x.sqlite", ".venv/bin/python", ".venv_qa/lib/x.py", ".venv-win/x",
     ".git/HEAD", ".claude/settings.json", ".ruff_cache/x", "uvicorn.log", "app/__pycache__/main.cpython-313.pyc",
-    "tests/conftest.py", ".pytest_cache/v/x",
+    "tests/conftest.py", ".pytest_cache/v/x", "deploy/RUNBOOK.md", "pytest.ini", "requirements-dev.lock",
 ])
 def test_never_in_the_image(path):
     assert excluded(path), path
@@ -56,7 +56,7 @@ def test_never_in_the_image(path):
 @pytest.mark.parametrize("path", [
     "app/main.py", "app/agents/nemo/output_policy.md", "alembic/alembic.ini", "alembic/versions/0045_be1_security.py",
     "config/sales_policy.yaml", "data/territories/states.csv", "data/pincodes/README.md",
-    "scripts/bootstrap_db.py", "requirements.txt",
+    "scripts/bootstrap_db.py", "requirements.txt", "requirements.lock", "scripts/smoke_fonts.py",
 ])
 def test_everything_the_app_reads_is_kept(path):
     assert not excluded(path), path

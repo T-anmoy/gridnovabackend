@@ -6,13 +6,10 @@ at send time). This is deliberately lightweight — no e-signature vendor. Custo
 acceptance is a DISTINCT concept from the internal two-stage approval gate; it never
 touches staff approval/permission logic.
 
-Rate limiting mirrors the hand-rolled per-IP limiter already used by the public chat
-endpoint (kept consistent with the codebase rather than pulling in a second style).
+Rate-limited per IP through the shared bounded store (app/security/rate_limit.py).
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,24 +21,20 @@ from app.memory.memory_manager import MemoryManager
 from app.memory.models import PipelineStage, TimelineEventType
 from app.proposals import acceptance
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter()
 
 # Per-IP rate limiting for these public endpoints.
 _ACCEPT_RATE_LIMIT = 30
 _ACCEPT_RATE_WINDOW_SECONDS = 60
-_accept_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_accept_request_log = RateLimitLog(_ACCEPT_RATE_WINDOW_SECONDS)
 
 
-def _check_rate_limit(request: Request, log: Optional[defaultdict] = None) -> None:
+def _check_rate_limit(request: Request, log: Optional[RateLimitLog] = None) -> None:
     log = _accept_request_log if log is None else log
-    ip = client_ip(request)
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_ACCEPT_RATE_WINDOW_SECONDS)
-    log[ip] = [t for t in log[ip] if t > cutoff]
-    if len(log[ip]) >= _ACCEPT_RATE_LIMIT:
+    if not log.hit(client_ip(request), _ACCEPT_RATE_LIMIT):
         raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
-    log[ip].append(now)
 
 
 def _validity(proposal) -> tuple[Optional[str], bool]:
@@ -144,7 +137,7 @@ def accept_proposal(token: str, request: Request, db: Session = Depends(get_db))
             "accepted_at": proposal.accepted_at.isoformat(), "already_accepted": False}
 
 
-_pdf_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_pdf_request_log = RateLimitLog(_ACCEPT_RATE_WINDOW_SECONDS)
 
 
 @router.get("/api/v1/public/proposals/{token}/pdf")

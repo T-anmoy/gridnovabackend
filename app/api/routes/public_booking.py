@@ -14,8 +14,7 @@ rely on. This module adds no new scheduling logic of its own.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,6 +30,7 @@ from app.memory.models import Customer, Lead, LeadSource
 from app.rules import sales_policy
 from app.scheduling import availability, booking, google_calendar
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog, RecentKeys
 from app.timezones import format_ist_datetime
 
 router = APIRouter(prefix="/api/v1/public/booking")
@@ -42,13 +42,13 @@ router = APIRouter(prefix="/api/v1/public/booking")
 _AVAILABILITY_RATE_LIMIT = 20
 _BOOKING_RATE_LIMIT = 5
 _RATE_WINDOW_SECONDS = 60
-_availability_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_booking_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_availability_request_log = RateLimitLog(_RATE_WINDOW_SECONDS)
+_booking_request_log = RateLimitLog(_RATE_WINDOW_SECONDS)
 
 # Same per-email guard as public_intake.py: a repeat booking attempt for the
 # same email within this window is rejected even from a different IP.
 _EMAIL_COOLDOWN_SECONDS = 60
-_recent_emails: dict[str, datetime] = {}
+_recent_emails = RecentKeys(_EMAIL_COOLDOWN_SECONDS)
 
 MAX_DAYS_AHEAD = 30
 DEFAULT_DAYS_AHEAD = 14
@@ -63,14 +63,9 @@ NEARBY_ALTERNATIVES_COUNT = 3
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$")
 
 
-def _check_rate_limit(request: Request, log: defaultdict, limit: int) -> None:
-    ip = client_ip(request)
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
-    log[ip] = [t for t in log[ip] if t > cutoff]
-    if len(log[ip]) >= limit:
+def _check_rate_limit(request: Request, log: RateLimitLog, limit: int) -> None:
+    if not log.hit(client_ip(request), limit):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before trying again.")
-    log[ip].append(now)
 
 
 def _check_email_cooldown(email: str) -> None:

@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.execution import service as execution
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import Customer, CustomerOnboarding, ProjectExecution
+from app.memory.models import Customer, CustomerOnboarding, ProjectExecution, ProjectStage, ProjectStageEvent
 
 
 def check_execution_alerts(db: Session, now: datetime) -> dict:
@@ -26,7 +26,12 @@ def check_execution_alerts(db: Session, now: datetime) -> dict:
 
     newly_stuck = []
     stuck_total = 0
-    for record in db.execute(select(ProjectExecution)).scalars():
+    # Only projects still in execution: handover_complete is every project's last stage
+    # (app/onboarding/progress.py ORDER, always applicable), and a handed-over project
+    # can never be stuck, so it is not loaded on every run any more.
+    handed_over = exists().where(ProjectStageEvent.project_id == ProjectExecution.project_id,
+                                 ProjectStageEvent.stage == ProjectStage.handover_complete)
+    for record in db.execute(select(ProjectExecution).where(~handed_over).order_by(ProjectExecution.id)).scalars():
         onboarding = db.get(CustomerOnboarding, record.onboarding_id)
         stages = progress.applicable(db, onboarding)
         done = progress.recorded(db, onboarding.project_id)

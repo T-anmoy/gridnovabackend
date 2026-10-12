@@ -1,0 +1,57 @@
+# Cloud Scheduler jobs for the Grid Nova backend — one per
+# POST /api/v1/dashboard/internal/check-* (tests/test_internal_jobs_contract.py fails if a
+# job the app exposes is missing here, or one listed here does not exist).
+#
+# Turned into gcloud commands by deploy/scheduler_commands.py (deploy/RUNBOOK.md §9).
+#
+# Authentication (both, deploy/RUNBOOK.md §9):
+#   * Cloud Scheduler signs every call with an OIDC token for the scheduler service
+#     account, audience = the target service URL. The jobs target the PRIVATE
+#     "gridnova-jobs" service (same image, --no-allow-unauthenticated), where Cloud Run
+#     itself rejects any call without a valid token from an account holding
+#     roles/run.invoker.
+#   * The app checks X-Internal-Key (INTERNAL_API_KEY) on every internal route, on both
+#     services.
+#
+# Overlap: each job holds a job-level lock (app/jobs/locks.py); a run that finds the
+# previous one still going answers 200 {"status": "skipped", "reason": "already_running"},
+# so a retry never doubles an alert.
+#
+# Schedules are cron in India Standard Time. Their frequency is not a value Grid Nova has
+# confirmed: placeholder-registry entry BE3-1.
+
+defaults:
+  time_zone: Asia/Kolkata
+  http_method: POST
+  # Cloud Run's request timeout for the jobs service is 600 s (RUNBOOK §6); the deadline
+  # sits just under it.
+  attempt_deadline: 590s
+  retry:
+    max_retry_attempts: 1
+    min_backoff: 60s
+    max_backoff: 300s
+    max_doublings: 2
+
+jobs:
+  # [UNCONFIRMED] every schedule below (BE3-1)
+  - name: gridnova-check-stale-leads
+    path: /api/v1/dashboard/internal/check-stale-leads
+    # Quiet-lead alerts (48 h / 5 d), one staff digest per run, up to
+    # STALE_LEAD_REFLECTIONS_PER_RUN model calls, and the proposal-PDF sweeper.
+    schedule: "15 * * * *"        # hourly at :15 [UNCONFIRMED]
+  - name: gridnova-check-onboarding-escalations
+    path: /api/v1/dashboard/internal/check-onboarding-escalations
+    # Overdue associate-customer verification calls move one step up the chain.
+    schedule: "5 * * * *"         # hourly at :05 [UNCONFIRMED]
+  - name: gridnova-check-survey-reviews
+    path: /api/v1/dashboard/internal/check-survey-reviews
+    # Surveys waiting past review_target_hours.
+    schedule: "35 * * * *"        # hourly at :35 [UNCONFIRMED]
+  - name: gridnova-check-payment-alerts
+    path: /api/v1/dashboard/internal/check-payment-alerts
+    # Overdue milestones, unverified payments, and the receipt sweeper.
+    schedule: "30 9,13,17 * * *"  # 09:30, 13:30, 17:30 IST [UNCONFIRMED]
+  - name: gridnova-check-execution-alerts
+    path: /api/v1/dashboard/internal/check-execution-alerts
+    # Projects stuck at an execution stage (thresholds: placeholder E2, in days).
+    schedule: "45 9 * * *"        # daily 09:45 IST [UNCONFIRMED]

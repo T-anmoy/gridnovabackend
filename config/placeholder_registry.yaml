@@ -942,6 +942,16 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  # ── BE-3: deployment ───────────────────────────────────────────────────────────
+  - id: BE3-1
+    area: policies
+    location: {file: deploy/scheduler.yaml, key: jobs}
+    description: "How often the scheduled checks run (cron, IST): stale leads, onboarding escalations and survey reviews hourly; payment alerts at 09:30, 13:30 and 17:30; execution alerts daily at 09:45. Chosen by engineering, not confirmed."
+    dummy_value: "hourly / 3× daily / daily"
+    needed_from_grid_nova: At what times of day (and how often) should staff receive the stale-lead, escalation, survey-review, payment and stuck-project alerts?
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.

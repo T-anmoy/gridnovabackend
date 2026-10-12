@@ -362,9 +362,18 @@ def put_schedule(onboarding_id: int, body: ScheduleIn, db: Session = Depends(get
 @router.post("/internal/check-payment-alerts")
 def run_payment_alerts(db: Session = Depends(get_db), _: None = Depends(_require_admin_or_internal_key)):
     """Admin or INTERNAL_API_KEY. Emails Accounts once per overdue milestone and once
-    per payment left unverified past the threshold. Idempotent."""
+    per payment left unverified past the threshold. Idempotent; an overlapping run is
+    skipped. Also retries receipts still pending (app/jobs/sweeper.py): `receipts_retried`."""
+    from app.jobs import sweeper
+    from app.jobs.locks import run_exclusive
     from app.jobs.payment_alerts import check_payment_alerts
-    return check_payment_alerts(db, datetime.now(timezone.utc))
+
+    def job() -> dict:
+        now = datetime.now(timezone.utc)
+        result = check_payment_alerts(db, now)
+        result["receipts_retried"] = sweeper.retry_pending_receipts(db, now)
+        return result
+    return run_exclusive(db, "check-payment-alerts", job)
 
 
 # ── CSV exports (Accounts, Admin) ────────────────────────────────────────────────

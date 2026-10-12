@@ -190,9 +190,11 @@ def resolve_flag(flag_id: int, body: ResolveFlagRequest, db: Session = Depends(g
 @router.post("/internal/check-onboarding-escalations")
 def run_onboarding_escalations(db: Session = Depends(get_db), _: None = Depends(_require_admin_or_internal_key)):
     """Admin or INTERNAL_API_KEY (Cloud Scheduler). Re-scores submitted associate-sourced
-    customers and escalates overdue verification calls one step up the chain. Idempotent."""
+    customers and escalates overdue verification calls one step up the chain. Idempotent;
+    an overlapping run is skipped."""
+    from app.jobs.locks import run_exclusive
     from app.jobs.onboarding_escalations import check_onboarding_escalations
-    return check_onboarding_escalations(db)
+    return run_exclusive(db, "check-onboarding-escalations", lambda: check_onboarding_escalations(db))
 
 
 @router.get("/onboardings/{onboarding_id}/progress")

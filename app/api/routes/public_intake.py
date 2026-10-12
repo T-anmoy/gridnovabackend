@@ -13,8 +13,7 @@ tagged with a distinct source so it's never confused with a chat-qualified lead.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import re
@@ -29,6 +28,7 @@ from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import LeadSource
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog, RecentKeys
 from app.security.internal_key import forwarded_customer_ip, has_valid_internal_key
 
 router = APIRouter(prefix="/api/v1/public")
@@ -39,19 +39,19 @@ router = APIRouter(prefix="/api/v1/public")
 # tighter than either of those.
 _RATE_LIMIT = 10
 _RATE_WINDOW_SECONDS = 60
-_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_request_log = RateLimitLog(_RATE_WINDOW_SECONDS)
 
 # Additional per-email guard: a resubmission for the same email address within
 # this window is rejected even from a different IP (e.g. a script rotating
 # addresses would still be caught by the IP limit; one rotating IPs per email
 # would not be, which is exactly the gap this closes).
 _EMAIL_COOLDOWN_SECONDS = 60
-_recent_emails: dict[str, datetime] = {}
+_recent_emails = RecentKeys(_EMAIL_COOLDOWN_SECONDS)
 
 # The contact form gets the same limits in its own buckets, so an estimate request
 # and a contact message from the same visitor don't block each other.
-_contact_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_recent_contact_emails: dict[str, datetime] = {}
+_contact_request_log = RateLimitLog(_RATE_WINDOW_SECONDS)
+_recent_contact_emails = RecentKeys(_EMAIL_COOLDOWN_SECONDS)
 
 
 def _rate_limit_identity(request: Request) -> Optional[str]:
@@ -68,20 +68,16 @@ def _rate_limit_identity(request: Request) -> Optional[str]:
     return client_ip(request)
 
 
-def _check_rate_limit(request: Request, log: Optional[defaultdict] = None) -> None:
+def _check_rate_limit(request: Request, log: Optional[RateLimitLog] = None) -> None:
     log = _request_log if log is None else log
     ip = _rate_limit_identity(request)
     if ip is None:
         return
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
-    log[ip] = [t for t in log[ip] if t > cutoff]
-    if len(log[ip]) >= _RATE_LIMIT:
+    if not log.hit(ip, _RATE_LIMIT):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before submitting again.")
-    log[ip].append(now)
 
 
-def _check_email_cooldown(email: str, recent: Optional[dict] = None, what: str = "An estimate request") -> None:
+def _check_email_cooldown(email: str, recent: Optional[RecentKeys] = None, what: str = "An estimate request") -> None:
     recent = _recent_emails if recent is None else recent
     now = datetime.now(timezone.utc)
     key = email.strip().lower()

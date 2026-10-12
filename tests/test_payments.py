@@ -272,8 +272,10 @@ class TestMilestoneStatus:
         overdue = client.get(f"{DASH}/payment-milestones", params={"needs_attention": True}, headers=ACCOUNTS).json()
         assert [(i["onboarding_id"], i["number"]) for i in overdue["items"]] == [(oid, 1)]
         url = f"{DASH}/internal/check-payment-alerts"
-        assert client.post(url, headers=ADMIN).json() == {"overdue_milestones": 1, "awaiting_verification": 0}
-        assert client.post(url, headers=ADMIN).json() == {"overdue_milestones": 0, "awaiting_verification": 0}
+        assert client.post(url, headers=ADMIN).json() == {"overdue_milestones": 1, "awaiting_verification": 0,
+                                                          "receipts_retried": 0}
+        assert client.post(url, headers=ADMIN).json() == {"overdue_milestones": 0, "awaiting_verification": 0,
+                                                          "receipts_retried": 0}
         assert len(notifications.of("payments_attention")) == 1
 
     def test_second_milestone_falls_due_at_its_trigger(self, client, db_session, onboarding_ready):

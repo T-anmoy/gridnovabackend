@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -144,21 +144,30 @@ def list_applications(
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
     """Both programmes, newest first. Same {items, page, page_size, total} shape as
-    the other paginated dashboard lists."""
+    the other paginated dashboard lists. The page and the count come from SQL (one
+    UNION over both programmes); only the page's applications are loaded."""
     _require(employee.can_review_associate_applications(), "review associate applications")
-    rows = []
+    parts = []
     for kind, model in service.APPLICATION_MODELS.items():
         if application_type and kind != application_type:
             continue
-        q = select(model)
+        q = select(literal(kind.value).label("kind"), model.id.label("id"), model.submitted_at.label("submitted_at"))
         if status:
             q = q.where(model.status == status)
-        rows.extend((kind, a) for a in db.execute(q).scalars())
-    rows.sort(key=lambda r: (r[1].submitted_at, r[1].id), reverse=True)
-    start = (page - 1) * page_size
+        parts.append(q)
+    both = union_all(*parts).subquery() if len(parts) > 1 else parts[0].subquery()
+    total = db.execute(select(func.count()).select_from(both)).scalar_one()
+    page_keys = [(AssociateType(kind), app_id) for kind, app_id in db.execute(
+        select(both.c.kind, both.c.id).order_by(both.c.submitted_at.desc(), both.c.id.desc(), both.c.kind)
+        .offset((page - 1) * page_size).limit(page_size))]
+    loaded = {}
+    for kind, model in service.APPLICATION_MODELS.items():
+        ids = [app_id for k, app_id in page_keys if k == kind]
+        if ids:
+            loaded.update({(kind, a.id): a for a in db.execute(select(model).where(model.id.in_(ids))).scalars()})
     return {
-        "items": [_serialize_application(db, a, kind, full=False) for kind, a in rows[start:start + page_size]],
-        "page": page, "page_size": page_size, "total": len(rows),
+        "items": [_serialize_application(db, loaded[key], key[0], full=False) for key in page_keys],
+        "page": page, "page_size": page_size, "total": total,
     }
 
 
@@ -238,8 +247,9 @@ def approve_application(application_type: AssociateType, application_id: int, bo
     stands in for OTP verification — to be recorded as completed, with a note.
 
     In one transaction: the Associate ID is issued, the associate created and (for a
-    Preferred Associate) the seat taken. After it commits: the Clerk invitation, the
-    ID card and welcome letter PDFs, and the notification. A failure in any of those
+    Preferred Associate) the seat taken. After it commits, on the background runner
+    (app/jobs/runner.py): the Clerk invitation, the ID card and welcome letter PDFs,
+    and the notification — so the response does not wait for them. A failure in any of those
     is recorded on the associate and retried from the dashboard; the approval stands.
     """
     _require(employee.can_review_associate_applications(), "approve associate applications")
@@ -277,8 +287,13 @@ def approve_application(application_type: AssociateType, application_id: int, bo
         db.rollback()
         raise _approval_conflict(db, application_type, application_id)
 
-    issuance.send_clerk_invite(db, associate, employee.employee_id)
-    issuance.generate_documents(db, associate, employee.employee_id, today)
+    # The Clerk invitation and the two PDFs run on the background runner: the response
+    # shows the associate as approved, with clerk_invite_status null and the documents
+    # not yet generated until that work finishes (GET .../associates/{id} shows it).
+    from app.jobs import runner
+    associate_pk, approver = associate.id, employee.employee_id
+    runner.submit(lambda: issuance.issue_after_approval(associate_pk, approver, today),
+                  f"associate issuance {associate.associate_id}")
     db.refresh(associate)
     return {"application": _serialize_application(db, application, application_type, full=True),
             "associate": serialize_associate(db, associate)}

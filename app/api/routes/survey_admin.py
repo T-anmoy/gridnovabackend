@@ -274,5 +274,6 @@ def run_survey_review_alerts(db: Session = Depends(get_db),
     Idempotent, also when two runs overlap."""
     from datetime import datetime, timezone
 
+    from app.jobs.locks import run_exclusive
     from app.jobs.survey_reviews import check_survey_reviews
-    return check_survey_reviews(db, datetime.now(timezone.utc))
+    return run_exclusive(db, "check-survey-reviews", lambda: check_survey_reviews(db, datetime.now(timezone.utc)))

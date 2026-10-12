@@ -233,16 +233,35 @@ def release_seat(db: Session, seat: TerritorySeat, performed_by: str, reason: st
 
 # ── Identity claims (duplicate-registration guard) ──────────────────────────────
 
-def _claim_key() -> bytes:
-    from app.security.encryption import EncryptionKeyMissingError
+def legacy_claim_key() -> bytes:
+    """The pre-BE-3 claim key, derived from the Fernet key (its last — oldest — entry, so
+    prepending a new Fernet key does not change it). Only for databases whose claims
+    were written before IDENTITY_HMAC_KEY existed; scripts/rehash_identity_claims.py
+    moves them to the new key."""
+    from app.security.encryption import EncryptionKeyMissingError, keys
 
-    if not settings.fernet_encryption_key:
+    configured = keys()
+    if not configured:
         raise EncryptionKeyMissingError("FERNET_ENCRYPTION_KEY is not set — registrations cannot be accepted.")
-    return hashlib.sha256(b"gridnova-associate-identity-claims:" + settings.fernet_encryption_key.encode()).digest()
+    return hashlib.sha256(b"gridnova-associate-identity-claims:" + configured[-1].encode()).digest()
 
 
-def claim_hash(kind: str, value: str) -> str:
-    return hmac.new(_claim_key(), f"{kind}:{value}".encode(), hashlib.sha256).hexdigest()
+def identity_claim_key() -> bytes:
+    """The key identity claims are signed with: derived from IDENTITY_HMAC_KEY, its own
+    secret. Rotating FERNET_ENCRYPTION_KEY then never touches duplicate detection.
+    Without it (development databases from before BE-3) the legacy Fernet-derived key is
+    used; the production guard requires IDENTITY_HMAC_KEY in staging and production."""
+    if settings.identity_hmac_key:
+        return hashlib.sha256(b"gridnova-associate-identity-claims:v2:" + settings.identity_hmac_key.encode()).digest()
+    return legacy_claim_key()
+
+
+def _claim_key() -> bytes:
+    return identity_claim_key()
+
+
+def claim_hash(kind: str, value: str, key: Optional[bytes] = None) -> str:
+    return hmac.new(key or _claim_key(), f"{kind}:{value}".encode(), hashlib.sha256).hexdigest()
 
 
 CLAIM_MESSAGES = {
@@ -255,15 +274,15 @@ CLAIM_MESSAGES = {
 
 
 def identity_claims(*, pan: str, mobile: str, ifsc: str, account: str, aadhaar_last4: str,
-                    dob: date, name_key: str) -> dict[str, str]:
+                    dob: date, name_key: str, key: Optional[bytes] = None) -> dict[str, str]:
     """kind -> HMAC for the four attributes a person may register only once with,
     across both programmes. A bank account is its IFSC bank code + account number,
     since account numbers are only unique within one bank."""
     return {
-        "pan": claim_hash("pan", pan),
-        "mobile": claim_hash("mobile", mobile),
-        "bank_account": claim_hash("bank_account", f"{ifsc[:4]}|{account}"),
-        "aadhaar_dob_name": claim_hash("aadhaar_dob_name", f"{aadhaar_last4}|{dob.isoformat()}|{name_key}"),
+        "pan": claim_hash("pan", pan, key),
+        "mobile": claim_hash("mobile", mobile, key),
+        "bank_account": claim_hash("bank_account", f"{ifsc[:4]}|{account}", key),
+        "aadhaar_dob_name": claim_hash("aadhaar_dob_name", f"{aadhaar_last4}|{dob.isoformat()}|{name_key}", key),
     }
 
 

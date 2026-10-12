@@ -11,8 +11,7 @@ is an Aadhaar number, which must not travel anywhere it could be logged.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,6 +37,7 @@ from app.memory.models import (
     TerritoryState,
 )
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter(prefix="/api/v1/public")
 
@@ -47,19 +47,14 @@ router = APIRouter(prefix="/api/v1/public")
 # is kept low to slow down walking through them (BE-1 S10).
 _APPLY_LIMIT, _VERIFY_LIMIT, _LOOKUP_LIMIT = 5, 10, 60
 _WINDOW_SECONDS = 60
-_apply_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_verify_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_lookup_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_apply_request_log = RateLimitLog(_WINDOW_SECONDS)
+_verify_request_log = RateLimitLog(_WINDOW_SECONDS)
+_lookup_request_log = RateLimitLog(_WINDOW_SECONDS)
 
 
-def _check_rate_limit(request: Request, log: defaultdict, limit: int) -> None:
-    ip = client_ip(request)
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_WINDOW_SECONDS)
-    log[ip] = [t for t in log[ip] if t > cutoff]
-    if len(log[ip]) >= limit:
+def _check_rate_limit(request: Request, log: RateLimitLog, limit: int) -> None:
+    if not log.hit(client_ip(request), limit):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before trying again.")
-    log[ip].append(now)
 
 
 def _lookup_limit(request: Request) -> None:

@@ -4,27 +4,28 @@ for any bad or not-yet-rendered token, and while the receipt is held (placeholde
 content) or void (the payment was dishonoured)."""
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.routes.public_proposals import _check_rate_limit
 from app.memory.db import get_db
 from app.memory.models import PaymentReceipt, ReceiptEmailStatus
+from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter()
-_receipt_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+# Same limit as the proposal PDF link (app/api/routes/public_proposals.py).
+_RATE_LIMIT, _RATE_WINDOW_SECONDS = 30, 60
+_receipt_request_log = RateLimitLog(_RATE_WINDOW_SECONDS)
 
 
 @router.get("/api/v1/public/receipts/{token}/pdf")
 def download_receipt(token: str, request: Request, db: Session = Depends(get_db)):
     from app.storage import r2
 
-    _check_rate_limit(request, _receipt_request_log)
+    if not _receipt_request_log.hit(client_ip(request), _RATE_LIMIT):
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
     receipt = db.execute(select(PaymentReceipt).where(PaymentReceipt.public_token == token)).scalar_one_or_none() \
         if 16 <= len(token) <= 64 else None
     if (receipt is None or not receipt.pdf_key or receipt.voided_at is not None

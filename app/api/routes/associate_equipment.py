@@ -11,8 +11,6 @@ brand and model as printed instead (an unmatched unit) — never stuck.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,23 +21,20 @@ from app.auth.dependencies import AuthenticatedAssociate, get_current_associate
 from app.config import settings
 from app.memory.db import get_db
 from app.memory.models import Equipment, EquipmentCategory
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter(prefix="/api/v1/associate/equipment")
 
 ITEM_FIELDS = ("id", "category", "brand", "model_name", "specification", "is_dcr_compliant", "is_placeholder")
 RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60
-_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_request_log = RateLimitLog(RATE_WINDOW_SECONDS)
 
 
 def _check_rate_limit(key: str) -> None:
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=RATE_WINDOW_SECONDS)
-    _request_log[key] = [t for t in _request_log[key] if t > cutoff]
-    if len(_request_log[key]) >= RATE_LIMIT:
+    if not _request_log.hit(key, RATE_LIMIT):
         raise HTTPException(status_code=429, detail={"code": "rate_limited",
                                                      "message": "Too many requests. Please wait a moment."})
-    _request_log[key].append(now)
 
 
 def item(e: Equipment) -> dict:

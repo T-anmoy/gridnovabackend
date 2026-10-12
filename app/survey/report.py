@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.associates.service import AssociateError
 from app.memory.models import Customer, CustomerOnboarding, Employee, ProposalInputs
+from app.pdf.fonts import FONT_STACK
 from app.survey import results as survey_results
 
 PDF = "application/pdf"
@@ -232,7 +233,7 @@ def build_html(db: Session, onboarding: CustomerOnboarding, now: Optional[dateti
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><style>
   @page {{ size: A4; margin: 16mm; }}
-  body {{ font-family: Arial, sans-serif; color: #111; font-size: 10pt; line-height: 1.4; }}
+  body {{ font-family: {FONT_STACK}; color: #111; font-size: 10pt; line-height: 1.4; }}
   .header {{ border-bottom: 3px solid #f7a800; padding-bottom: 8px; margin-bottom: 14px; }}
   .company-name {{ color: #0e2a63; font-size: 18pt; font-weight: bold; }}
   .meta {{ color: #555; font-size: 9pt; }}

@@ -343,6 +343,9 @@ def record_execution_stage(onboarding_id: int, stage: str, body: RecordExecution
 @router.post("/internal/check-execution-alerts")
 def run_execution_alerts(db: Session = Depends(get_db), _: None = Depends(_require_admin_or_internal_key)):
     """Admin or INTERNAL_API_KEY. Emails Operations once about each project that has
-    become stuck at a stage (it is not emailed again for the same stage). Idempotent."""
+    become stuck at a stage (it is not emailed again for the same stage). Idempotent; an
+    overlapping run is skipped."""
     from app.jobs.execution_alerts import check_execution_alerts
-    return check_execution_alerts(db, datetime.now(timezone.utc))
+    from app.jobs.locks import run_exclusive
+    return run_exclusive(db, "check-execution-alerts",
+                         lambda: check_execution_alerts(db, datetime.now(timezone.utc)))

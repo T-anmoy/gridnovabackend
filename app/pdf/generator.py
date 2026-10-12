@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.config import settings
+from app.pdf.fonts import FONT_STACK
 from app.timezones import format_ist_date
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ _PROPOSAL_HTML_TEMPLATE = """
 <head>
 <meta charset="UTF-8">
 <style>
-  body {{ font-family: Arial, sans-serif; color: #111; margin: 0; padding: 40px; }}
+  body {{ font-family: {font_stack}; color: #111; margin: 0; padding: 40px; }}
   .header {{ border-bottom: 3px solid {accent}; padding-bottom: 20px; margin-bottom: 30px; }}
   .company-name {{ color: {primary}; font-size: 28px; font-weight: bold; }}
   .proposal-title {{ color: {accent}; font-size: 18px; margin-top: 8px; }}
@@ -170,6 +171,7 @@ def _build_html(proposal_data: dict, content_config: dict) -> str:
         )
 
     return _PROPOSAL_HTML_TEMPLATE.format(
+        font_stack=FONT_STACK,
         accent=accent,
         primary=primary,
         company_name=_e(company.get("name", "Grid Nova Energy")),

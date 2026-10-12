@@ -11,21 +11,42 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import Customer, CustomerOnboarding, Payment, PaymentMilestone, PaymentStatus
+from app.memory.models import (
+    Customer, CustomerOnboarding, Payment, PaymentLedgerEntry, PaymentMilestone, PaymentStatus,
+)
 from app.payments import service as payments
+
+
+def _open_onboarding_ids(db: Session) -> list[int]:
+    """Onboardings that could still produce a milestone alert: at least one milestone not
+    yet alerted, on a project whose verified money does not yet cover its schedule. A
+    fully paid project, or one whose every milestone was already alerted, is never
+    loaded again (it used to be re-scanned on every run, forever)."""
+    scheduled = (select(PaymentMilestone.project_id.label("project_id"),
+                        func.sum(PaymentMilestone.amount_due).label("due"))
+                 .where(PaymentMilestone.onboarding_id.is_not(None))
+                 .group_by(PaymentMilestone.project_id).subquery())
+    received = (select(PaymentLedgerEntry.project_id.label("project_id"),
+                       func.sum(PaymentLedgerEntry.amount).label("paid"))
+                .group_by(PaymentLedgerEntry.project_id).subquery())
+    return list(db.execute(
+        select(PaymentMilestone.onboarding_id).distinct()
+        .join(scheduled, scheduled.c.project_id == PaymentMilestone.project_id)
+        .outerjoin(received, received.c.project_id == PaymentMilestone.project_id)
+        .where(PaymentMilestone.onboarding_id.is_not(None), PaymentMilestone.overdue_alerted_at.is_(None),
+               func.coalesce(received.c.paid, 0) < scheduled.c.due)
+        .order_by(PaymentMilestone.onboarding_id)).scalars())
 
 
 def check_payment_alerts(db: Session, now: datetime) -> dict:
     from app.notifications import notifier as notifier_module
 
     overdue, waiting = [], []
-    onboarding_ids = db.execute(select(PaymentMilestone.onboarding_id).where(
-        PaymentMilestone.onboarding_id.is_not(None)).distinct()).scalars().all()
-    for onboarding in (db.get(CustomerOnboarding, i) for i in onboarding_ids):
+    for onboarding in (db.get(CustomerOnboarding, i) for i in _open_onboarding_ids(db)):
         customer = db.get(Customer, onboarding.customer_id)
         for m in payments.milestone_status(db, onboarding, now):
             row = db.get(PaymentMilestone, m["milestone_id"])

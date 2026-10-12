@@ -1,3 +1,13 @@
+# Runtime dependencies — what the production image needs, nothing else.
+#
+# This file lists the DIRECT dependencies. The image and CI never install it directly:
+# they install requirements.lock (every transitive package pinned, with hashes) with
+# `pip install --require-hashes`. After editing this file, regenerate the lockfiles:
+#
+#     scripts/lock_requirements.sh
+#
+# Test tooling is in requirements-dev.txt; the optional NeMo Guardrails rail is in
+# requirements-nemo.txt.
 fastapi==0.141.1
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
@@ -6,36 +16,30 @@ pydantic==2.10.3
 pydantic-settings==2.6.1
 psycopg2-binary==2.9.10
 openai==1.57.4
-langchain-core>=0.3.81
-# langchain-core: CRITICAL CVE-2025-68664 fixed at >=0.3.81. The langgraph>=1.0.10
-# upgrade pulls langchain-core up to 1.6.1 as a transitive dependency, which also
-# resolves PYSEC-2026-2193 (path traversal). Verified: zero application code imports
-# langchain_core directly (grep confirms), and the full 256-test suite passes with
-# this resolved version — this is the compatibility check, verified by evidence.
-langgraph>=1.0.10
+# langchain-core: CRITICAL CVE-2025-68664 fixed at >=0.3.81; 1.6.1 (pulled up by
+# langgraph) also resolves PYSEC-2026-2193 (path traversal). No application code imports
+# langchain_core directly. Pinned to the version the test suite runs against.
+langchain-core==1.6.1
+langgraph==1.2.11
 boto3==1.35.84
-weasyprint>=68.0
+# WeasyPrint: one exact version — the one the suite and the PDF font check
+# (scripts/smoke_fonts.py) run against. 70.0 fixes PYSEC-2026-3940 / GHSA-r543-q48m-4c9j
+# (pip-audit); 68 was never tested.
+weasyprint==70.0
 # QR code on associate ID cards (app/associates/documents.py). Pure Python, no dependencies.
 segno==1.6.6
 sentry-sdk[fastapi]==2.19.2
 PyYAML==6.0.2
 httpx==0.27.2
-starlette>=0.49.1
+starlette==1.6.0
 # jinja2: needed at runtime only through starlette.templating, which the Sentry Starlette
 # integration imports; it used to arrive implicitly through nemoguardrails.
 jinja2==3.1.6
-cryptography>=48.0.1
+cryptography==50.0.1
 google-auth==2.37.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.157.0
-PyJWT>=2.13.0
-pytest==8.3.4
-pytest-asyncio==0.24.0
-python-multipart==0.0.20
-
-# NeMo Guardrails — semantic output rail preventing internal-information disclosure
-# in customer replies (app/agents/nemo_guard.py). Off unless NEMO_GUARDRAILS_ENABLED
-# is set; the code degrades to the deterministic guardrails when it is absent.
-# Weighs ~400MB installed (pulls onnxruntime + numpy + huggingface-hub via fastembed).
-# Verified not to downgrade langchain-core below the CVE-2025-68664 pin.
-nemoguardrails==0.24.0
+# PyJWT 2.15.0 and python-multipart 0.0.31: the lowest versions pip-audit reports as
+# fixing the PYSEC-2026 advisories against 2.13.0 / 0.0.20 (BE-3).
+PyJWT==2.15.0
+python-multipart==0.0.31

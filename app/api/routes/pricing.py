@@ -17,8 +17,6 @@ configuration. Nothing here returns a procurement-cost-derived figure.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Optional
 
@@ -34,6 +32,7 @@ from app.pricing import engine as pricing_engine
 from app.pricing import instant_estimate as instant_estimate_module
 from app.pricing.engine import PricingInputs
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter(prefix="/api/v1/pricing")
 
@@ -180,21 +179,16 @@ def full_breakdown(
 
 _INSTANT_ESTIMATE_RATE_LIMIT = 20
 _INSTANT_ESTIMATE_RATE_WINDOW_SECONDS = 60
-_instant_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_instant_estimate_request_log = RateLimitLog(_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
 # /estimate and /packages are public too and get the same per-IP limit, in their own
 # buckets (BE-1 S10).
-_estimate_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_packages_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
+_estimate_request_log = RateLimitLog(_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
+_packages_request_log = RateLimitLog(_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
 
 
-def _check_rate_limit(request: Request, log: defaultdict) -> None:
-    ip = client_ip(request)
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
-    log[ip] = [t for t in log[ip] if t > cutoff]
-    if len(log[ip]) >= _INSTANT_ESTIMATE_RATE_LIMIT:
+def _check_rate_limit(request: Request, log: RateLimitLog) -> None:
+    if not log.hit(client_ip(request), _INSTANT_ESTIMATE_RATE_LIMIT):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before trying again.")
-    log[ip].append(now)
 
 
 def _check_instant_estimate_rate_limit(request: Request) -> None:

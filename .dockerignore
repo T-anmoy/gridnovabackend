@@ -4,8 +4,9 @@
 #   alembic/             migrations; GET /api/v1/health/ready reads its head revision
 #   config/              Grid Nova's YAML config, validated at boot
 #   data/                territory master and PIN directory (seeded / read at runtime)
-#   scripts/             bootstrap_db.py runs on every deploy (and the seed scripts)
-#   requirements*.txt    the image's pip install
+#   scripts/             bootstrap_db.py runs on every deploy (and the seed scripts);
+#                        smoke_fonts.py is run against the built image in CI
+#   requirements.lock    the image's pip install (hash-checked)
 
 # Secrets and local databases — never in an image.
 .env
@@ -35,4 +36,9 @@ venv/
 Dockerfile
 tests/
 docs/
+deploy/
 README.md
+pytest.ini
+ruff.toml
+requirements-dev.*
+requirements-nemo.txt

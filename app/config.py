@@ -17,6 +17,12 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     database_url: str = "sqlite:///./gridnova_dev.db"
+    # PostgreSQL connection pool, per instance (app/memory/db.py). Infrastructure sizing,
+    # not business values: size them against Cloud SQL max_connections ÷ max instances.
+    db_pool_size: int = Field(default=10, ge=1)
+    db_max_overflow: int = Field(default=5, ge=0)
+    db_pool_timeout_seconds: float = Field(default=10.0, gt=0)
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60)
 
     # Clerk
     clerk_secret_key: str = ""
@@ -59,6 +65,20 @@ class Settings(BaseSettings):
     # guardrails have already run), true withholds it. Fail-open is the default
     # because an outage would otherwise silence every conversation.
     nemo_guardrails_fail_closed: bool = False
+    # Rail checks that may run at once (one per concurrent customer reply). A single
+    # worker serialised every check and one hung call starved the rest.
+    nemo_guardrails_max_workers: int = Field(default=4, ge=1, le=32)
+
+    # Background work after the response (app/jobs/runner.py): threads per instance.
+    background_workers: int = Field(default=4, ge=1, le=32)
+
+    # Sweepers in the scheduled jobs (app/jobs/sweeper.py): background work older than
+    # this many minutes and still unfinished is retried, at most this many per run.
+    sweeper_grace_minutes: int = Field(default=15, ge=1)
+    sweeper_batch_size: int = Field(default=10, ge=1)
+    # check-stale-leads: most quiet-lead reflections (model calls) one run makes inline,
+    # so a backlog cannot push the request past its timeout.
+    stale_lead_reflections_per_run: int = Field(default=10, ge=0)
 
     # Customer memory (episodic recall + self-reflection)
     # Keyword retrieval is the default and needs nothing extra. Semantic search
@@ -84,8 +104,15 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
 
-    # Encryption at rest (Fernet) — for employee Google refresh tokens
+    # Encryption at rest (Fernet) — employee Google refresh tokens, associate bank
+    # account numbers. Comma-separated, newest first: the first key encrypts, all decrypt
+    # (rotation: app/security/encryption.py).
     fernet_encryption_key: str = ""
+    # Signs associate identity claims (the duplicate-registration guard,
+    # app/associates/service.py). Its own secret, so a Fernet rotation never changes it.
+    # Required in staging and production. Never rotate it without
+    # scripts/rehash_identity_claims.py.
+    identity_hmac_key: str = ""
 
     # Scheduling business hours (IST). Slots are only ever offered inside this window.
     business_hours_start_ist: int = 10  # 10:00
@@ -109,6 +136,10 @@ class Settings(BaseSettings):
     # Cloud Run's own front end appends one entry: 1. An external HTTPS load balancer in
     # front of Cloud Run adds another: 2.
     trusted_proxy_hops: int = 0
+
+    # GET /api/v1/health/ready reuses its answer for this many seconds (0 = never), so
+    # probes and uptime checks polling it never add database load.
+    readiness_cache_seconds: float = Field(default=15.0, ge=0)
 
     # Server-to-server key (app/security/internal_key.py), sent as X-Internal-Key by the
     # website's lead mirror and by Cloud Scheduler. Blank = feature off, header ignored.
@@ -205,6 +236,36 @@ def _is_local_url(url: str) -> bool:
     return host in _LOCAL_HOSTS or host.endswith(".localhost")
 
 
+def _is_bare_origin(origin: str) -> bool:
+    """scheme://host[:port] exactly — what a browser sends as Origin and Clerk as `azp`.
+    A path or a trailing slash never matches either."""
+    parsed = urlparse(origin)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc) and parsed.path == "" \
+        and not parsed.params and not parsed.query and not parsed.fragment
+
+
+def _database_url_problem(url: str) -> str | None:
+    """Why DATABASE_URL is not a usable production PostgreSQL URL, or None."""
+    from sqlalchemy.engine import make_url
+    try:
+        parsed = make_url(url)
+    except Exception:
+        return "DATABASE_URL is not a valid SQLAlchemy URL"
+    if parsed.drivername.startswith("sqlite"):
+        return "DATABASE_URL is SQLite — production needs PostgreSQL"
+    if not parsed.drivername.startswith("postgresql"):
+        return f"DATABASE_URL uses {parsed.drivername!r} — production needs PostgreSQL (postgresql://…)"
+    if not parsed.database:
+        return "DATABASE_URL names no database"
+    socket_host = str(parsed.query.get("host", ""))
+    if not parsed.host and not socket_host.startswith("/"):
+        return "DATABASE_URL has neither a host nor a Cloud SQL socket (?host=/cloudsql/<connection name>)"
+    if parsed.query.get("sslmode") == "disable" and not socket_host.startswith("/"):
+        return ("DATABASE_URL disables TLS over TCP (sslmode=disable) — use the Cloud SQL socket "
+                "(?host=/cloudsql/<connection name>) or TLS; that flag is a local-laptop workaround only")
+    return None
+
+
 def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
     """(errors, warnings) for a production or staging boot. Empty otherwise.
 
@@ -217,15 +278,37 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
 
-    if s.database_url.strip().lower().startswith("sqlite"):
-        errors.append("DATABASE_URL is SQLite — production needs PostgreSQL")
+    database_problem = _database_url_problem(s.database_url.strip())
+    if database_problem:
+        errors.append(database_problem)
     if not s.clerk_jwt_issuer.strip():
         errors.append("CLERK_JWT_ISSUER is empty — no employee could authenticate")
+    if not s.clerk_secret_key.strip():
+        errors.append("CLERK_SECRET_KEY is empty — associate invitations would be silently skipped "
+                      "and staff roles could not be synced to Clerk")
     if not s.fernet_encryption_key.strip():
         errors.append("FERNET_ENCRYPTION_KEY is empty — Google refresh tokens cannot be stored encrypted")
+    if not s.identity_hmac_key.strip():
+        errors.append("IDENTITY_HMAC_KEY is empty — associate duplicate-registration checks need their own key")
     local_origins = [o for o in s.allowed_origins if _is_local_url(o)]
     if local_origins:
         errors.append(f"ALLOWED_ORIGINS contains a localhost origin: {', '.join(local_origins)}")
+    malformed = [o for o in s.allowed_origins if not _is_bare_origin(o)]
+    if malformed:
+        errors.append("ALLOWED_ORIGINS entries must be scheme://host with no path or trailing slash "
+                      f"(they are compared with the browser's Origin and Clerk's azp exactly): {', '.join(malformed)}")
+    if s.trusted_proxy_hops <= 0:
+        errors.append("TRUSTED_PROXY_HOPS is 0 — behind Cloud Run every visitor would share one rate-limit "
+                      "bucket (1 directly behind Cloud Run, 2 behind an external HTTPS load balancer)")
+    if not s.internal_api_key.strip():
+        message = "INTERNAL_API_KEY is empty — Cloud Scheduler's internal jobs cannot authenticate"
+        (errors if s.is_production else warnings).append(message)
+    if _is_local_url(s.frontend_base_url) or not s.frontend_base_url.strip():
+        errors.append(f"FRONTEND_BASE_URL is {s.frontend_base_url or 'empty'} — browser redirects and "
+                      "associate email links would point at it")
+    if not s.public_api_base_url.strip() or _is_local_url(s.public_api_base_url):
+        errors.append("PUBLIC_API_BASE_URL is empty or local — customer PDF/receipt links and associate ID "
+                      "card QR codes point at this API's public origin")
 
     empty_storage = [
         name for name, value in (
@@ -247,11 +330,11 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
             "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REDIRECT_URI "
             "not all set — meeting scheduling is off"
         )
-    if _is_local_url(s.frontend_base_url):
-        warnings.append(f"FRONTEND_BASE_URL is {s.frontend_base_url} — browser redirects will point at localhost")
-    if not s.public_api_base_url.strip():
-        warnings.append("PUBLIC_API_BASE_URL is empty — associate ID cards cannot be generated "
-                        "(their QR code links to this API's public verification endpoint)")
+    if not s.resend_api_key.strip() or not s.notify_from_email.strip():
+        warnings.append("RESEND_API_KEY / NOTIFY_FROM_EMAIL not both set — no email is sent (customer "
+                        "proposals, receipts, staff and associate alerts)")
+    if not s.sentry_dsn.strip():
+        warnings.append("SENTRY_DSN is empty — unhandled errors are only in Cloud Logging")
     from app.associates import texts
     if texts.consent_is_placeholder():
         warnings.append("config/associate_documents.yaml: the current KYC consent notice is a [PLACEHOLDER] "
@@ -285,6 +368,11 @@ def check_production_config(s: Settings) -> None:
     development and test."""
     errors, warnings = production_config_problems(s)
     log = logging.getLogger("app.config")
+    if s.is_production_like:
+        # Cannot be checked from here: it is a setting of the Clerk instance. Without it
+        # every staff and associate request is refused (403 session_token_missing_claims).
+        log.info("Clerk: the session token must carry public_metadata, email and name "
+                 "(Clerk Dashboard → Sessions → Customize session token; deploy/RUNBOOK.md §D8)")
     for message in warnings:
         log.warning("PRODUCTION CONFIG WARNING: %s", message)
     if errors:

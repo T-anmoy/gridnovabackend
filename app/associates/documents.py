@@ -16,6 +16,7 @@ from datetime import date
 from typing import Optional
 
 from app.config import settings
+from app.pdf.fonts import FONT_STACK
 
 TYPE_LABELS = {"associate": "Associate", "preferred_associate": "Preferred Associate"}
 LEVEL_LABELS = {"state_head": "State Head", "district_head": "District Head", "block": "Block"}
@@ -85,7 +86,7 @@ def id_card_html(details: CardDetails) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><style>
   @page {{ size: 85.6mm 54mm; margin: 0; }}
-  body {{ margin: 0; font-family: Arial, sans-serif; color: #111; }}
+  body {{ margin: 0; font-family: {FONT_STACK}; color: #111; }}
   .card {{ width: 85.6mm; height: 54mm; box-sizing: border-box; padding: 3mm 4mm; position: relative; }}
   .brand {{ font-size: 9pt; font-weight: bold; color: #0b3d2e; border-bottom: 0.6mm solid #f2a900; padding-bottom: 1mm; }}
   .body {{ display: flex; margin-top: 2.5mm; }}
@@ -120,7 +121,7 @@ def welcome_letter_html(details: CardDetails, body_text: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><style>
   @page {{ size: A4; margin: 25mm 22mm; }}
-  body {{ font-family: Arial, sans-serif; color: #111; font-size: 11pt; line-height: 1.55; }}
+  body {{ font-family: {FONT_STACK}; color: #111; font-size: 11pt; line-height: 1.55; }}
   .brand {{ font-size: 20pt; font-weight: bold; color: #0b3d2e; border-bottom: 1mm solid #f2a900; padding-bottom: 3mm; }}
   .meta {{ margin: 8mm 0; }}
   .meta p {{ margin: 0; }}

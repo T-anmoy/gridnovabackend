@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -15,6 +17,18 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# /health/ready runs three database queries. It is the deploy gate, never a Cloud Run
+# probe (deploy/RUNBOOK.md §6.3), but uptime checks and load balancers may still poll it; its
+# answer is reused for READINESS_CACHE_SECONDS so polling never adds database load.
+_ready_lock = threading.Lock()
+_ready_cache: Optional[tuple[float, int, dict]] = None  # (monotonic time, status, body)
+
+
+def reset_readiness_cache() -> None:
+    global _ready_cache
+    with _ready_lock:
+        _ready_cache = None
 
 
 @router.get("/api/v1/health")
@@ -59,13 +73,27 @@ def _schema_state(current: list[str]) -> str:
 def ready(db: Session = Depends(get_db)):
     """Readiness: the database answers, its schema is at this build's Alembic head and —
     in production — the territory master is loaded. 503 names the failing check;
-    nothing about the connection is disclosed. `territories` reports what is loaded."""
+    nothing about the connection is disclosed. `territories` reports what is loaded.
+    The result is cached for READINESS_CACHE_SECONDS (0 = never)."""
+    global _ready_cache
+    ttl = settings.readiness_cache_seconds
+    with _ready_lock:
+        cached = _ready_cache
+    if cached is not None and ttl > 0 and time.monotonic() - cached[0] < ttl:
+        _, status_code, body = cached
+    else:
+        status_code, body = _check_ready(db)
+        with _ready_lock:
+            _ready_cache = (time.monotonic(), status_code, body)
+    return body if status_code == 200 else JSONResponse(status_code=status_code, content=body)
+
+
+def _check_ready(db: Session) -> tuple[int, dict]:
     try:
         db.execute(text("SELECT 1"))
     except Exception:
         logger.exception("Readiness check: database unreachable")
-        return JSONResponse(status_code=503,
-                            content={"status": "not_ready", "db": "unreachable", "schema": "unknown"})
+        return 503, {"status": "not_ready", "db": "unreachable", "schema": "unknown"}
 
     schema: Optional[str]
     try:
@@ -79,7 +107,7 @@ def ready(db: Session = Depends(get_db)):
         schema = "unknown"
 
     if schema != "at_head":
-        return JSONResponse(status_code=503, content={"status": "not_ready", "db": "ok", "schema": schema})
+        return 503, {"status": "not_ready", "db": "ok", "schema": schema}
 
     from app.associates.territory_seed import territory_counts
     try:
@@ -91,5 +119,5 @@ def ready(db: Session = Depends(get_db)):
     if settings.is_production_like and not territories["seeded"]:
         # A deploy must not go live with empty registration forms. Development stays
         # ready (and says seeded: false) so a half-set-up machine still starts.
-        return JSONResponse(status_code=503, content={**body, "status": "not_ready"})
-    return body
+        return 503, {**body, "status": "not_ready"}
+    return 200, body

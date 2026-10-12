@@ -15,12 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.sales_agent import QUALIFICATION_FIELDS
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
-from app.auth.scoping import can_access_lead, lead_scope, require_lead_access
+from app.auth.scoping import lead_scope, require_lead_access
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
@@ -28,7 +29,7 @@ from app.memory.db import get_db
 from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import TERMINAL_STAGES, MemoryManager, ProposalTransitionError
 from app.memory.models import (
-    EmployeeRole, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
+    EmployeeRole, Lead, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
 )
 from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
@@ -659,6 +660,9 @@ def create_proposal_draft(
         if problem is not None:
             raise HTTPException(status_code=problem.status_code, detail=problem.body())
 
+    # The orchestrator drafts in its own session: end this request's read-only
+    # transaction first, so one request never holds two pooled connections.
+    db.commit()
     result = orchestrator.request_proposal_draft(
         lead_id=body.lead_id,
         customer_id=body.customer_id,
@@ -1582,13 +1586,14 @@ def recent_activity(
     if lead_scope(employee).everything:
         entries = memory.list_recent_activity(limit=15, exclude_actions=exclude)
     else:
-        entries = []
-        for entry in memory.list_recent_activity(limit=_ACTIVITY_SCAN_LIMIT, exclude_actions=exclude):
-            leads = [memory.get_lead(i) for i in memory.lead_ids_for_audit_entry(entry)]
-            if any(can_access_lead(employee, lead) for lead in leads):
-                entries.append(entry)
-                if len(entries) == 15:
-                    break
+        # Visibility is resolved in batches (one query per kind of entity, one for the
+        # visible leads), not per entry: the scan is up to _ACTIVITY_SCAN_LIMIT entries.
+        scanned = memory.list_recent_activity(limit=_ACTIVITY_SCAN_LIMIT, exclude_actions=exclude)
+        lead_ids = memory.lead_ids_for_audit_entries(scanned)
+        wanted = {i for ids in lead_ids.values() for i in ids}
+        visible = set(db.execute(select(Lead.id).where(Lead.id.in_(wanted), lead_scope(employee).condition()))
+                      .scalars()) if wanted else set()
+        entries = [e for e in scanned if visible.intersection(lead_ids.get(e.id, ()))][:15]
 
     actor_names: dict[str, str] = {}
 
@@ -1850,9 +1855,20 @@ def run_check_stale_leads(
     _: None = Depends(_require_admin_or_internal_key),
 ):
     """Admin or INTERNAL_API_KEY. Scans for quiet leads and fires internal follow-up
-    notifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it)."""
+    notifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it); an
+    overlapping run answers {"status": "skipped", "reason": "already_running"}. Also
+    retries proposal PDFs that never finished (app/jobs/sweeper.py): `pdfs_retried`."""
+    from datetime import datetime, timezone
+
+    from app.jobs import sweeper
+    from app.jobs.locks import run_exclusive
     from app.jobs.stale_leads import check_stale_leads
-    return check_stale_leads(db)
+
+    def job() -> dict:
+        result = check_stale_leads(db)
+        result["pdfs_retried"] = sweeper.retry_missing_proposal_pdfs(db, datetime.now(timezone.utc))
+        return result
+    return run_exclusive(db, "check-stale-leads", job)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1910,7 +1926,10 @@ def ask_customer_memory(
         _assert_may_read_customer_memory(memory, body.customer_id, employee)
 
     # Sales: name matches outside the caller's lead scope are dropped before anything
-    # is listed, resolved or handed to the model.
+    # is listed, resolved or handed to the model. The recall runs in the orchestrator's
+    # own session, so this request's read-only transaction ends first (one pooled
+    # connection per request, not two).
+    db.commit()
     result = orchestrator.answer_customer_question(
         question=body.question,
         performed_by=employee.employee_id,
@@ -2116,19 +2135,22 @@ def governance_activity(
 
 
 def _start_pdf_generation(generate_fn, proposal_id: int) -> None:
-    """Run `generate_fn` in a background thread — split out from
+    """Run `generate_fn` on the background runner (app/jobs/runner.py) — split out from
     _trigger_pdf_generation as its own seam so tests can substitute a synchronous
     call instead (see tests/conftest.py). generate_fn opens its own DB session,
     which under the test harness's single shared SQLite connection (StaticPool)
     is not safe to run concurrently with the request's own session no matter how
     carefully the call sites avoid touching shared ORM state — real deployments
     don't share a connection this way, so this only matters for tests.
-    """
-    import threading
 
-    threading.Thread(
-        target=generate_fn, daemon=True, name=f"pdf-generation-proposal-{proposal_id}"
-    ).start()
+    A daemon thread used to do this; Cloud Run throttles the CPU once the response is
+    sent, which starved it. The runner's pool runs with CPU always allocated, is drained
+    on shutdown, and a proposal left without a PDF is retried by the sweeper in
+    check-stale-leads (app/jobs/sweeper.py).
+    """
+    from app.jobs import runner
+
+    runner.submit(generate_fn, f"pdf proposal {proposal_id}")
 
 
 def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: MemoryManager) -> None:

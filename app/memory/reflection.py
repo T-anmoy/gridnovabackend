@@ -36,7 +36,6 @@ lost because remembering failed.
 from __future__ import annotations
 
 import logging
-import threading
 from typing import TYPE_CHECKING, Optional
 
 from app.config import settings
@@ -470,10 +469,8 @@ def start_reflection(lead_id: int, trigger: str, performed_by: str = "sales_agen
     This is the seam tests replace with a synchronous call — the same arrangement
     the PDF generator uses, and for the same reason: the test harness shares one
     SQLite connection across sessions, which is not safe to use from two threads.
+    Runs on the background runner (app/jobs/runner.py), not a bare daemon thread.
     """
-    threading.Thread(
-        target=_reflect_with_own_session,
-        args=(lead_id, trigger, performed_by),
-        daemon=True,
-        name=f"reflection-lead-{lead_id}",
-    ).start()
+    from app.jobs import runner
+
+    runner.submit(lambda: _reflect_with_own_session(lead_id, trigger, performed_by), f"reflection lead {lead_id}")

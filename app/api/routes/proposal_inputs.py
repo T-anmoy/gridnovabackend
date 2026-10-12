@@ -432,9 +432,13 @@ def _trigger_auto_draft(
     lead = memory.get_lead(lead_id)
     if not lead:
         return {"triggered": False, "reason": "Lead not found"}
+    customer_id = lead.customer_id
+    # The draft runs in the orchestrator's own session: end this request's (read-only)
+    # transaction first so it does not hold a second pooled connection meanwhile.
+    db.commit()
 
     outcome = orchestrator.request_proposal_draft(
-        lead_id=lead_id, customer_id=lead.customer_id, performed_by=performed_by,
+        lead_id=lead_id, customer_id=customer_id, performed_by=performed_by,
     )
     proposal_id = outcome.get("proposal_id")
     if proposal_id is None:

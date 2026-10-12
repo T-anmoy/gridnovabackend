@@ -1,43 +1,82 @@
 name: Backend Tests
 
+# Every pull request, and pushes to main (a branch push is covered by its PR).
 on:
   push:
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# A newer push to the same branch / PR cancels the run it supersedes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # WeasyPrint's native libraries and the fonts the image installs (Dockerfile), so the
+  # PDF tests — including tests/test_pdf_fonts.py — run here instead of skipping.
+  APT_PACKAGES: >-
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fontconfig
+    fonts-liberation fonts-noto-core
+  RUFF_VERSION: "0.15.22"
+  PIP_AUDIT_VERSION: "2.9.0"
+
 jobs:
+  lint-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ruff and pip-audit
+        run: python -m pip install "ruff==${RUFF_VERSION}" "pip-audit==${PIP_AUDIT_VERSION}"
+
+      - name: ruff check
+        run: ruff check .
+
+      # The runtime lock is what ships in the image. (requirements-dev.lock adds only test
+      # tooling that never leaves CI.)
+      - name: pip-audit (runtime lock)
+        run: pip-audit --require-hashes --disable-pip -r requirements.lock
+
   test:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 30
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-dev.lock
 
-      - name: Install system dependencies (WeasyPrint)
+      - name: Install system packages (WeasyPrint, fonts)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
-            libffi-dev libcairo2 libpangoft2-1.0-0
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install Python dependencies (hash-checked)
+        run: python -m pip install --require-hashes -r requirements-dev.lock
 
-      - name: Run tests
-        run: pytest -v
+      - name: Run tests (SQLite)
+        run: python -m pytest -q
+
+      - name: OpenAPI contract is current
+        run: python scripts/export_openapi.py --check
 
   # Same suite against a real PostgreSQL (the production engine). SQLite does not
   # enforce foreign keys, varchar lengths or native enum types; this job does.
   test-postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -54,31 +93,72 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+    # A plain URL: the `?gssencmode=disable&sslmode=disable` some macOS laptops need
+    # (a libpq segfault) is a local workaround and is not used here — or in production.
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gridnova_test
+      PGPASSWORD: postgres
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-dev.lock
 
-      - name: Install system dependencies (WeasyPrint)
+      - name: Install system packages (WeasyPrint, fonts)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
-            libffi-dev libcairo2 libpangoft2-1.0-0
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (hash-checked)
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+
+      # The deploy job's commands, exactly as the migration job runs them (D4): an empty
+      # database is built and stamped, the second run is a no-op `upgrade head`, and the
+      # territory seed is idempotent.
+      - name: Bootstrap an empty database twice, seed territories twice
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gridnova_bootstrap
+          ENVIRONMENT: test
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          psql -h localhost -U postgres -c "CREATE DATABASE gridnova_bootstrap"
+          python scripts/bootstrap_db.py
+          python scripts/bootstrap_db.py
+          python scripts/seed_territories.py
+          python scripts/seed_territories.py
 
+      # Includes tests/test_migration_truth.py (Postgres-only): models == migrations.
       - name: Run tests (PostgreSQL)
-        run: pytest -v
+        run: python -m pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t gridnova-backend:ci .
+
+      # The image has no tests and no pytest: only shipped scripts run inside it.
+      - name: Fonts — a Hindi and a Bengali name render with real glyphs
+        run: docker run --rm gridnova-backend:ci python scripts/smoke_fonts.py
+
+      - name: Container smoke test — /api/v1/health
+        run: |
+          docker run -d --name api -p 8080:8080 -e PORT=8080 \
+            -e ENVIRONMENT=development -e DATABASE_URL=sqlite:////tmp/smoke.db \
+            gridnova-backend:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/v1/health; then echo; break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/api/v1/health | grep -q '"status":"ok"'
+          test "$(docker exec api id -u)" != "0"   # not running as root
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true

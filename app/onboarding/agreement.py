@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.associates.service import AssociateError
+from app.pdf.fonts import FONT_STACK
 from app.memory.models import (
     AuditLog, Customer, CustomerAgreement, CustomerOnboarding, Project, ProjectStage, Proposal, ProposalInputs,
     ProposalStatus,
@@ -73,7 +74,7 @@ def agreement_html(db: Session, onboarding: CustomerOnboarding, proposal: Propos
 <html lang="en"><head><meta charset="UTF-8"><style>
   @page {{ size: A4; margin: 20mm 20mm 20mm 20mm; }}
   @page :first {{ margin-top: {float(cfg['stamp_paper_top_margin_mm'])}mm; }}
-  body {{ font-family: Arial, sans-serif; color: #111; font-size: 10.5pt; line-height: 1.5; }}
+  body {{ font-family: {FONT_STACK}; color: #111; font-size: 10.5pt; line-height: 1.5; }}
   h1 {{ font-size: 14pt; text-align: center; margin: 0 0 6mm; }}
   table {{ width: 100%; border-collapse: collapse; margin-bottom: 6mm; }}
   th {{ text-align: left; width: 38%; padding: 1.2mm 2mm; border: 0.2mm solid #999; background: #f3f3f3; }}

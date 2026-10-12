@@ -461,6 +461,12 @@ class Equipment(Base):
 
 class Lead(Base):
     __tablename__ = "leads"
+    __table_args__ = (
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_leads_customer_id", "customer_id"),
+        Index("ix_leads_assigned_employee_id", "assigned_employee_id"),
+        Index("ix_leads_pipeline_stage_created_at", "pipeline_stage", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
@@ -510,6 +516,9 @@ class Proposal(Base):
             "status != 'approved' OR approved_by_employee_id IS NOT NULL",
             name="ck_proposal_approved_requires_approver",
         ),
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_proposals_lead_id_status", "lead_id", "status"),
+        Index("ix_proposals_date_created", "date_created"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -710,6 +719,10 @@ class ProposalInputs(Base):
 
 class TimelineEvent(Base):
     __tablename__ = "timeline_events"
+    __table_args__ = (
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_timeline_events_lead_id_created_at", "lead_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)
@@ -723,6 +736,10 @@ class TimelineEvent(Base):
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
+    __table_args__ = (
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_conversation_messages_lead_id_created_at", "lead_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lead_id: Mapped[Optional[int]] = mapped_column(ForeignKey("leads.id"), nullable=True)
@@ -769,6 +786,11 @@ class OAuthStateNonce(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_audit_logs_entity_type_entity_id", "entity_type", "entity_id"),
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     entity_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -812,6 +834,9 @@ class Meeting(Base):
             sqlite_where=text("status = 'scheduled'"),
             postgresql_where=text("status = 'scheduled'"),
         ),
+        # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
+        Index("ix_meetings_lead_id", "lead_id"),
+        Index("ix_meetings_scheduled_at", "scheduled_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

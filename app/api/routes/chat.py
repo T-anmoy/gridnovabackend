@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -24,6 +23,7 @@ from app.memory.models import Channel, LeadSource
 from app.orchestrator.orchestrator import orchestrator
 from app.rules import sales_policy
 from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog, RecentKeys
 
 router = APIRouter()
 
@@ -31,20 +31,15 @@ MAX_MESSAGE_CHARS = 2_000
 RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 60
 
-# In-memory stores — suitable for single-process Phase 1 deployment.
-_request_log: defaultdict[str, list[datetime]] = defaultdict(list)
-_recent_messages: dict[str, datetime] = {}
+# In-memory, per instance, bounded (app/security/rate_limit.py).
 _DEDUP_WINDOW_SECONDS = 10
+_request_log = RateLimitLog(RATE_WINDOW_SECONDS)
+_recent_messages = RecentKeys(_DEDUP_WINDOW_SECONDS)
 
 
 def _check_rate_limit(request: Request) -> None:
-    ip = client_ip(request)
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=RATE_WINDOW_SECONDS)
-    _request_log[ip] = [t for t in _request_log[ip] if t > cutoff]
-    if len(_request_log[ip]) >= RATE_LIMIT:
+    if not _request_log.hit(client_ip(request), RATE_LIMIT):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait before sending more messages.")
-    _request_log[ip].append(now)
 
 
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$")  # same shape check as public_intake.py
@@ -91,11 +86,7 @@ def _dedup_key(token_hash: str, message: str) -> str:
 
 def _is_duplicate(key: str) -> bool:
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=_DEDUP_WINDOW_SECONDS)
-    expired = [k for k, ts in _recent_messages.items() if ts < cutoff]
-    for k in expired:
-        _recent_messages.pop(k, None)
-    if key in _recent_messages:
+    if _recent_messages.get(key, now) is not None:
         return True
     _recent_messages[key] = now
     return False

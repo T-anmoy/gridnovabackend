@@ -13,6 +13,7 @@ these files disagree, the code wins — fix the file.
 | [hf_c_equipment.md](hf_c_equipment.md) | Associate equipment catalogue, unmatched units and the staff match action, customer name on payment lists |
 | [site_survey.md](site_survey.md) | S1 on-site site survey: survey fields on the onboarding, status, live results and warnings, signatures, the survey part of the submit gate; the Engineer's feasibility review and formal-proposal gate, corrections and proposal re-verification, the survey report PDF, the review queue and its overdue alert |
 | [be1_public_contracts.md](be1_public_contracts.md) | BE-1: website chat sessions (`session_token`), paged leads list, accept-link codes, public booking limits, estimate-request calculator fields, health, auth changes, territory documents, validation, CSV, PDFs |
+| [be3_deploy_contracts.md](be3_deploy_contracts.md) | BE-3: associate approval answers before the invitation/PDFs, scheduled-job `skipped` answer and new counters, readiness cache, stricter token claims, per-instance rate limits |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)

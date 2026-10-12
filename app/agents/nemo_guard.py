@@ -114,7 +114,11 @@ def _get_rails():
                 if settings.llm_api_key and not os.environ.get("OPENAI_API_KEY"):
                     os.environ["OPENAI_API_KEY"] = settings.llm_api_key
                 _rails = _build_rails()
-                _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nemo-rail")
+                # One worker per concurrent check (config): a single worker serialised
+                # every customer reply's rail behind the others, and one hung call
+                # starved all of them until its timeout.
+                _executor = ThreadPoolExecutor(max_workers=settings.nemo_guardrails_max_workers,
+                                               thread_name_prefix="nemo-rail")
                 logger.info("NeMo Guardrails output rail loaded")
             except Exception:
                 _load_failed = True
@@ -123,6 +127,14 @@ def _get_rails():
                     "deterministic guardrails only"
                 )
     return _rails
+
+
+def warm() -> bool:
+    """Load the rails now (app startup) instead of inside the first customer reply.
+    Returns whether the rail is ready; never raises."""
+    if not available():
+        return False
+    return _get_rails() is not None
 
 
 def check_output(bot_message: str, user_message: str = "") -> Optional[dict]:

@@ -30,10 +30,17 @@ os.environ.setdefault("LLM_API_KEY", "")  # forces mock mode
 os.environ.setdefault("CLERK_SECRET_KEY", "")
 os.environ.setdefault("CLERK_JWT_ISSUER", "")
 os.environ.setdefault("SLACK_WEBHOOK_URL", "")
+# Readiness answers fresh in tests (its cache has its own test in tests/test_readiness.py).
+os.environ.setdefault("READINESS_CACHE_SECONDS", "0")
 # Sentry is forced off, not defaulted: app.main calls sentry_sdk.init() at import time
 # whenever SENTRY_DSN is set, and a test run must never report to a real project —
 # whether the DSN comes from .env or from the shell.
 os.environ["SENTRY_DSN"] = ""
+
+# Background work (app/jobs/runner.py) runs inline under tests: whatever a request
+# started has finished when the test client returns.
+import app.jobs.runner as _runner  # noqa: E402
+_runner.INLINE = True
 
 from app.main import app as fastapi_app
 from app.memory.db import Base, get_db
@@ -107,6 +114,9 @@ def _isolated_db(monkeypatch):
             session.close()
 
     fastapi_app.dependency_overrides[get_db] = _override_get_db
+    # GET /health/ready caches its answer per process; every test starts without one.
+    from app.api.routes.health import reset_readiness_cache
+    reset_readiness_cache()
     try:
         yield SessionLocal
     finally:
@@ -117,6 +127,22 @@ def _isolated_db(monkeypatch):
             close_all_sessions()
             Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+class _HttpxPostSeam:
+    """Stands in for the notifier's shared httpx.Client: forwards to httpx.post, looked
+    up at call time, so the tests that intercept email by patching httpx.post keep
+    working (and no test can reach Resend through a client built before the patch)."""
+
+    def post(self, *args, **kwargs):
+        import httpx
+        return httpx.post(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _notifier_http_seam(monkeypatch):
+    import app.notifications.notifier as notifier_module
+    monkeypatch.setattr(notifier_module, "http_client", lambda: _HttpxPostSeam())
 
 
 @pytest.fixture(autouse=True)
@@ -149,7 +175,9 @@ def reset_chat_inmemory_state():
     public_intake._contact_request_log.clear()
     public_intake._recent_contact_emails.clear()
     import app.api.routes.associate_equipment as associate_equipment
+    import app.api.routes.public_receipts as public_receipts
     associate_equipment._request_log.clear()
+    public_receipts._receipt_request_log.clear()
     yield
     for log in (public_associates._apply_request_log, public_associates._verify_request_log,
                 public_associates._lookup_request_log):
@@ -240,7 +268,12 @@ def fake_storage(monkeypatch):
 
     monkeypatch.setattr(boto3, "client", _client)
     _FAKE_BUCKET.clear()
-    return clients
+    # app/storage/r2.py caches one client per process: start (and end) without it, so
+    # this test's fake is the one in use and never outlives the test.
+    from app.storage import r2
+    r2.reset_client()
+    yield clients
+    r2.reset_client()
 
 
 STORAGE_URL_PREFIX = "https://acct.r2.cloudflarestorage.com/gridnova-test/"

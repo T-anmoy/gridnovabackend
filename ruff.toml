@@ -1,0 +1,11 @@
+# CI lint (.github/workflows/backend-tests.yml: `ruff check .`).
+#
+# Correctness rules only for now: syntax errors (E9), invalid comparisons / print syntax
+# (F63, F7) and undefined names (F82). The full default set reports ~635 pre-existing
+# style findings (mostly F811 from pytest fixture imports and F401 unused imports); widen
+# `select` once those are cleaned up, a rule family at a time.
+target-version = "py312"
+extend-exclude = [".venv_qa"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]

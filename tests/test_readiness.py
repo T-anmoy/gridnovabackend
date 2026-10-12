@@ -124,3 +124,40 @@ class TestTerritories:
         monkeypatch.setattr(settings, "environment", "production")
         _stamp(db_session, "0022_site_assessment_fields")
         assert client.get(READY).json() == {"status": "not_ready", "db": "ok", "schema": "behind"}
+
+
+class TestReadinessCache:
+    """P8 (BE-3): the deploy gate is cheap to poll — its answer is reused for
+    READINESS_CACHE_SECONDS, and /health (liveness) never touches the database."""
+
+    def test_the_answer_is_reused_within_the_ttl(self, client, db_session, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "readiness_cache_seconds", 15)
+        _stamp(db_session, _script_directory().get_current_head())
+        assert client.get(READY).status_code == 200
+        db_session.execute(text("DROP TABLE alembic_version"))
+        db_session.commit()
+        assert client.get(READY).status_code == 200        # cached
+        from app.api.routes.health import reset_readiness_cache
+        reset_readiness_cache()                             # (the TTL running out)
+        assert client.get(READY).json()["schema"] == "not_initialized"
+
+    def test_zero_disables_the_cache(self, client, db_session, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "readiness_cache_seconds", 0)
+        _stamp(db_session, _script_directory().get_current_head())
+        assert client.get(READY).status_code == 200
+        db_session.execute(text("DROP TABLE alembic_version"))
+        db_session.commit()
+        assert client.get(READY).status_code == 503
+
+    def test_liveness_never_opens_a_database_session(self, client, monkeypatch):
+        from app.main import app
+        from app.memory.db import get_db
+
+        def _no_db():
+            raise AssertionError("/health must not touch the database")
+            yield  # pragma: no cover
+
+        monkeypatch.setitem(app.dependency_overrides, get_db, _no_db)
+        assert client.get("/api/v1/health").json() == {"status": "ok"}

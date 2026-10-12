@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.associates.service import AssociateError
 from app.execution import config
+from app.pdf.fonts import FONT_STACK
 from app.memory.models import (
     Customer, CustomerOnboarding, LedgerEntryKind, Payment, PaymentLedgerEntry, PaymentMilestone, PaymentReceipt,
     Project, ReceiptEmailStatus,
@@ -239,7 +240,7 @@ def receipt_html(db: Session, receipt: PaymentReceipt) -> str:
     void_mark = ('<div class="void">VOID</div><p class="void-note">This receipt is void: the payment was '
                  f'dishonoured on {e(format_ist_date(receipt.voided_at))}.</p>') if receipt.voided_at else ""
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-body {{ font-family: sans-serif; font-size: 11pt; margin: 20mm; }}
+body {{ font-family: {FONT_STACK}; font-size: 11pt; margin: 20mm; }}
 h1 {{ font-size: 16pt; margin: 0 0 4mm; }} th {{ text-align: left; padding: 2mm 6mm 2mm 0; vertical-align: top; }}
 .company {{ margin-bottom: 8mm; }} .footer {{ margin-top: 10mm; font-size: 9pt; color: #444; }}
 .void {{ position: fixed; top: 90mm; left: 0; right: 0; text-align: center; font-size: 96pt; font-weight: bold;

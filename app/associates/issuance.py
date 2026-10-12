@@ -52,6 +52,29 @@ def send_clerk_invite(db: Session, associate: Associate, performed_by: str) -> C
     return outcome
 
 
+def issue_after_approval(associate_pk: int, performed_by: str, issued_on: date) -> None:
+    """The approval's follow-up — the Clerk invitation, then the ID card and welcome
+    letter — in its own session, on the background runner (app/jobs/runner.py): two
+    PDF renders, two uploads and a Clerk call no longer hold up the approval response.
+    Each step records its own outcome, exactly as when it ran inline; a failure is
+    retried from the dashboard (POST .../clerk-invite, .../documents/regenerate)."""
+    from app.memory.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        associate = db.get(Associate, associate_pk)
+        if associate is None:
+            return
+        try:
+            send_clerk_invite(db, associate, performed_by)
+        except service.InvalidTransitionError as exc:   # suspended meanwhile, or already invited
+            db.rollback()
+            logger.info("Clerk invitation for %s not sent: %s", associate.associate_id, exc)
+        generate_documents(db, associate, performed_by, issued_on)
+    finally:
+        db.close()
+
+
 def territory_label(db: Session, associate: Associate) -> Optional[str]:
     parts = [
         db.get(model, pk).name

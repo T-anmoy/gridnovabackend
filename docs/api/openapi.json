@@ -8310,7 +8310,7 @@
     },
     "/api/v1/dashboard/associate-applications": {
       "get": {
-        "description": "Both programmes, newest first. Same {items, page, page_size, total} shape as\nthe other paginated dashboard lists.",
+        "description": "Both programmes, newest first. Same {items, page, page_size, total} shape as\nthe other paginated dashboard lists. The page and the count come from SQL (one\nUNION over both programmes); only the page's applications are loaded.",
         "operationId": "list_applications_api_v1_dashboard_associate_applications_get",
         "parameters": [
           {
@@ -8449,7 +8449,7 @@
     },
     "/api/v1/dashboard/associate-applications/{application_type}/{application_id}/approve": {
       "post": {
-        "description": "Approve an application under review. Requires the verification call — this\nstands in for OTP verification — to be recorded as completed, with a note.\n\nIn one transaction: the Associate ID is issued, the associate created and (for a\nPreferred Associate) the seat taken. After it commits: the Clerk invitation, the\nID card and welcome letter PDFs, and the notification. A failure in any of those\nis recorded on the associate and retried from the dashboard; the approval stands.",
+        "description": "Approve an application under review. Requires the verification call — this\nstands in for OTP verification — to be recorded as completed, with a note.\n\nIn one transaction: the Associate ID is issued, the associate created and (for a\nPreferred Associate) the seat taken. After it commits, on the background runner\n(app/jobs/runner.py): the Clerk invitation, the ID card and welcome letter PDFs,\nand the notification — so the response does not wait for them. A failure in any of those\nis recorded on the associate and retried from the dashboard; the approval stands.",
         "operationId": "approve_application_api_v1_dashboard_associate_applications__application_type___application_id__approve_post",
         "parameters": [
           {
@@ -10093,7 +10093,7 @@
     },
     "/api/v1/dashboard/internal/check-execution-alerts": {
       "post": {
-        "description": "Admin or INTERNAL_API_KEY. Emails Operations once about each project that has\nbecome stuck at a stage (it is not emailed again for the same stage). Idempotent.",
+        "description": "Admin or INTERNAL_API_KEY. Emails Operations once about each project that has\nbecome stuck at a stage (it is not emailed again for the same stage). Idempotent; an\noverlapping run is skipped.",
         "operationId": "run_execution_alerts_api_v1_dashboard_internal_check_execution_alerts_post",
         "responses": {
           "200": {
@@ -10115,7 +10115,7 @@
     },
     "/api/v1/dashboard/internal/check-onboarding-escalations": {
       "post": {
-        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Re-scores submitted associate-sourced\ncustomers and escalates overdue verification calls one step up the chain. Idempotent.",
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Re-scores submitted associate-sourced\ncustomers and escalates overdue verification calls one step up the chain. Idempotent;\nan overlapping run is skipped.",
         "operationId": "run_onboarding_escalations_api_v1_dashboard_internal_check_onboarding_escalations_post",
         "responses": {
           "200": {
@@ -10137,7 +10137,7 @@
     },
     "/api/v1/dashboard/internal/check-payment-alerts": {
       "post": {
-        "description": "Admin or INTERNAL_API_KEY. Emails Accounts once per overdue milestone and once\nper payment left unverified past the threshold. Idempotent.",
+        "description": "Admin or INTERNAL_API_KEY. Emails Accounts once per overdue milestone and once\nper payment left unverified past the threshold. Idempotent; an overlapping run is\nskipped. Also retries receipts still pending (app/jobs/sweeper.py): `receipts_retried`.",
         "operationId": "run_payment_alerts_api_v1_dashboard_internal_check_payment_alerts_post",
         "responses": {
           "200": {
@@ -10159,7 +10159,7 @@
     },
     "/api/v1/dashboard/internal/check-stale-leads": {
       "post": {
-        "description": "Admin or INTERNAL_API_KEY. Scans for quiet leads and fires internal follow-up\nnotifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it).",
+        "description": "Admin or INTERNAL_API_KEY. Scans for quiet leads and fires internal follow-up\nnotifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it); an\noverlapping run answers {\"status\": \"skipped\", \"reason\": \"already_running\"}. Also\nretries proposal PDFs that never finished (app/jobs/sweeper.py): `pdfs_retried`.",
         "operationId": "run_check_stale_leads_api_v1_dashboard_internal_check_stale_leads_post",
         "responses": {
           "200": {
@@ -15065,7 +15065,7 @@
     },
     "/api/v1/health/ready": {
       "get": {
-        "description": "Readiness: the database answers, its schema is at this build's Alembic head and —\nin production — the territory master is loaded. 503 names the failing check;\nnothing about the connection is disclosed. `territories` reports what is loaded.",
+        "description": "Readiness: the database answers, its schema is at this build's Alembic head and —\nin production — the territory master is loaded. 503 names the failing check;\nnothing about the connection is disclosed. `territories` reports what is loaded.\nThe result is cached for READINESS_CACHE_SECONDS (0 = never).",
         "operationId": "ready_api_v1_health_ready_get",
         "responses": {
           "200": {

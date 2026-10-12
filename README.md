@@ -8,7 +8,7 @@ Three commands, run from this folder:
 
 ```bash
 # 1. Once: environment and dependencies
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && cp .env.example .env
+python3.12 -m venv .venv && source .venv/bin/activate && pip install --require-hashes -r requirements-dev.lock && cp .env.example .env
 
 # 2. Database: schema + the territory lists (safe to re-run; add --dummy-data for the DUMMY equipment catalogue)
 python scripts/dev_setup.py
@@ -38,96 +38,113 @@ Check it worked: `http://localhost:8000/api/v1/health` (the process is up) and `
 | `dev_setup.py` stops with "no recorded schema revision" | `uvicorn` created the tables itself on an earlier start, so the revision is unknown | Follow the printed steps: back the file up, then **move** it aside (not delete) and run `dev_setup.py` again |
 | The app refuses to start with "ALLOWED_ORIGINS contains a localhost origin" | `ENVIRONMENT=production` with the default origins | Production must set `ALLOWED_ORIGINS` explicitly, e.g. `["https://www.gridnova.in"]` |
 
-Production is not set up with `dev_setup.py`: it runs `scripts/bootstrap_db.py` and `scripts/seed_territories.py` (see "Database schema" below), and `GET /api/v1/health/ready` returns **503** there until the territory lists are loaded.
+Production is not set up with `dev_setup.py`: it runs `scripts/bootstrap_db.py` and `scripts/seed_territories.py` as a Cloud Run job (see "Deployment" below), and `GET /api/v1/health/ready` returns **503** there until the territory lists are loaded.
 
 ## Running tests
 
 ```bash
-# From the project root (grid-nova-ai-backend/)
-python -m pytest tests/ -v
+# From the project root (grid-nova-ai-backend/), in the venv from "Local development"
+python -m pytest -q
+# Against PostgreSQL (a throwaway database — every table in it is dropped repeatedly):
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/gridnova_test python -m pytest -q
+python scripts/export_openapi.py --check   # docs/api/openapi.json matches the code
 ```
 
 No external services required — tests use an in-memory SQLite database and
-LLM mock mode activates automatically when `LLM_API_KEY` is unset.
+LLM mock mode activates automatically when `LLM_API_KEY` is unset. CI
+(`.github/workflows/backend-tests.yml`) runs ruff, pip-audit, both suites, and builds the
+image and smoke-tests it.
 
-## Database schema: first deploy and subsequent deploys
+Dependencies: `requirements.txt` (runtime, direct), `requirements-dev.txt` (+ pytest),
+`requirements-nemo.txt` (optional NeMo rail). The image and CI install the hash-pinned
+`requirements.lock` / `requirements-dev.lock`; after editing a `requirements*.txt`, run
+`scripts/lock_requirements.sh`.
 
-The schema is owned by `scripts/bootstrap_db.py` + Alembic. With `ENVIRONMENT=production`
-(or `staging`) the app does **not** create tables on startup, so run the bootstrap (e.g. as a Cloud Run
-job, with the same `DATABASE_URL`) **before** the service's first boot.
+## Deployment (Cloud Run + Cloud SQL, asia-south1)
 
-### First deploy / fresh database
+**The step-by-step procedure — empty GCP project → staging → production, with every
+command — is [deploy/RUNBOOK.md](deploy/RUNBOOK.md).** This section is the summary; where
+they differ, the runbook is right.
+
+### The schema: never on boot
+
+With `ENVIRONMENT=staging` or `production` the app does **not** create or change tables
+on startup (`app/main.py` lifespan; `tests/test_production_config.py` proves it). The
+schema belongs to `scripts/bootstrap_db.py` + Alembic, run by a **Cloud Run job** from the
+same image before traffic moves to a new revision:
 
 ```bash
-DATABASE_URL=postgresql://... python scripts/bootstrap_db.py
-DATABASE_URL=postgresql://... python scripts/seed_territories.py   # the State → District → Block lists; idempotent
+python scripts/bootstrap_db.py      # empty DB: create_all + stamp head; otherwise: alembic upgrade head
+python scripts/seed_territories.py  # State → District → Block lists; idempotent
 ```
 
-The territory lists are reference data the public Apply forms cannot work without. In
-production `GET /api/v1/health/ready` returns **503** (with `territories.seeded: false`)
-until they are loaded, so an empty deploy cannot go live; the public lookups answer
-503 `territories_not_seeded` in the meantime.
+- A database with no application tables is built from the models and stamped at head
+  (the historical chain 0001–0022 has no baseline and cannot be replayed on PostgreSQL).
+- A database with tables and `alembic_version` gets `alembic upgrade head` — a no-op when
+  already at head. Two executions at once serialise on a PostgreSQL advisory lock.
+- Tables without `alembic_version` (or the reverse): the script changes nothing and exits 2.
+- `alembic.ini` lives at `alembic/alembic.ini` — run Alembic by hand as
+  `alembic -c alembic/alembic.ini …`.
+- New revision ids must be **32 characters or fewer** (`alembic_version.version_num` is
+  `VARCHAR(32)` on PostgreSQL).
 
-On a database with no application tables it runs `Base.metadata.create_all()` and then
-`alembic stamp head`. The historical chain (0001–0022) has no baseline and cannot be
-replayed on PostgreSQL, so a fresh database is always built from the models.
-
-### Subsequent deploys
-
-Run the same command. When the application tables and `alembic_version` both exist, it
-runs `alembic upgrade head`, which is equivalent to running
-`alembic -c alembic/alembic.ini upgrade head` yourself.
-
-If application tables exist but `alembic_version` does not, the script changes nothing
-and exits with code 2. It never guesses which revision an unversioned database is at.
-
-New revision ids must be **32 characters or fewer**, because PostgreSQL's
-`alembic_version.version_num` is `VARCHAR(32)`. SQLite does not enforce the length.
+Deploy order: build → run the migration job → wait for it → deploy the revision
+with no traffic → `/api/v1/health/ready` is 200 → shift traffic.
 
 ### Health checks
 
-- `GET /api/v1/health` is **liveness** only: the process is up. It never touches the database.
-- `GET /api/v1/health/ready` is **readiness**. It returns 200
-  `{"status":"ready","db":"ok","schema":"at_head"}` only when the database answers and
-  `alembic_version` equals this build's Alembic head. Otherwise it returns 503 with
-  `db` set to `ok`/`unreachable` and `schema` set to `not_initialized`, `behind`,
-  `unknown_revision` or `unknown`. Connection details are never included.
+- `GET /api/v1/health` — **liveness**: the process is up; never touches the database.
+- `GET /api/v1/health/ready` — **readiness / deploy gate**, checked on the new revision before traffic moves (deliberately not a Cloud Run probe — see deploy/RUNBOOK.md §6.3): 200
+  `{"status":"ready","db":"ok","schema":"at_head","territories":{…}}` only when the database
+  answers, `alembic_version` equals this build's head and (staging/production) the
+  territory lists are loaded; otherwise 503 naming the failing check (`db`:
+  `ok`/`unreachable`; `schema`: `not_initialized`, `behind`, `unknown_revision`,
+  `unknown`). Cached for `READINESS_CACHE_SECONDS`. Never use it as the liveness probe.
 
-Point Cloud Run's **startup probe** (and any post-deploy smoke test) at
-`/api/v1/health/ready`. That way a revision that boots before `scripts/bootstrap_db.py`
-has run, or against a database behind its migrations, never receives traffic. It would
-otherwise pass a plain health check while every database request fails.
+### Environment variables
 
-## Environment variables required before deployment
+Every variable is in `.env.example` with a comment (a test enforces it, and another
+checks this table lists every `Settings` field). "yes" = the app refuses to start in
+staging/production without it; "warns" = it starts and logs a warning.
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | PostgreSQL connection string (Cloud SQL for PostgreSQL, Mumbai `asia-south1`, HA) |
-| `CLERK_SECRET_KEY` | Clerk secret key for JWT verification |
-| `CLERK_JWT_ISSUER` | Your Clerk frontend API URL (e.g. `https://clerk.your-domain.com`) |
-| `STORAGE_BUCKET` | Cloudflare R2 bucket name |
-| `STORAGE_ENDPOINT_URL` | R2 S3-compatible endpoint |
-| `STORAGE_ACCESS_KEY` | R2 access key ID |
-| `STORAGE_SECRET_KEY` | R2 secret access key |
-| `LLM_API_KEY` | OpenAI API key |
-| `SENTRY_DSN` | Sentry DSN for error tracking |
-| `ALLOWED_ORIGINS` | JSON array of allowed CORS origins |
-
-Optional / defaulted:
-- `LLM_BASE_URL` — defaults to `https://api.openai.com/v1`
-- `LLM_MODEL` — defaults to `gpt-4o-mini`
-- `PROPOSAL_VALUE_MANAGER_APPROVAL_THRESHOLD` — defaults to `500000` (INR)
-- `CAPACITY_DIRECTOR_NOTIFY_THRESHOLD_MW` — defaults to `1.0` MW
-- `AI_ESTIMATED_COST_PER_CALL` — defaults to `0.01`; used to derive
-  `ai_estimated_cost` from the number of AI agent replies in `/analytics`
-
-Meeting scheduling (Google Calendar) — scheduling stays inert until these are set:
-- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
-- `FERNET_ENCRYPTION_KEY` — encrypts employee Google refresh tokens at rest. Generate with
-  `python -c "from app.security.encryption import generate_key; print(generate_key())"`
-- `BUSINESS_HOURS_START_IST` (10), `BUSINESS_HOURS_END_IST` (18), `BUSINESS_DAYS` (`[0,1,2,3,4,5]`,
-  Mon–Sat), `BUSINESS_TIMEZONE` (`Asia/Kolkata`), `SCHEDULING_DAYS_AHEAD` (5),
-  `SCHEDULING_DEFAULT_DURATION_MINUTES` (30)
+| Variable | Staging / production | Purpose |
+|---|---|---|
+| `ENVIRONMENT` | yes | `development` \| `test` \| `staging` \| `production` exactly; staging and production run the startup guard and refuse dev auth headers |
+| `DATABASE_URL` | yes | PostgreSQL; on Cloud Run the Cloud SQL socket: `postgresql://USER:PASS@/DB?host=/cloudsql/PROJECT:asia-south1:INSTANCE` |
+| `DB_POOL_SIZE / DB_MAX_OVERFLOW` | — | Connections per instance (10 / 5); see the connection budget in deploy/RUNBOOK.md |
+| `DB_POOL_TIMEOUT_SECONDS / DB_POOL_RECYCLE_SECONDS` | — | Wait for a connection (10 s); retire connections after (1800 s) |
+| `ALLOWED_ORIGINS` | yes | JSON array of exact `scheme://host` origins (CORS and Clerk `azp`); no localhost, no path, no trailing slash |
+| `TRUSTED_PROXY_HOPS` | yes (≥ 1) | 1 directly behind Cloud Run, 2 behind an external HTTPS load balancer |
+| `FRONTEND_BASE_URL` | yes | The website's origin (browser redirects, associate email links) |
+| `PUBLIC_API_BASE_URL` | yes | This API's public origin (customer PDF/receipt links, ID card QR codes) |
+| `CLERK_JWT_ISSUER` | yes | Clerk Frontend API URL; tokens are verified against its JWKS |
+| `CLERK_SECRET_KEY` | yes | Clerk secret key (role sync, associate invitations) |
+| `ASSOCIATE_INVITE_REDIRECT_URL` | — | Where an invited associate lands (the portal sign-up page) |
+| `INTERNAL_API_KEY` | production (warns on staging) | `X-Internal-Key` for Cloud Scheduler and the website's lead mirror |
+| `FERNET_ENCRYPTION_KEY` | yes | Encrypts Google refresh tokens and bank account numbers; comma-separated, newest first, for rotation |
+| `IDENTITY_HMAC_KEY` | yes | Signs associate identity claims (duplicate-registration guard); its own secret |
+| `LLM_API_KEY` | production (warns on staging) | OpenAI-compatible key; empty = mock replies |
+| `LLM_BASE_URL / LLM_MODEL` | — | Model endpoint and id |
+| `LLM_REQUEST_TIMEOUT_SECONDS / LLM_MAX_RETRIES` | — | Per-call timeout and transport retries |
+| `AGENT_SLOW_RUN_MS / AGENT_DAILY_ACTION_LIMIT_PER_LEAD / DISABLED_AGENTS` | — | Agent harness and governance (kill switch) |
+| `NEMO_GUARDRAILS_ENABLED / NEMO_GUARDRAILS_TIMEOUT_SECONDS / NEMO_GUARDRAILS_FAIL_CLOSED / NEMO_GUARDRAILS_MAX_WORKERS` | — | Optional semantic output rail (needs `requirements-nemo.txt`, not in the image) |
+| `STORAGE_BUCKET / STORAGE_ENDPOINT_URL / STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY` | warns | Cloudflare R2 (private bucket): PDFs, uploads, receipts |
+| `STORAGE_SIGNED_URL_TTL_SECONDS` | — | Lifetime of signed download links (600) |
+| `RESEND_API_KEY / NOTIFY_FROM_EMAIL` | warns | Email via Resend; both needed |
+| `STAFF_NOTIFY_EMAILS / ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS` | — | Alert recipients (placeholder P7) |
+| `NOTIFY_ASSOCIATES` | — | Email associates about their customers (placeholder A1) |
+| `SLACK_WEBHOOK_URL` | — | Internal alerts to Slack; blank = log only |
+| `SENTRY_DSN` | warns | Error reporting (request bodies never sent, KYC scrubbed) |
+| `GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REDIRECT_URI` | warns | Google Calendar meeting scheduling |
+| `BUSINESS_HOURS_START_IST / BUSINESS_HOURS_END_IST / BUSINESS_DAYS / BUSINESS_TIMEZONE` | — | Bookable slots |
+| `SCHEDULING_DAYS_AHEAD / SCHEDULING_DEFAULT_DURATION_MINUTES` | — | Booking window and default length |
+| `PROPOSAL_VALUE_MANAGER_APPROVAL_THRESHOLD / CAPACITY_DIRECTOR_NOTIFY_THRESHOLD_MW` | — | Approval and director-alert thresholds |
+| `AI_ESTIMATED_COST_PER_CALL` | — | Analytics cost estimate per AI reply |
+| `MEMORY_SEMANTIC_SEARCH / MEMORY_EMBEDDING_MODEL / MEMORY_RECALL_TOP_K / MEMORY_REFLECT_EVERY_N_MESSAGES` | — | Customer memory |
+| `BACKGROUND_WORKERS` | — | Threads for work after the response (4) |
+| `SWEEPER_GRACE_MINUTES / SWEEPER_BATCH_SIZE` | — | Retry unfinished background work older than 15 min, 10 per run |
+| `STALE_LEAD_REFLECTIONS_PER_RUN` | — | Model calls the stale-lead job may make per run (10) |
+| `READINESS_CACHE_SECONDS` | — | `/health/ready` answer reuse (15) |
 
 ## Parameterized proposal engine
 
@@ -587,49 +604,4 @@ Three rules this feature does not bend:
    stops there. The conversation stage, qualification and pricing stay pure
    functions of the lead's own collected fields.
 
-## Deployment (Google Cloud Run + Cloud SQL)
-
-1. Provision a Cloud SQL for PostgreSQL instance in Mumbai (`asia-south1`), HA
-   (regional) configuration.
-2. Build and deploy the container to Cloud Run (it listens on the `$PORT` Cloud Run
-   injects; the `Dockerfile` falls back to `8000` locally).
-3. Connect Cloud Run to the Cloud SQL instance and set `DATABASE_URL` accordingly.
-4. Set all environment variables listed above, and `ENVIRONMENT=production`.
-
-Run Alembic migrations after the first deploy:
-```bash
-alembic -c alembic/alembic.ini upgrade head
-```
-(`alembic.ini` lives at `alembic/alembic.ini`, not the project root — the bare
-`alembic upgrade head` command fails immediately with "No config file 'alembic.ini'
-found" unless `-c` points at it, or the command is run from inside `alembic/`.)
-
-### Deploying to a fresh database
-
-This repo has historically relied on `Base.metadata.create_all()` (run automatically
-by the app's startup lifespan in `app/main.py`) rather than a true baseline migration —
-see the note at the top of `alembic/versions/0001_scheduling_and_fallback.py`. Every
-migration from `0001` onward is an incremental `ALTER` that assumes the tables it's
-touching already exist, so running `alembic upgrade head` against a genuinely empty
-database fails (`NoSuchTableError`), and running it against a database `create_all()`
-already brought fully up to date fails a different way (`CircularDependencyError` on
-SQLite, "column already exists" on Postgres) — the columns those migrations try to add
-are already there.
-
-The correct, current workflow against a brand-new database is therefore:
-
-1. Start the app once (`uvicorn app.main:app`, or just let Cloud Run's first boot do
-   it) — the startup lifespan calls `Base.metadata.create_all()` and builds the full
-   current schema.
-2. Mark migration history as caught up, **without** replaying any migrations:
-   ```bash
-   alembic -c alembic/alembic.ini stamp head
-   ```
-3. From then on, `alembic -c alembic/alembic.ini upgrade head` works normally for any
-   *new* migration added after this point, since the database will already be at
-   `head` in Alembic's bookkeeping.
-
-Writing a real `0000` baseline migration (so `upgrade head` alone works end-to-end
-against a genuinely empty database, the way it should) is a known follow-up — tracked,
-intentionally not done in this change.
 # gridnovabackend

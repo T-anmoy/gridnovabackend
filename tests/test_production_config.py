@@ -22,6 +22,12 @@ GOOD = dict(
     google_oauth_redirect_uri="https://api.gridnova.in/api/v1/dashboard/employees/me/calendar/callback",
     frontend_base_url="https://www.gridnova.in",
     public_api_base_url="https://api.gridnova.in",
+    clerk_secret_key="sk_test_x",
+    identity_hmac_key="y" * 44,
+    trusted_proxy_hops=1,
+    internal_api_key="z" * 43,
+    resend_api_key="re_test", notify_from_email="Grid Nova <notifications@gridnova.in>",
+    sentry_dsn="https://key@o0.ingest.sentry.io/0",
 )
 
 
@@ -55,10 +61,33 @@ class TestErrors:
         ({"allowed_origins": ["https://www.gridnova.in", "http://localhost:3000"]}, "ALLOWED_ORIGINS"),
         ({"allowed_origins": ["http://127.0.0.1:3000"]}, "ALLOWED_ORIGINS"),
         ({"llm_api_key": ""}, "LLM_API_KEY"),
+        # BE-3 D7
+        ({"clerk_secret_key": ""}, "CLERK_SECRET_KEY"),
+        ({"identity_hmac_key": ""}, "IDENTITY_HMAC_KEY"),
+        ({"trusted_proxy_hops": 0}, "TRUSTED_PROXY_HOPS"),
+        ({"internal_api_key": ""}, "INTERNAL_API_KEY"),
+        ({"frontend_base_url": "http://localhost:3000"}, "FRONTEND_BASE_URL"),
+        ({"public_api_base_url": ""}, "PUBLIC_API_BASE_URL"),
+        ({"database_url": "mysql://u:p@db/gridnova"}, "DATABASE_URL"),
+        ({"database_url": "postgresql://u:p@10.0.0.5:5432/"}, "DATABASE_URL"),
+        ({"database_url": "postgresql://u:p@10.0.0.5/gridnova?sslmode=disable&gssencmode=disable"},
+         "DATABASE_URL"),
+        ({"allowed_origins": ["https://www.gridnova.in/"]}, "ALLOWED_ORIGINS"),
+        ({"allowed_origins": ["https://www.gridnova.in/app"]}, "ALLOWED_ORIGINS"),
+        ({"allowed_origins": ["www.gridnova.in"]}, "ALLOWED_ORIGINS"),
     ])
     def test_each_required_setting_fails_naming_the_variable(self, overrides, variable):
         with pytest.raises(RuntimeError, match=variable):
             check_production_config(_settings(**overrides))
+
+    @pytest.mark.parametrize("url", [
+        "postgresql://gridnova:pw@/gridnova?host=/cloudsql/proj:asia-south1:gridnova-staging",
+        "postgresql+psycopg2://gridnova:pw@/gridnova?host=/cloudsql/proj:asia-south1:gridnova-prod",
+        "postgresql://gridnova:pw@10.20.0.3:5432/gridnova?sslmode=require",
+    ])
+    def test_cloud_sql_url_shapes_are_accepted(self, url, real_associate_texts):
+        errors, _ = production_config_problems(_settings(database_url=url))
+        assert errors == []
 
     def test_all_problems_are_reported_together(self):
         with pytest.raises(RuntimeError) as exc:
@@ -71,8 +100,9 @@ class TestWarnings:
         ({"storage_bucket": ""}, "STORAGE_BUCKET"),
         ({"storage_secret_key": ""}, "STORAGE_SECRET_KEY"),
         ({"google_oauth_client_id": ""}, "GOOGLE_OAUTH_CLIENT_ID"),
-        ({"frontend_base_url": "http://localhost:3000"}, "FRONTEND_BASE_URL"),
-        ({"public_api_base_url": ""}, "PUBLIC_API_BASE_URL"),
+        ({"resend_api_key": ""}, "RESEND_API_KEY"),
+        ({"notify_from_email": ""}, "NOTIFY_FROM_EMAIL"),
+        ({"sentry_dsn": ""}, "SENTRY_DSN"),
     ])
     def test_degraded_features_warn_but_do_not_fail(self, overrides, variable, caplog):
         with caplog.at_level(logging.WARNING, logger="app.config"):
@@ -122,6 +152,10 @@ class TestStaging:
         errors, warnings = production_config_problems(_settings(environment="staging", llm_api_key=""))
         assert errors == []
         assert any("LLM_API_KEY" in w for w in warnings)
+
+    def test_staging_without_an_internal_key_only_warns(self, real_associate_texts):
+        errors, warnings = production_config_problems(_settings(environment="staging", internal_api_key=""))
+        assert errors == [] and any("INTERNAL_API_KEY" in w for w in warnings)
 
     def test_production_without_an_llm_key_refuses(self, real_associate_texts):
         errors, _ = production_config_problems(_settings(llm_api_key=""))

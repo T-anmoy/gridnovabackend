@@ -25,6 +25,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.memory import reflection
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import PipelineStage
@@ -112,7 +113,17 @@ def check_stale_leads(db: Session, now: Optional[datetime] = None) -> dict:
     # (a lead nobody ever messaged has nothing to reflect on), fired after the commit,
     # and only on the run that first notices — mark_stale_notified above is what stops
     # the same quiet period reflecting twice.
-    for lead_id in newly_quiet:
+    #
+    # Each reflection is a model call made inside this request, so a backlog (the first
+    # run after an outage, a bulk import) is capped at STALE_LEAD_REFLECTIONS_PER_RUN;
+    # the rest are skipped and counted — their leads still reflect at their next
+    # milestone, and their stale alerts above are unaffected.
+    cap = settings.stale_lead_reflections_per_run
+    counts["reflections_skipped"] = max(0, len(newly_quiet) - cap)
+    if counts["reflections_skipped"]:
+        logger.warning("Stale-lead job: %d quiet-lead reflection(s) skipped (cap %d per run)",
+                       counts["reflections_skipped"], cap)
+    for lead_id in newly_quiet[:cap]:
         try:
             reflection.reflect_on_lead(
                 MemoryManager(db), lead_id,

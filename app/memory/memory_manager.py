@@ -2455,6 +2455,35 @@ class MemoryManager:
             return list(self._db.execute(select(Lead.id).where(column == entity_id)).scalars())
         return []
 
+    def lead_ids_for_audit_entries(self, entries: list[AuditLog]) -> dict[int, list[int]]:
+        """lead_ids_for_audit_entry for many entries at once: {entry.id: lead ids}, with
+        one query per kind of entity instead of one (or two) per entry."""
+        by_kind: dict[str, set[int]] = {}
+        parsed: dict[int, tuple[str, int]] = {}
+        for entry in entries:
+            try:
+                entity_id = int(entry.entity_id)
+            except (TypeError, ValueError):
+                continue
+            parsed[entry.id] = (entry.entity_type, entity_id)
+            by_kind.setdefault(entry.entity_type, set()).add(entity_id)
+
+        resolved: dict[tuple[str, int], list[int]] = {}
+        for kind, ids in by_kind.items():
+            if kind == "lead":
+                resolved.update({(kind, i): [i] for i in ids})
+                continue
+            model = {"proposal": Proposal, "proposal_inputs": ProposalInputs, "meeting": Meeting}.get(kind)
+            if model is not None:
+                for row_id, lead_id in self._db.execute(select(model.id, model.lead_id).where(model.id.in_(ids))):
+                    resolved[(kind, row_id)] = [lead_id]
+                continue
+            column = {"customer": Lead.customer_id, "project": Lead.project_id}.get(kind)
+            if column is not None:
+                for owner_id, lead_id in self._db.execute(select(column, Lead.id).where(column.in_(ids))):
+                    resolved.setdefault((kind, owner_id), []).append(lead_id)
+        return {entry_id: resolved.get(key, []) for entry_id, key in parsed.items()}
+
     def list_recent_activity(
         self, limit: int = 15, exclude_actions: Optional[tuple[str, ...]] = None
     ) -> list[AuditLog]:

@@ -118,9 +118,13 @@ def _verify_clerk_jwt(token: str) -> dict:
         token,
         signing_key.key,
         algorithms=["RS256"],
-        options={"verify_exp": True},
+        # A token without a subject would provision an employee with an empty id, and
+        # one without an expiry would never expire: both are refused, not defaulted.
+        options={"verify_exp": True, "require": ["exp", "sub", "iss"]},
         issuer=settings.clerk_jwt_issuer,
     )
+    if not isinstance(payload.get("sub"), str) or not payload["sub"].strip():
+        raise jwt.InvalidTokenError("sub is empty")
     azp = payload.get("azp")
     if azp is not None and azp.rstrip("/") not in {o.rstrip("/") for o in settings.allowed_origins}:
         raise jwt.InvalidTokenError("azp is not an allowed origin")
