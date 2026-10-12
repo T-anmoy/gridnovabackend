@@ -9,7 +9,7 @@ import io
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -19,6 +19,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.sales_agent import QUALIFICATION_FIELDS
+from app.api.staff_schemas import (
+    CustomerMemoryResponse, EngineerLeadDetailResponse, LeadAssignResponse, LeadDetailResponse,
+    LeadFieldsUpdateResponse, LeadListResponse, LeadStageUpdateResponse, MemoryAskResponse,
+    ReflectResponse, ScheduleMeetingResponse,
+)
+from app.api.lead_filters import parse_lead_filters
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
 from app.auth.scoping import lead_scope, require_lead_access
@@ -151,11 +157,16 @@ def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
 LEADS_MAX_PAGE_SIZE = 200
 
 
-@router.get("/leads")
+@router.get("/leads", response_model=LeadListResponse)
 def list_leads(
     source: Optional[str] = Query(default=None),
     assigned: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None, max_length=100),
+    stage: Optional[list[str]] = Query(default=None),
+    min_score: Optional[str] = Query(default=None),
+    max_score: Optional[str] = Query(default=None),
+    created_from: Optional[str] = Query(default=None),
+    created_to: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=LEADS_MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
@@ -163,7 +174,9 @@ def list_leads(
 ):
     """A page of leads, newest first: {items, page, page_size, total}. `q` matches the
     customer's name, email or phone, or a lead id — for an Engineer (who never sees
-    contact details) only a lead id. Every filter runs in SQL."""
+    contact details) only a lead id. Every filter runs in SQL.
+    Optional: `stage` (repeatable), `min_score`/`max_score` (low<medium<high), `created_from`/
+    `created_to` (IST days, inclusive) — see docs/api/staff_contracts.md."""
     source_enum: Optional[LeadSource] = None
     if source:
         try:
@@ -171,12 +184,13 @@ def list_leads(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown lead source: {source!r}")
 
+    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to)
     memory = MemoryManager(db)
     # One visibility rule (app/auth/scoping.py): Sales sees its own and unassigned
     # leads; ?assigned=me|unassigned|any narrows it for every role.
     if employee.is_engineer and q and not q.strip().isdigit():
         return {"items": [], "page": page, "page_size": page_size, "total": 0}
-    leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q,
+    leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q, filters=filters,
                                          page=page, page_size=page_size)
     items = [
         {
@@ -220,9 +234,16 @@ def _csv_response(rows: list[list], header: list[str], filename: str) -> Streami
     )
 
 
-@router.get("/leads/export")
+@router.get("/leads/export", response_class=StreamingResponse, responses={
+    200: {"description": "CSV file (attachment).", "content": {"text/csv": {"schema": {"type": "string"}}}},
+})
 def export_leads(
     source: Optional[str] = Query(default=None),
+    stage: Optional[list[str]] = Query(default=None),
+    min_score: Optional[str] = Query(default=None),
+    max_score: Optional[str] = Query(default=None),
+    created_from: Optional[str] = Query(default=None),
+    created_to: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
@@ -236,7 +257,8 @@ def export_leads(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown lead source: {source!r}")
 
-    leads = memory_of(db).list_leads(source=source_enum)
+    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to)
+    leads = memory_of(db).list_leads(source=source_enum, filters=filters)
     header = ["lead_id", "customer_name", "customer_email", "source",
               "pipeline_stage", "lead_score", "assigned_employee_id", "created_at"]
     rows = [
@@ -326,7 +348,7 @@ def _project_summary(project) -> Optional[dict]:
     }
 
 
-@router.get("/leads/{lead_id}")
+@router.get("/leads/{lead_id}", response_model=Union[LeadDetailResponse, EngineerLeadDetailResponse])
 def get_lead(
     lead_id: int,
     db: Session = Depends(get_db),
@@ -380,7 +402,7 @@ class LeadFieldsUpdateRequest(BaseModel):
     fields: dict[str, Any]
 
 
-@router.patch("/leads/{lead_id}/fields")
+@router.patch("/leads/{lead_id}/fields", response_model=LeadFieldsUpdateResponse)
 def update_lead_fields_manual(
     lead_id: int,
     body: LeadFieldsUpdateRequest,
@@ -432,7 +454,7 @@ class LeadStageUpdateRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=1000)
 
 
-@router.patch("/leads/{lead_id}/stage")
+@router.patch("/leads/{lead_id}/stage", response_model=LeadStageUpdateResponse)
 def update_lead_stage(
     lead_id: int,
     body: LeadStageUpdateRequest,
@@ -602,7 +624,7 @@ class LeadAssignRequest(BaseModel):
     employee_id: str = Field(min_length=1)
 
 
-@router.patch("/leads/{lead_id}/assign")
+@router.patch("/leads/{lead_id}/assign", response_model=LeadAssignResponse)
 def assign_lead(
     lead_id: int,
     body: LeadAssignRequest,
@@ -1714,7 +1736,7 @@ class ScheduleMeetingRequest(BaseModel):
     duration_minutes: Optional[int] = None
 
 
-@router.post("/leads/{lead_id}/schedule-meeting")
+@router.post("/leads/{lead_id}/schedule-meeting", response_model=ScheduleMeetingResponse)
 def schedule_meeting(
     lead_id: int,
     body: ScheduleMeetingRequest,
@@ -1905,7 +1927,7 @@ def _assert_may_read_customer_memory(
         )
 
 
-@router.post("/memory/ask")
+@router.post("/memory/ask", response_model=MemoryAskResponse)
 def ask_customer_memory(
     body: MemoryQuestionRequest,
     db: Session = Depends(get_db),
@@ -1956,7 +1978,7 @@ def ask_customer_memory(
     }
 
 
-@router.get("/customers/{customer_id}/memory")
+@router.get("/customers/{customer_id}/memory", response_model=CustomerMemoryResponse)
 def get_customer_memory(
     customer_id: int,
     kind: Optional[str] = Query(None, description="Filter to one memory kind"),
@@ -2021,7 +2043,7 @@ def get_customer_memory(
     }
 
 
-@router.post("/leads/{lead_id}/reflect")
+@router.post("/leads/{lead_id}/reflect", response_model=ReflectResponse)
 def reflect_on_lead_now(
     lead_id: int,
     db: Session = Depends(get_db),

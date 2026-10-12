@@ -21,6 +21,7 @@ from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager, is_placeholder_email
 from app.memory.models import Channel, LeadSource
 from app.orchestrator.orchestrator import orchestrator
+from app.llm.locale import reply_locale
 from app.rules import sales_policy
 from app.security.client_ip import client_ip
 from app.security.rate_limit import RateLimitLog, RecentKeys
@@ -58,6 +59,9 @@ class ChatRequest(BaseModel):
     customer_id: Optional[int] = Field(default=None, deprecated=True)
     lead_id: Optional[int] = Field(default=None, deprecated=True)
     source: Optional[str] = Field(default=None, deprecated=True)
+    # Reply language: en | hi | bn. Anything else (or absent) is treated as en. It only
+    # steers the wording of Nova's reply — never identity, session or merge behaviour.
+    locale: Optional[str] = Field(default=None, max_length=32)
 
     @field_validator("email")
     @classmethod
@@ -159,6 +163,7 @@ def chat_message(
         lead_id=lead_id,
         message=body.message,
         channel=Channel.website.value,
+        locale=reply_locale(body.locale),
     )
     db.commit()
 

@@ -47,6 +47,8 @@ class OrchestratorState(TypedDict, total=False):
     recall_mode: Optional[str]
     # A Sales employee's id when recall must stay inside their lead scope.
     scope_employee_id: Optional[str]
+    # Reply language for the website chat (en | hi | bn); wording only.
+    locale: Optional[str]
     # Correlates one turn across the agent, the harness and the audit trail.
     agent_run_id: Optional[str]
 
@@ -80,6 +82,7 @@ def _sales_node(state: OrchestratorState) -> OrchestratorState:
                 lead_id=state["lead_id"],
                 message=state.get("message", ""),
                 channel=channel,
+                locale=state.get("locale", "en"),
             ),
             memory=memory,
             lead_id=state["lead_id"],
@@ -303,6 +306,7 @@ class Orchestrator:
         lead_id: int,
         message: str,
         channel: str = "website",
+        locale: str = "en",
     ) -> dict:
         state: OrchestratorState = {
             "customer_id": customer_id,
@@ -314,6 +318,7 @@ class Orchestrator:
             "is_qualified": False,
             "can_draft": False,
             "performed_by": "customer",
+            "locale": locale,
         }
         result = _customer_graph.invoke(state)
         return dict(result)

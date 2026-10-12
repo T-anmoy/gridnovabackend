@@ -773,6 +773,7 @@ class MemoryManager:
         assigned_employee_id: Optional[str] = None,
         source: Optional[LeadSource] = None,
         scope=None,
+        filters=None,
     ) -> list[Lead]:
         """`scope` is an app.auth.scoping.LeadScope — the caller's visibility rule,
         applied in the query. Projects and customers are loaded with the leads (the
@@ -784,6 +785,8 @@ class MemoryManager:
             q = q.where(Lead.assigned_employee_id == assigned_employee_id)
         if source is not None:
             q = q.where(Lead.source == source)
+        if filters is not None:
+            q = q.where(*filters.conditions())
         q = q.order_by(Lead.created_at.desc(), Lead.id.desc())
         return list(self._db.execute(q).scalars().all())
 
@@ -793,6 +796,7 @@ class MemoryManager:
         source: Optional[LeadSource] = None,
         scope=None,
         q: Optional[str] = None,
+        filters=None,
         page: int = 1,
         page_size: int = 25,
     ) -> tuple[list[Lead], int]:
@@ -803,6 +807,8 @@ class MemoryManager:
             query = query.where(scope.condition())
         if source is not None:
             query = query.where(Lead.source == source)
+        if filters is not None:
+            query = query.where(*filters.conditions())
         text = (q or "").strip()
         if text:
             like = f"%{text.lower()}%"

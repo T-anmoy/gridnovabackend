@@ -120,6 +120,7 @@ class SalesAgent:
         lead_id: int,
         message: str,
         channel: Channel = Channel.website,
+        locale: str = "en",
     ) -> dict:
         # Governance runs in the harness now (app/agents/harness.py), which calls
         # stand_down below when it refuses. Sub-actions taken part-way through a turn
@@ -274,6 +275,7 @@ class SalesAgent:
                 available_slots=available_human,
                 memory_context=memory_context,
                 lead_id=lead_id,
+                locale=locale,
             )
 
             # Everything the reply is allowed to assert: what the customer actually

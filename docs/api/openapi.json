@@ -1072,6 +1072,18 @@
             "deprecated": true,
             "title": "Lead Id"
           },
+          "locale": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -1290,6 +1302,187 @@
         "title": "CorrectionRequest",
         "type": "object"
       },
+      "CustomerMemoryItem": {
+        "properties": {
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lead_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Id"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "salience": {
+            "title": "Salience",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tags": {
+            "items": {},
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "summary",
+          "tags",
+          "salience",
+          "created_by"
+        ],
+        "title": "CustomerMemoryItem",
+        "type": "object"
+      },
+      "CustomerMemoryProfile": {
+        "properties": {
+          "agent_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Notes"
+          },
+          "last_reflected_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reflected At"
+          },
+          "next_best_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Best Action"
+          },
+          "open_questions": {
+            "items": {},
+            "title": "Open Questions",
+            "type": "array"
+          },
+          "reflection_count": {
+            "title": "Reflection Count",
+            "type": "integer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "traits": {
+            "items": {},
+            "title": "Traits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "traits",
+          "open_questions",
+          "reflection_count"
+        ],
+        "title": "CustomerMemoryProfile",
+        "type": "object"
+      },
+      "CustomerMemoryResponse": {
+        "properties": {
+          "customer": {
+            "$ref": "#/components/schemas/MemoryCustomerSummary"
+          },
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerMemoryItem"
+            },
+            "title": "Memories",
+            "type": "array"
+          },
+          "memory_count": {
+            "title": "Memory Count",
+            "type": "integer"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerMemoryProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer",
+          "memory_count",
+          "memories"
+        ],
+        "title": "CustomerMemoryResponse",
+        "type": "object"
+      },
       "CustomerTimeline": {
         "description": "When the customer says they want the system — as the associate recorded it.",
         "enum": [
@@ -1386,6 +1579,29 @@
         ],
         "title": "EmployeeRole",
         "type": "string"
+      },
+      "EngineerLeadDetailResponse": {
+        "description": "Engineers get technical fields only: no customer, pricing, messages or timeline.",
+        "properties": {
+          "collected_fields": {
+            "title": "Collected Fields",
+            "type": "object"
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "pipeline_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          }
+        },
+        "required": [
+          "lead_id",
+          "pipeline_stage",
+          "collected_fields"
+        ],
+        "title": "EngineerLeadDetailResponse",
+        "type": "object"
       },
       "EquipmentCategory": {
         "enum": [
@@ -1861,6 +2077,162 @@
         "title": "LeadAssignRequest",
         "type": "object"
       },
+      "LeadAssignResponse": {
+        "properties": {
+          "assigned_employee_id": {
+            "title": "Assigned Employee Id",
+            "type": "string"
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "previous_assigned_employee_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Assigned Employee Id"
+          }
+        },
+        "required": [
+          "lead_id",
+          "assigned_employee_id"
+        ],
+        "title": "LeadAssignResponse",
+        "type": "object"
+      },
+      "LeadCustomerBrief": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "LeadCustomerBrief",
+        "type": "object"
+      },
+      "LeadDetailResponse": {
+        "description": "Admin / Management / Sales / (any role with lead access except Engineer).",
+        "properties": {
+          "assigned_employee_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Employee Id"
+          },
+          "collected_fields": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected Fields"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadCustomerBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "lead_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/LeadMessageEntry"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "pipeline_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadProjectSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/LeadProposalBrief"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/LeadSource"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/LeadTimelineEntry"
+            },
+            "title": "Timeline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lead_id",
+          "pipeline_stage",
+          "source",
+          "proposals",
+          "timeline",
+          "messages"
+        ],
+        "title": "LeadDetailResponse",
+        "type": "object"
+      },
       "LeadFieldsUpdateRequest": {
         "properties": {
           "fields": {
@@ -1873,6 +2245,342 @@
         ],
         "title": "LeadFieldsUpdateRequest",
         "type": "object"
+      },
+      "LeadFieldsUpdateResponse": {
+        "properties": {
+          "collected_fields": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected Fields"
+          },
+          "is_qualified": {
+            "title": "Is Qualified",
+            "type": "boolean"
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "lead_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          },
+          "pipeline_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          }
+        },
+        "required": [
+          "lead_id",
+          "pipeline_stage",
+          "is_qualified",
+          "missing_fields"
+        ],
+        "title": "LeadFieldsUpdateResponse",
+        "type": "object"
+      },
+      "LeadListItem": {
+        "properties": {
+          "assigned_employee_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Employee Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lead_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pipeline_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          },
+          "project_reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Reference Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/LeadSource"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "pipeline_stage",
+          "source",
+          "created_at"
+        ],
+        "title": "LeadListItem",
+        "type": "object"
+      },
+      "LeadListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LeadListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "LeadListResponse",
+        "type": "object"
+      },
+      "LeadMessageEntry": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          }
+        },
+        "required": [
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "LeadMessageEntry",
+        "type": "object"
+      },
+      "LeadProjectSummary": {
+        "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "capacity_kw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Kw"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "monthly_electricity_bill": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Electricity Bill"
+          },
+          "project_family": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectFamily"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Type"
+          },
+          "reference_id": {
+            "title": "Reference Id",
+            "type": "string"
+          },
+          "roof_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roof Type"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "timeline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeline"
+          }
+        },
+        "required": [
+          "id",
+          "reference_id"
+        ],
+        "title": "LeadProjectSummary",
+        "type": "object"
+      },
+      "LeadProposalBrief": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProposalStatus"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status"
+        ],
+        "title": "LeadProposalBrief",
+        "type": "object"
+      },
+      "LeadScore": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "LeadScore",
+        "type": "string"
       },
       "LeadSource": {
         "enum": [
@@ -1913,6 +2621,66 @@
           "stage"
         ],
         "title": "LeadStageUpdateRequest",
+        "type": "object"
+      },
+      "LeadStageUpdateResponse": {
+        "properties": {
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "pipeline_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          },
+          "previous_stage": {
+            "$ref": "#/components/schemas/PipelineStage"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "lead_id",
+          "previous_stage",
+          "pipeline_stage"
+        ],
+        "title": "LeadStageUpdateResponse",
+        "type": "object"
+      },
+      "LeadTimelineEntry": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/TimelineEventType"
+          }
+        },
+        "required": [
+          "event_type",
+          "created_at"
+        ],
+        "title": "LeadTimelineEntry",
         "type": "object"
       },
       "ManualLeadCreate": {
@@ -2047,6 +2815,152 @@
         "title": "MatchIn",
         "type": "object"
       },
+      "MeetingStatus": {
+        "enum": [
+          "scheduled",
+          "cancelled",
+          "completed"
+        ],
+        "title": "MeetingStatus",
+        "type": "string"
+      },
+      "MemoryAskResponse": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryCustomerSummary"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "retrieval_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Mode"
+          }
+        },
+        "required": [
+          "resolved",
+          "candidates",
+          "citations"
+        ],
+        "title": "MemoryAskResponse",
+        "type": "object"
+      },
+      "MemoryCitation": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "summary"
+        ],
+        "title": "MemoryCitation",
+        "type": "object"
+      },
+      "MemoryCustomerSummary": {
+        "description": "A customer as the Memory Agent lists a candidate.",
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "customer_id",
+          "email"
+        ],
+        "title": "MemoryCustomerSummary",
+        "type": "object"
+      },
       "MemoryQuestionRequest": {
         "properties": {
           "customer_id": {
@@ -2072,6 +2986,15 @@
         ],
         "title": "MemoryQuestionRequest",
         "type": "object"
+      },
+      "MessageRole": {
+        "enum": [
+          "customer",
+          "agent",
+          "employee"
+        ],
+        "title": "MessageRole",
+        "type": "string"
       },
       "MilestoneIn": {
         "properties": {
@@ -4273,6 +5196,19 @@
         "title": "ProposalInputsReview",
         "type": "object"
       },
+      "ProposalStatus": {
+        "enum": [
+          "draft",
+          "pending_pricing_validation",
+          "pending_approval",
+          "revision_requested",
+          "approved",
+          "sent",
+          "accepted"
+        ],
+        "title": "ProposalStatus",
+        "type": "string"
+      },
       "PublicEstimateRequest": {
         "properties": {
           "battery_storage": {
@@ -4466,6 +5402,41 @@
           "note"
         ],
         "title": "RecordStageRequest",
+        "type": "object"
+      },
+      "ReflectResponse": {
+        "description": "Always 200 once access is granted — reflection never raises; a no-op or a\nfailure is reported in `skipped` (null when it ran).",
+        "properties": {
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "memories_written": {
+            "title": "Memories Written",
+            "type": "integer"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger",
+          "lead_id",
+          "memories_written"
+        ],
+        "title": "ReflectResponse",
         "type": "object"
       },
       "ResolveFlagRequest": {
@@ -4697,6 +5668,54 @@
           "scheduled_at"
         ],
         "title": "ScheduleMeetingRequest",
+        "type": "object"
+      },
+      "ScheduleMeetingResponse": {
+        "properties": {
+          "duration_minutes": {
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "employee_id": {
+            "title": "Employee Id",
+            "type": "string"
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "meet_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meet Link"
+          },
+          "meeting_id": {
+            "title": "Meeting Id",
+            "type": "integer"
+          },
+          "scheduled_at": {
+            "title": "Scheduled At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MeetingStatus"
+          }
+        },
+        "required": [
+          "meeting_id",
+          "lead_id",
+          "employee_id",
+          "scheduled_at",
+          "duration_minutes",
+          "status"
+        ],
+        "title": "ScheduleMeetingResponse",
         "type": "object"
       },
       "SeatReleaseRequest": {
@@ -5019,6 +6038,46 @@
         },
         "title": "TerritoryUpdateRequest",
         "type": "object"
+      },
+      "TimelineEventType": {
+        "enum": [
+          "lead_created",
+          "qualification_completed",
+          "meeting_scheduled",
+          "proposal_draft_created",
+          "proposal_approved",
+          "manager_signoff_completed",
+          "proposal_sent",
+          "revision_requested",
+          "pricing_adjusted",
+          "customer_accepted",
+          "proposal_v2",
+          "negotiation",
+          "won",
+          "lost",
+          "escalated",
+          "proposal_inputs_submitted",
+          "proposal_inputs_reviewed",
+          "proposal_auto_drafted_from_inputs",
+          "stage_changed",
+          "lead_assigned",
+          "fields_filled_from_inputs",
+          "onboarding_submitted",
+          "onboarding_verified",
+          "attribution_flagged",
+          "project_stage_recorded",
+          "indicative_estimate_created",
+          "execution_stage_submitted",
+          "execution_stage_rejected",
+          "site_location_updated",
+          "survey_signed",
+          "survey_reviewed",
+          "survey_correction_requested",
+          "survey_corrected",
+          "possible_returning_customer"
+        ],
+        "title": "TimelineEventType",
+        "type": "string"
       },
       "UnitIn": {
         "properties": {
@@ -9225,7 +10284,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerMemoryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10203,7 +11264,7 @@
     },
     "/api/v1/dashboard/leads": {
       "get": {
-        "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.",
+        "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.\nOptional: `stage` (repeatable), `min_score`/`max_score` (low<medium<high), `created_from`/\n`created_to` (IST days, inclusive) — see docs/api/staff_contracts.md.",
         "operationId": "list_leads_api_v1_dashboard_leads_get",
         "parameters": [
           {
@@ -10257,6 +11318,89 @@
           },
           {
             "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stage"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
+          },
+          {
+            "in": "query",
             "name": "page",
             "required": false,
             "schema": {
@@ -10283,7 +11427,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LeadListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10366,16 +11512,101 @@
               ],
               "title": "Source"
             }
+          },
+          {
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stage"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
           }
         ],
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "CSV file (attachment)."
           },
           "422": {
             "content": {
@@ -10414,7 +11645,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LeadDetailResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EngineerLeadDetailResponse"
+                    }
+                  ],
+                  "title": "Response Get Lead Api V1 Dashboard Leads  Lead Id  Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -10467,7 +11708,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LeadAssignResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10520,7 +11763,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LeadFieldsUpdateResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10563,7 +11808,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10616,7 +11863,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleMeetingResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10669,7 +11918,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStageUpdateResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10768,7 +12019,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryAskResponse"
+                }
               }
             },
             "description": "Successful Response"

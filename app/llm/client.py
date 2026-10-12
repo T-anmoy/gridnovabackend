@@ -15,6 +15,7 @@ from typing import Any, Optional
 from app.agents import harness
 from app.config import settings
 from app.llm.company_facts import COMPANY_FACTS_BLOCK, RESPONSE_TIME_COMMITMENT
+from app.llm.locale import language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -557,6 +558,7 @@ class LLMClient:
         available_slots: Optional[list[str]] = None,
         memory_context: Optional[str] = None,
         lead_id: Optional[int] = None,
+        locale: Optional[str] = None,
     ) -> str:
         """
         Generate Nova's next conversational reply, warm and calibrated to the current
@@ -571,7 +573,7 @@ class LLMClient:
         """
         harness.note_llm_call()
         system_prompt = self._build_reply_system_prompt(
-            stage, collected_fields, missing_fields, available_slots, memory_context
+            stage, collected_fields, missing_fields, available_slots, memory_context, locale
         )
         if self._mock and not settings.allows_mock_replies:
             # No model configured outside development/test: the customer gets the
@@ -601,6 +603,7 @@ class LLMClient:
         missing_fields: list[str],
         available_slots: Optional[list[str]] = None,
         memory_context: Optional[str] = None,
+        locale: Optional[str] = None,
     ) -> str:
         """Assemble Nova's reply system prompt. Kept pure and static so tests can
         assert the design constraints are actually present in what gets sent."""
@@ -646,7 +649,7 @@ How to use it:
 --- THIS CONVERSATION ---
 CURRENT STAGE: {stage}
 ALREADY KNOWN: {known}
-STILL NEEDED: {still_needed}{slots_line}{memory_block}
+STILL NEEDED: {still_needed}{slots_line}{memory_block}{language_instruction(locale)}
 """
     @staticmethod
     def _fallback_reply(

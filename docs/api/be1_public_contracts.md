@@ -22,6 +22,7 @@ ids.
 | `session_token` | string ≤ 256, optional | from the previous reply. Missing, unknown or expired → a new conversation |
 | `name` | string ≤ 200, optional | |
 | `email` | string ≤ 254, optional | must look like an email (same check as `/public/estimate-request`), else 422 |
+| `locale` | `en` \| `hi` \| `bn`, optional (BE-6) | reply language only. Case-insensitive; `hi-IN`/`bn_BD` are read as `hi`/`bn`; any other value, or none, is treated as `en` (never an error). It adds one `LANGUAGE:` line to the reply prompt; it never changes the session, identity, merge behaviour, the stage logic or the guardrails. Fixed system texts (e.g. the "something went wrong" apology and booking confirmations) stay in English |
 | `lead_id`, `customer_id`, `source` | **deprecated, ignored** | accepted (and ignored) for one release so older widgets still validate |
 
 **Response 200**
@@ -84,6 +85,8 @@ none).
 ```
 
 Newest first. Every filter (scope, source, `q`) and the count run in SQL.
+
+BE-6 added optional `stage`, `min_score`, `max_score`, `created_from`, `created_to` (also on the export) — see [staff_contracts.md](staff_contracts.md) §3.
 `GET /dashboard/leads/export` is unchanged in shape; it now loads customers with the leads
 and every CSV cell is formula-safe (see §9).
 
