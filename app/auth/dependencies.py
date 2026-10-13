@@ -335,8 +335,15 @@ class AuthenticatedEmployee:
         return self.role in (EmployeeRole.admin, EmployeeRole.operations)
 
     def can_record_execution(self) -> bool:
-        """Record a stage directly (grid_nova mode) and upload execution evidence."""
+        """Record a stage directly (grid_nova mode) and upload execution evidence. Also
+        acts on the handover pack (ticks, customer link) — BE-5."""
         return self.role in (EmployeeRole.admin, EmployeeRole.operations)
+
+    def can_handle_service_requests(self) -> bool:
+        """Raise on a customer's behalf, assign, add notes and change the status of a
+        warranty / O&M service request (BE-5). Management and Sales read (scoped as
+        execution is); Accounts: none."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.operations, EmployeeRole.engineer)
 
 
 def get_current_employee(

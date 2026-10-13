@@ -2239,3 +2239,164 @@ event.listen(CommissionEntry.__table__, "after_create",
              DDL(COMMISSION_ENTRIES_PG_TRIGGER).execute_if(dialect="postgresql"))
 for _sql in COMMISSION_ENTRIES_SQLITE_TRIGGERS:
     event.listen(CommissionEntry.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+
+
+# ── Handover, warranty and service requests (BE-5, Phase 6A) — app/handover/ ─────
+
+class ServiceRequestCategory(str, enum.Enum):
+    no_generation = "no_generation"
+    inverter_error = "inverter_error"
+    physical_damage = "physical_damage"
+    cleaning_om = "cleaning_om"
+    other = "other"
+
+
+class ServiceRequestStatus(str, enum.Enum):
+    open = "open"
+    in_progress = "in_progress"
+    resolved = "resolved"
+    rejected = "rejected"
+
+
+class HandoverPack(Base):
+    """One per project (created the first time anyone looks at the handover). The pack's
+    checklist is COMPUTED from real records wherever there is one; only the three manual
+    items live here (orientation, acknowledgement, O&M contact), each with who and when —
+    changes are audited. Also holds the customer's link (hashed token, revocable) and the
+    rendered handover PDF (app/handover/pdf.py)."""
+    __tablename__ = "handover_packs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), unique=True, nullable=False)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    orientation_done_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    orientation_done_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    orientation_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ack_method: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # signature | in_person
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    acknowledged_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ack_customer_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    ack_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ack_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    om_contact_given_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    om_contact_given_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    om_contact_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The customer's link: only a SHA-256 of the random token is kept.
+    link_token_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    link_issued_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_issued_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    link_expires_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_revoked_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_revoked_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pdf_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pdf_generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    render_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    held_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    email_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # sent | skipped | failed | held
+    email_skipped_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    emailed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ProjectWarranty(Base):
+    """The warranty register entry for a project, written once when `handover_complete`
+    is recorded (or, for a project handed over before this existed, the first time it is
+    needed). The years are what was configured at that moment."""
+    __tablename__ = "project_warranties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), unique=True, nullable=False)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    handover_date: Mapped[date] = mapped_column(Date, nullable=False)
+    system_warranty_years: Mapped[int] = mapped_column(Integer, nullable=False)
+    system_warranty_end: Mapped[date] = mapped_column(Date, nullable=False)
+    panel_performance_life_years: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    om_free_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    om_free_until: Mapped[date] = mapped_column(Date, nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class WarrantyItem(Base):
+    """One installed unit's product warranty in the register. `source`: `register` (the
+    dates on the serial register), `default` (configured years for its category) or
+    `none` (neither — no end date is claimed)."""
+    __tablename__ = "warranty_items"
+    __table_args__ = (UniqueConstraint("warranty_id", "unit_id", name="uq_warranty_items_unit"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    warranty_id: Mapped[int] = mapped_column(ForeignKey("project_warranties.id"), nullable=False, index=True)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("installed_units.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    warranty_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class ServiceRequest(Base):
+    """A warranty / O&M request after handover — raised by staff on a customer's behalf,
+    by the owning associate, or by the customer through their link. History is the
+    append-only service_request_events."""
+    __tablename__ = "service_requests"
+    __table_args__ = (Index("ix_service_requests_status", "status"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    category: Mapped[ServiceRequestCategory] = mapped_column(SAEnum(ServiceRequestCategory), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ServiceRequestStatus] = mapped_column(SAEnum(ServiceRequestStatus), nullable=False,
+                                                         default=ServiceRequestStatus.open)
+    raised_via: Mapped[str] = mapped_column(String(16), nullable=False)   # staff | associate | customer
+    raised_by: Mapped[str] = mapped_column(String, nullable=False)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Computed from the warranty register when raised; NULL when the project has none.
+    within_warranty: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    warranty_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    assignee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True, index=True)
+    photos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    sla_due_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    overdue_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ServiceRequestEvent(Base):
+    """Append-only history of a service request (a database trigger refuses UPDATE and
+    DELETE)."""
+    __tablename__ = "service_request_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("service_requests.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)   # raised | status | assigned | note
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    from_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+SERVICE_EVENTS_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION service_request_events_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION USING MESSAGE = 'service_request_events is append-only';
+END;
+$$ LANGUAGE plpgsql
+"""
+SERVICE_EVENTS_PG_TRIGGER = (
+    "CREATE TRIGGER service_request_events_append_only BEFORE UPDATE OR DELETE ON service_request_events "
+    "FOR EACH ROW EXECUTE FUNCTION service_request_events_append_only()"
+)
+SERVICE_EVENTS_SQLITE_TRIGGERS = tuple(
+    f"CREATE TRIGGER service_request_events_no_{op.lower()} BEFORE {op} ON service_request_events "
+    f"BEGIN SELECT RAISE(ABORT, 'service_request_events is append-only'); END" for op in ("UPDATE", "DELETE")
+)
+event.listen(ServiceRequestEvent.__table__, "after_create",
+             DDL(SERVICE_EVENTS_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(ServiceRequestEvent.__table__, "after_create",
+             DDL(SERVICE_EVENTS_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in SERVICE_EVENTS_SQLITE_TRIGGERS:
+    event.listen(ServiceRequestEvent.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))

@@ -24,13 +24,16 @@ ONBOARDING_READERS = {"admin", "management", "sales"}
 ONBOARDING_ACTORS = {"admin", "sales"}
 EXECUTION_READERS = {"admin", "management", "sales", "engineer", "operations"}
 EXECUTION_ACTORS = {"admin", "operations"}
+SERVICE_ACTORS = {"admin", "operations", "engineer"}
+SR_FORM = {"data": {"category": "no_generation", "description": "No power"}}
 MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balance", "commission",
               "procurement_price_inr", "rate_per_kw", "final_price", "subtotal", "gst"}
 
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
-                   "survey_admin", "commissions_admin", "associate_commissions", "network_admin")
+                   "survey_admin", "commissions_admin", "associate_commissions", "network_admin", "handover_admin",
+                   "associate_handover")
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
 PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
@@ -116,6 +119,27 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
         (ONBOARDING_ACTORS, {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52",
                                       "reason": "Confirmed on the call."}}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/handover"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/orientation"):
+        (EXECUTION_ACTORS, {"json": {"done": True}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/om-contact"):
+        (EXECUTION_ACTORS, {"json": {"done": True}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/acknowledgement"):
+        (EXECUTION_ACTORS, {"data": {"method": "in_person", "customer_name": "Asha"}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link"): (EXECUTION_ACTORS, {"json": {}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link/revoke"): (EXECUTION_ACTORS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf/regenerate"): (EXECUTION_ACTORS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf"): (EXECUTION_READERS, {}),
+    ("GET", "/api/v1/dashboard/service-requests"): (EXECUTION_READERS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (SERVICE_ACTORS, SR_FORM),
+    ("GET", "/api/v1/dashboard/service-requests/{request_id}"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/assign"): (SERVICE_ACTORS, {"json": {"assignee_id": None}}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/status"):
+        (SERVICE_ACTORS, {"json": {"status": "in_progress"}}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/notes"): (SERVICE_ACTORS, {"json": {"note": "x"}}),
+    ("GET", "/api/v1/dashboard/service-requests/{request_id}/photos/{file_ref}"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/internal/check-service-requests"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/placeholders"): ({"admin", "management"}, {}),
     ("POST", "/api/v1/dashboard/placeholders/{entry_id}/resolve"): (ADMIN_ONLY, {"json": {"note": "x"}}),
     ("GET", "/api/v1/dashboard/execution"): (EXECUTION_READERS, {}),
@@ -263,6 +287,11 @@ ASSOCIATE = {
         ("write", {"json": {"rating_wp": "545"}}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/execution/units/{unit_id}/void"):
         ("write", {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/handover"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/handover/pdf"): ("documents", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/service-requests"): ("read", {}),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/service-requests"): ("write", SR_FORM),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/service-requests/{request_id}"): ("read", {}),
     ("GET", "/api/v1/associate/payments/instructions"): ("own", {}),
     ("GET", "/api/v1/associate/home"): ("own", {}),
     ("GET", "/api/v1/associate/equipment"): ("own", {}),
@@ -325,7 +354,7 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
               "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999,
-              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999}
+              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999, "request_id": 999999}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 

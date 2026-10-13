@@ -435,6 +435,8 @@ def work_queues(db: Session = Depends(get_db), employee: AuthenticatedEmployee =
             "stuck_projects": sum(1 for r in rows if r["is_stuck"]),
             "dcr_mismatch": sum(1 for r in rows if "dcr_mismatch" in r["flags"]),
         }
+        from app.handover import queues as handover_queues
+        out.update(handover_queues.counts(db, employee))   # BE-5: `handover`, `service_requests` (SQL)
     if employee.can_view_payments():
         now = datetime.now(timezone.utc)
         visible = list(db.execute(_visible(db, employee, select(Payment))).scalars())

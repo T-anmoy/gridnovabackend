@@ -130,6 +130,24 @@
         "title": "ApproveRequest",
         "type": "object"
       },
+      "AssignRequest": {
+        "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Id"
+          }
+        },
+        "title": "AssignRequest",
+        "type": "object"
+      },
       "AssociateStatus": {
         "enum": [
           "active",
@@ -232,6 +250,170 @@
           "period"
         ],
         "title": "BatchIn",
+        "type": "object"
+      },
+      "Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post": {
+        "properties": {
+          "customer_name": {
+            "maxLength": 200,
+            "title": "Customer Name",
+            "type": "string"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "method": {
+            "enum": [
+              "signature",
+              "in_person"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "method",
+          "customer_name"
+        ],
+        "title": "Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post",
+        "type": "object"
+      },
+      "Body_raise_request_api_v1_public_handover__token__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_request_api_v1_public_handover__token__service_requests_post",
+        "type": "object"
+      },
+      "Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post",
+        "type": "object"
+      },
+      "Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post",
         "type": "object"
       },
       "Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post": {
@@ -2773,6 +2955,17 @@
         "title": "LeadTimelineEntry",
         "type": "object"
       },
+      "LinkRequest": {
+        "properties": {
+          "send_email": {
+            "default": true,
+            "title": "Send Email",
+            "type": "boolean"
+          }
+        },
+        "title": "LinkRequest",
+        "type": "object"
+      },
       "ManualLeadCreate": {
         "properties": {
           "capacity_kw": {
@@ -3188,6 +3381,21 @@
           "name"
         ],
         "title": "NewDistrictRequest",
+        "type": "object"
+      },
+      "NoteRequest": {
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "NoteRequest",
         "type": "object"
       },
       "OnboardingCreate": {
@@ -5871,6 +6079,27 @@
         "title": "SeatReleaseRequest",
         "type": "object"
       },
+      "ServiceRequestCategory": {
+        "enum": [
+          "no_generation",
+          "inverter_error",
+          "physical_damage",
+          "cleaning_om",
+          "other"
+        ],
+        "title": "ServiceRequestCategory",
+        "type": "string"
+      },
+      "ServiceRequestStatus": {
+        "enum": [
+          "open",
+          "in_progress",
+          "resolved",
+          "rejected"
+        ],
+        "title": "ServiceRequestStatus",
+        "type": "string"
+      },
       "ShadingCondition": {
         "enum": [
           "none",
@@ -6011,6 +6240,36 @@
           "reason"
         ],
         "title": "StaffSiteLocationRequest",
+        "type": "object"
+      },
+      "StatusRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "status": {
+            "enum": [
+              "in_progress",
+              "resolved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusRequest",
         "type": "object"
       },
       "SubmitStageRequest": {
@@ -6175,6 +6434,29 @@
           }
         },
         "title": "TerritoryUpdateRequest",
+        "type": "object"
+      },
+      "TickRequest": {
+        "properties": {
+          "done": {
+            "default": true,
+            "title": "Done",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "TickRequest",
         "type": "object"
       },
       "TimelineEventType": {
@@ -8602,6 +8884,92 @@
         "summary": "Get Formal Proposal"
       }
     },
+    "/api/v1/associate/onboardings/{onboarding_id}/handover": {
+      "get": {
+        "description": "The handover checklist, the warranty register (once handed over) and the PDF state.",
+        "operationId": "handover_pack_api_v1_associate_onboardings__onboarding_id__handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pack"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/handover/pdf": {
+      "get": {
+        "description": "A short-lived signed URL for the handover PDF — the owner (a territory viewer only\nwhen territory_viewers_see_documents is on).",
+        "operationId": "handover_pdf_api_v1_associate_onboardings__onboarding_id__handover_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pdf"
+      }
+    },
     "/api/v1/associate/onboardings/{onboarding_id}/payments": {
       "get": {
         "operationId": "list_payments_api_v1_associate_onboardings__onboarding_id__payments_get",
@@ -9004,6 +9372,150 @@
           }
         ],
         "summary": "Request Formal Proposal"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/service-requests": {
+      "get": {
+        "operationId": "list_service_requests_api_v1_associate_onboardings__onboarding_id__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Service Requests"
+      },
+      "post": {
+        "description": "The owning associate raises a request for their customer (multipart; up to\nservice.max_photos images in `files`). 409 not_handed_over before the handover.",
+        "operationId": "raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Service Request"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/service-requests/{request_id}": {
+      "get": {
+        "operationId": "service_request_api_v1_associate_onboardings__onboarding_id__service_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request"
       }
     },
     "/api/v1/associate/onboardings/{onboarding_id}/site-location": {
@@ -12397,6 +12909,28 @@
         "summary": "Run Payment Alerts"
       }
     },
+    "/api/v1/dashboard/internal/check-service-requests": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Emails Operations once about each open\nrequest past its SLA. Idempotent; an overlapping run answers\n{\"status\": \"skipped\", \"reason\": \"already_running\"}.",
+        "operationId": "run_check_service_requests_api_v1_dashboard_internal_check_service_requests_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Check Service Requests"
+      }
+    },
     "/api/v1/dashboard/internal/check-stale-leads": {
       "post": {
         "description": "Admin or INTERNAL_API_KEY. Scans for quiet leads and fires internal follow-up\nnotifications. Idempotent — safe to call repeatedly (Cloud Scheduler calls it); an\noverlapping run answers {\"status\": \"skipped\", \"reason\": \"already_running\"}. Also\nretries proposal PDFs that never finished (app/jobs/sweeper.py): `pdfs_retried`.",
@@ -14524,6 +15058,397 @@
         "summary": "Prepare Formal Proposal"
       }
     },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover": {
+      "get": {
+        "description": "The checklist (computed items and manual ticks), whether it is complete, the\nwarranty register once handed over, the PDF state and — staff only — the customer\nlink state (never the token) and email state.",
+        "operationId": "handover_pack_api_v1_dashboard_onboardings__onboarding_id__handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pack"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/acknowledgement": {
+      "post": {
+        "description": "Operations / Admin: the customer's acknowledgement — a signature image (PNG, method\n`signature`) or an in-person tick (method `in_person`, no file).",
+        "operationId": "acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link": {
+      "post": {
+        "description": "Operations / Admin: issue a NEW customer link (any earlier one stops working),\nrender the PDF if needed and email the customer (unless send_email is false). The link\nis returned this once. 409 handover_not_recorded / handover_pdf_held.",
+        "operationId": "issue_link_api_v1_dashboard_onboardings__onboarding_id__handover_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue Link"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link/revoke": {
+      "post": {
+        "description": "Operations / Admin: the customer's link stops working at once.",
+        "operationId": "revoke_link_api_v1_dashboard_onboardings__onboarding_id__handover_link_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Link"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/om-contact": {
+      "post": {
+        "description": "Operations / Admin: the O&M contact details were (or were not) given to the customer.",
+        "operationId": "tick_om_contact_api_v1_dashboard_onboardings__onboarding_id__handover_om_contact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tick Om Contact"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/orientation": {
+      "post": {
+        "description": "Operations / Admin: the customer orientation was (or was not) given.",
+        "operationId": "tick_orientation_api_v1_dashboard_onboardings__onboarding_id__handover_orientation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tick Orientation"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf": {
+      "get": {
+        "description": "A short-lived signed URL for the rendered handover PDF (404 until it exists).",
+        "operationId": "handover_pdf_api_v1_dashboard_onboardings__onboarding_id__handover_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pdf"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf/regenerate": {
+      "post": {
+        "description": "Operations / Admin: render the handover PDF again (after the register changed or a\nfailed render). Runs in the background; poll GET .../handover `pdf.status`.",
+        "operationId": "regenerate_pdf_api_v1_dashboard_onboardings__onboarding_id__handover_pdf_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regenerate Pdf"
+      }
+    },
     "/api/v1/dashboard/onboardings/{onboarding_id}/payment-schedule": {
       "get": {
         "operationId": "get_schedule_api_v1_dashboard_onboardings__onboarding_id__payment_schedule_get",
@@ -14863,6 +15788,100 @@
           }
         ],
         "summary": "In Person Acceptance"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests": {
+      "get": {
+        "description": "Every service request for one customer, newest first.",
+        "operationId": "customer_service_requests_api_v1_dashboard_onboardings__onboarding_id__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer Service Requests"
+      },
+      "post": {
+        "description": "Operations / Admin / Engineer: raise a request on a customer's behalf (multipart;\nup to service.max_photos images in `files`). 409 not_handed_over before handover.",
+        "operationId": "raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Service Request"
       }
     },
     "/api/v1/dashboard/onboardings/{onboarding_id}/site-location": {
@@ -16942,6 +17961,430 @@
         "summary": "Send Proposal"
       }
     },
+    "/api/v1/dashboard/service-requests": {
+      "get": {
+        "description": "Service requests the caller may see, newest first. `open=true`: open or in\nprogress. `overdue=true`: past the SLA (none while service.sla_hours is null).",
+        "operationId": "service_request_queue_api_v1_dashboard_service_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ServiceRequestStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Open"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "within_warranty",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Within Warranty"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ServiceRequestCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "description": "an employee id, `me` or `unassigned`",
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "an employee id, `me` or `unassigned`",
+              "title": "Assignee"
+            }
+          },
+          {
+            "in": "query",
+            "name": "onboarding_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Onboarding Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Queue"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}": {
+      "get": {
+        "operationId": "service_request_detail_api_v1_dashboard_service_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Detail"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/assign": {
+      "post": {
+        "description": "Assign to an active Admin / Operations / Engineer employee, or unassign (null).",
+        "operationId": "assign_service_request_api_v1_dashboard_service_requests__request_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign Service Request"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/notes": {
+      "post": {
+        "description": "An internal note (never shown to the customer).",
+        "operationId": "add_service_request_note_api_v1_dashboard_service_requests__request_id__notes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Service Request Note"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/photos/{file_ref}": {
+      "get": {
+        "operationId": "service_request_photo_api_v1_dashboard_service_requests__request_id__photos__file_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_ref",
+            "required": true,
+            "schema": {
+              "title": "File Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Photo"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/status": {
+      "post": {
+        "description": "open → in_progress → resolved | rejected (open may go straight to either end).\nresolved and rejected need a note and close the request.",
+        "operationId": "set_service_request_status_api_v1_dashboard_service_requests__request_id__status_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Service Request Status"
+      }
+    },
     "/api/v1/dashboard/survey-corrections": {
       "get": {
         "description": "Correction requests, newest first. Sales sees its own or unassigned leads only.",
@@ -18595,6 +20038,165 @@
           }
         },
         "summary": "Submit Estimate Request"
+      }
+    },
+    "/api/v1/public/handover/{token}": {
+      "get": {
+        "description": "What the customer's page shows: their system, the warranty register, how to get\nservice, and whether the PDF can be downloaded.",
+        "operationId": "handover_page_api_v1_public_handover__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handover Page"
+      }
+    },
+    "/api/v1/public/handover/{token}/pdf": {
+      "get": {
+        "description": "302 to a short-lived signed URL for the handover PDF. 404 while there is none (not\nrendered yet, or held because the pack still contains placeholder text).",
+        "operationId": "handover_pdf_api_v1_public_handover__token__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handover Pdf"
+      }
+    },
+    "/api/v1/public/handover/{token}/service-requests": {
+      "get": {
+        "operationId": "list_requests_api_v1_public_handover__token__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Requests"
+      },
+      "post": {
+        "description": "The customer raises a service request (multipart; up to service.max_photos images).",
+        "operationId": "raise_request_api_v1_public_handover__token__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_request_api_v1_public_handover__token__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Raise Request"
       }
     },
     "/api/v1/public/kyc-consent": {

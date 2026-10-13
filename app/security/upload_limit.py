@@ -23,6 +23,10 @@ _EXECUTION_FILE_PATH = re.compile(
 _PAYMENT_PROOF_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/payments/\d+/proof|dashboard/payments/\d+/proof)/?$")
 _SIGNATURE_PATH = re.compile(r"^/api/v1/associate/onboardings/\d+/survey/signatures/[^/]+/?$")
+_HANDOVER_ACK_PATH = re.compile(r"^/api/v1/dashboard/onboardings/\d+/handover/acknowledgement/?$")
+_SERVICE_REQUEST_PATH = re.compile(
+    r"^/api/v1/(associate/onboardings/\d+/service-requests|dashboard/onboardings/\d+/service-requests"
+    r"|public/handover/[^/]+/service-requests)/?$")
 _FILE_ROUTES = (
     (_ONBOARDING_FILE_PATH, "app.api.routes.associate_onboarding", "MAX_FILE_BYTES"),
     (_EXECUTION_FILE_PATH, "app.execution.files", "MAX_FILE_BYTES"),
@@ -63,6 +67,17 @@ def limit_for(path: str):
     if _SIGNATURE_PATH.match(path):
         from app.survey.signatures import max_bytes   # read at call time: config decides
         return max_bytes() + MULTIPART_OVERHEAD_BYTES, f"Signature exceeds the {max_bytes() // 1024} KB limit."
+    if _HANDOVER_ACK_PATH.match(path):
+        from app.handover import config as handover_config   # read at call time: config decides
+        kb = handover_config.handover()["signature_max_kb"]
+        return kb * 1024 + MULTIPART_OVERHEAD_BYTES, f"Signature exceeds the {kb} KB limit."
+    if _SERVICE_REQUEST_PATH.match(path):
+        from app.associates import uploads
+        from app.handover import config as handover_config
+        photos = handover_config.service()["max_photos"]
+        return (uploads.MAX_DOCUMENT_BYTES * photos + MULTIPART_OVERHEAD_BYTES,
+                f"Upload exceeds the limit ({uploads.MAX_DOCUMENT_BYTES // (1024 * 1024)}MB per photo, "
+                f"{photos} photos).")
     for pattern, module, attr in _FILE_ROUTES:
         if pattern.match(path):
             import importlib

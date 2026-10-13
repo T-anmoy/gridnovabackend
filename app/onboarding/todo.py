@@ -22,6 +22,12 @@ into English, Hindi or Bengali.
     execution_next_step       todo.execution_next_step            2  (params: stage, stage_label)
     payment_due               todo.payment_due                    2  (params: milestone_number, label, outstanding)
     receipt_available         todo.receipt_available              3  (params: receipt_number) — home feed only
+    handover_pending          todo.handover_pending               3  (commissioned, not yet handed over) — home feed only
+    service_request_open      todo.service_request_open           3  (params: request_id, category, status,
+                                                                     within_warranty) — home feed only
+    service_request_closed    todo.service_request_closed         3  (params: request_id, category, outcome —
+                                                                     resolved|rejected) — home feed only, for
+                                                                     service.associate_notice_days
     commission_payout_paid    todo.commission_payout_paid         3  (params: batch_id, period, net, bank_reference,
                                                                      bank_account_last4) — home feed only; not about
                                                                      one customer, so onboarding_id/customer_name null
@@ -119,6 +125,8 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
                                message_key="todo.payment_overdue" if m["overdue"] else "todo.payment_due"))
     if include_info:
         items += _receipts(db, onboarding, name)
+        if ProjectStage.commissioned in done and ProjectStage.handover_complete not in done:
+            items.append(_item(onboarding, name, "handover_pending", 3))
     return items
 
 
@@ -205,9 +213,40 @@ def home(db: Session, associate) -> dict:
                        or o.id in unverified)
             awaiting += 1 if waiting else 0
     items += commission_items(db, associate)
+    items += service_request_items(db, own)
     items.sort(key=lambda i: (i["priority"], i["onboarding_id"] or 0))
     return {"items": items, "totals": {"customers": len(own), "awaiting_grid_nova": awaiting,
                                        "needing_action": needing}}
+
+
+def service_request_items(db: Session, onboardings: list) -> list[dict]:
+    """BE-5: open service requests, and ones closed in the last service.associate_notice_days
+    days, for the associate's own customers. One query for the whole feed."""
+    from app.handover import config as handover_config
+    from app.handover.requests import OPEN
+    from app.memory.models import ServiceRequest
+
+    if not onboardings:
+        return []
+    since = datetime.now(timezone.utc) - timedelta(days=handover_config.service()["associate_notice_days"])
+    names = {o.id: o for o in onboardings}
+    out = []
+    for req in db.execute(select(ServiceRequest).where(
+            ServiceRequest.onboarding_id.in_(list(names)),
+            (ServiceRequest.status.in_(OPEN)) | (ServiceRequest.closed_at >= since))
+            .order_by(ServiceRequest.id)).scalars():
+        customer = db.get(Customer, names[req.onboarding_id].customer_id)
+        base = {"onboarding_id": req.onboarding_id, "customer_name": customer.name if customer else None,
+                "priority": 3}
+        if req.status in OPEN:
+            out.append({"kind": "service_request_open", "message_key": "todo.service_request_open", **base,
+                        "params": {"request_id": req.id, "category": req.category.value, "status": req.status.value,
+                                   "within_warranty": req.within_warranty}})
+        else:
+            out.append({"kind": "service_request_closed", "message_key": "todo.service_request_closed", **base,
+                        "params": {"request_id": req.id, "category": req.category.value,
+                                   "outcome": req.status.value}})
+    return out
 
 
 def commission_items(db: Session, associate) -> list[dict]:

@@ -1,0 +1,57 @@
+# Grid Nova Energy — handover, warranty and service requests (Phase 6A, BE-5)
+#
+# Read by app/handover/config.py and validated at startup (a malformed file stops the app
+# from booting rather than failing mid-request).
+#
+# Confirmed by Grid Nova (Pricing & Equipment Master Data, config/price_list.yaml
+# commercial_terms): standard warranty 5 years from handover; O&M free for the first year.
+# Everything else is marked where it stands: a value carries an unconfirmed or placeholder
+# comment on its own line, text begins with DUMMY, and each has an entry in
+# config/placeholder_registry.yaml (scripts/list_placeholders.py). Resolving one is an
+# edit to this file.
+
+handover:
+  # H1 — recording `handover_complete` needs the handover pack complete. Projects already
+  # at handover_complete are never re-checked.
+  pack_required: true                     # [UNCONFIRMED]
+  # H2 — the pack's "final payment" item: every payment milestone up to and including this
+  # one is verified ("Before Commissioning", app/payments/service.py).
+  final_payment_through_milestone: 3      # [UNCONFIRMED]
+  # H3 — the customer's link (page + PDF) stops working this many days after it is issued.
+  # null: it never expires (it can still be revoked by staff).
+  link_expiry_days: null                  # [UNCONFIRMED]
+  # H4 — the customer acknowledgement is a signature image or an in-person tick.
+  acknowledgement_methods: [signature, in_person]
+  signature_max_kb: 512
+
+warranty:
+  # W1 — Grid Nova's standard system warranty, from the handover date. CONFIRMED.
+  system_warranty_years: 5
+  # W2 — product warranty per unit category when the serial register carries no dates.
+  # null: no end date is shown for that category (nothing is invented).
+  unit_default_years:
+    module: null                          # [UNCONFIRMED]
+    inverter: null                        # [UNCONFIRMED]
+    other: null                           # [UNCONFIRMED]
+  # W3 — expected panel performance life. Grid Nova's master data says "20–25 years", other
+  # system text says "25 years": not chosen here. null: not printed.
+  panel_performance_life_years: null      # [UNCONFIRMED]
+  # W4 — operations & maintenance. The first year is free (CONFIRMED); later terms are not
+  # supplied. The handover pack is held while this text is a dummy.
+  om_free_months: 12
+  om_after_free_terms: "DUMMY — O&M terms after the first free year to be supplied by Grid Nova"   # [PLACEHOLDER]
+
+service:
+  # S1 — hours within which a service request should be resolved. null: no SLA is shown and
+  # no request is ever overdue.
+  sla_hours: null                         # [UNCONFIRMED]
+  # S2 — who the customer contacts for service. null: the company's main phone / email
+  # (config/execution_payments.yaml payments.receipt.company) is printed.
+  contact:
+    phone: null                           # [UNCONFIRMED]
+    email: null                           # [UNCONFIRMED]
+  # S3 — photos a customer or associate may attach to one request.
+  max_photos: 5
+  # S4 — a resolved or rejected request stays in the owning associate's home feed this many
+  # days.
+  associate_notice_days: 7                # [UNCONFIRMED]

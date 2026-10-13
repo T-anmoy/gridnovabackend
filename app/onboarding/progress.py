@@ -146,6 +146,10 @@ def record(db: Session, onboarding: CustomerOnboarding, stage: ProjectStage, rec
         # The agreement date is the commission rate date (policy 4.1).
         from app.commissions import service as commissions
         commissions.on_agreement_signed(db, onboarding, recorded_by)
+    if stage == ProjectStage.handover_complete:
+        # Warranty register, handover pack and the customer's link (BE-5).
+        from app.handover import service as handover
+        handover.on_handover_complete(db, onboarding, recorded_by, event)
     if stage == ProjectStage.accepted:
         # The payment schedule is made against the accepted proposal's total (nothing
         # happens, and nothing fails, while there is no total yet).

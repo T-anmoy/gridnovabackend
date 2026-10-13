@@ -442,6 +442,7 @@ The jobs (one per `POST /api/v1/dashboard/internal/check-*`, all in `deploy/sche
 | `gridnova-check-payment-alerts` | Overdue milestones, unverified payments, receipt sweeper |
 | `gridnova-check-execution-alerts` | Projects stuck at an execution stage |
 | `gridnova-check-commission-queries` | Associate commission queries past their response date (BE-4, policy 4.8) — one Accounts email per run |
+| `gridnova-check-service-requests` | Warranty / O&M service requests past `service.sla_hours` (BE-5) — one Operations email per run; does nothing while no SLA is configured |
 
 ## 10. Custom domain and CORS
 

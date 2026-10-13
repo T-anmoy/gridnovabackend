@@ -60,3 +60,8 @@ jobs:
     # Associate commission queries past their response date (policy 4.8): one Accounts
     # email per run, each query alerted once (BE-4).
     schedule: "0 10 * * 1-5"      # weekdays 10:00 IST [UNCONFIRMED]
+  - name: gridnova-check-service-requests
+    path: /api/v1/dashboard/internal/check-service-requests
+    # Warranty / O&M service requests past service.sla_hours (BE-5): one Operations
+    # email per run, each request alerted once. Does nothing while no SLA is configured.
+    schedule: "50 * * * *"        # hourly at :50 [UNCONFIRMED]

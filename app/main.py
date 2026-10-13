@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.agent_governance import router as agent_governance_router
+from app.api.routes.associate_handover import router as associate_handover_router
+from app.api.routes.handover_admin import router as handover_admin_router
+from app.api.routes.public_handover import router as public_handover_router
 from app.api.routes.associate_onboarding import router as associate_onboarding_router
 from app.api.routes.associate_execution import router as associate_execution_router
 from app.api.routes.associate_equipment import router as associate_equipment_router
@@ -64,6 +67,9 @@ async def lifespan(app: FastAPI):
     # And execution/payments (config/execution_payments.yaml).
     from app.execution.config import load as load_execution_config
     load_execution_config()
+    # And handover, warranty and service requests (config/handover_warranty.yaml).
+    from app.handover.config import load as load_handover_config
+    load_handover_config()
     # And the on-site survey (config/site_survey.yaml).
     from app.survey.config import load as load_survey_config
     load_survey_config()
@@ -161,6 +167,9 @@ app.include_router(commissions_admin_router)
 app.include_router(associate_commissions_router)
 app.include_router(network_admin_router)
 app.include_router(public_receipts_router)
+app.include_router(handover_admin_router)
+app.include_router(associate_handover_router)
+app.include_router(public_handover_router)
 
 
 def _json_safe(value):

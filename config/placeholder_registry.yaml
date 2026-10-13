@@ -946,7 +946,7 @@ entries:
   - id: BE3-1
     area: policies
     location: {file: deploy/scheduler.yaml, key: jobs}
-    description: "How often the scheduled checks run (cron, IST): stale leads, onboarding escalations and survey reviews hourly; payment alerts at 09:30, 13:30 and 17:30; execution alerts daily at 09:45; overdue commission queries weekdays at 10:00 (BE-4). Chosen by engineering, not confirmed."
+    description: "How often the scheduled checks run (cron, IST): stale leads, onboarding escalations and survey reviews hourly; payment alerts at 09:30, 13:30 and 17:30; execution alerts daily at 09:45; overdue commission queries weekdays at 10:00 (BE-4); overdue service requests hourly at :50 (BE-5). Chosen by engineering, not confirmed."
     dummy_value: "hourly / 3× daily / daily"
     needed_from_grid_nova: At what times of day (and how often) should staff receive the stale-lead, escalation, survey-review, payment and stuck-project alerts?
     blocking: tunable
@@ -1059,6 +1059,80 @@ entries:
     blocking: blocks_launch
     probe: yaml_contains_marker
 
+  # ── BE-5: handover, warranty and service requests (config/handover_warranty.yaml) ──
+  - id: HW-GATE
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: handover.pack_required}
+    description: "Recording handover_complete needs the handover pack complete (commissioning report, net-meter report, verified register, final payment milestone, orientation, customer acknowledgement, O&M contact given). Chosen by engineering."
+    dummy_value: true
+    needed_from_grid_nova: Must a project's handover pack be complete before the project can be marked handed over?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: HW-MILESTONE
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: handover.final_payment_through_milestone}
+    description: "The pack's final-payment item is met when every payment milestone up to this number is verified (3 = Before Commissioning). Chosen by engineering."
+    dummy_value: 3
+    needed_from_grid_nova: Which payment must be received before handover - all three milestones, or only up to "Before Commissioning"?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: HW-LINK
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: handover.link_expiry_days}
+    description: "How long the customer's handover link stays valid. Null (never expires) until Grid Nova decides; staff can revoke a link at any time."
+    dummy_value: null (never expires)
+    needed_from_grid_nova: Should the customer's handover and service-request link expire, and after how many days?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: HW-UNIT-YEARS
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: warranty.unit_default_years}
+    description: "Product warranty years per unit category (module, inverter, other) used when the serial register carries no dates. Null: no end date is shown for that category."
+    dummy_value: null for every category
+    needed_from_grid_nova: What manufacturer product warranty (in years) applies to solar modules, inverters and other equipment when the serial number is registered without warranty dates?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: HW-PANEL-LIFE
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: warranty.panel_performance_life_years}
+    description: "Expected panel performance life. Grid Nova's master data says 20-25 years; other system text says 25 years. Null: not printed on the handover pack."
+    dummy_value: null (not stated)
+    needed_from_grid_nova: Which is correct for solar panel life - "20-25 years" (price list) or "25 years" (elsewhere)? Please choose one wording.
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: HW-OM
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: warranty.om_after_free_terms}
+    description: "O&M terms after the first free year, printed on the handover pack. The pack is held (not rendered or emailed) while this is a dummy."
+    dummy_value: "DUMMY - O&M terms after the first free year to be supplied by Grid Nova"
+    needed_from_grid_nova: What are the O&M terms after the first free year (what is covered, how often, at what price or plan)?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: HW-SLA
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: service.sla_hours}
+    description: "Hours within which a service request should be resolved. Null: no service target is shown and no request is ever overdue."
+    dummy_value: null (no SLA)
+    needed_from_grid_nova: Within how many hours should a warranty or O&M service request be resolved?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: HW-CONTACT
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: service.contact}
+    description: "The service phone / email printed on the handover pack. Null: the company's main phone and email are printed."
+    dummy_value: null (company main contact)
+    needed_from_grid_nova: Is there a dedicated phone number and email customers should use for service requests?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: HW-NOTICE
+    area: policies
+    location: {file: config/handover_warranty.yaml, key: service.associate_notice_days}
+    description: "How many days a resolved or rejected service request stays in the owning associate's home feed. Chosen by engineering."
+    dummy_value: 7
+    needed_from_grid_nova: For how many days should an associate keep seeing a closed service request on their home screen?
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.
@@ -1079,3 +1153,4 @@ exemptions:
   - {file: config/associate_documents.yaml, anchor: current_kyc_consent_version, reason: file header explaining the marker convention}
   - {file: config/associate_onboarding.yaml, anchor: current_notice_version, reason: file header explaining the marker convention}
   - {file: config/execution_payments.yaml, anchor: execution, reason: file header explaining the marker convention}
+  - {file: config/handover_warranty.yaml, anchor: handover, reason: file header explaining the marker convention}

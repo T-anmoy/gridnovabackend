@@ -80,6 +80,11 @@ class Notifier(ABC):
         """Email the customer a link to their payment receipt. (sent, reason-if-not)."""
         return False, "email_not_configured"
 
+    def send_handover_to_customer(self, customer_email: Optional[str], customer_name: Optional[str],
+                                  project_reference: str, pack_url: str) -> tuple[bool, Optional[str]]:
+        """Email the customer a link to their handover pack and warranty (BE-5)."""
+        return False, "email_not_configured"
+
     def send_associate_email(self, to: str, subject: str, lines: list[str], link_label: Optional[str] = None,
                              link_url: Optional[str] = None, event_type: str = "associate_email") -> bool:
         """One plain email to an associate (app/notifications/associate_emails.py)."""
@@ -154,14 +159,21 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "survey_review_overdue",
                       "catalogue_unmatched",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
-                      "commission_queries_overdue")
+                      "commission_queries_overdue", "handover_blocked", "service_request_raised",
+                      "service_requests_overdue")
 # Events for one team rather than all staff: sent to that team's own recipients
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
                   "dcr_mismatch": ("operations", "staff"), "catalogue_unmatched": ("operations",),
                   "payment_recorded": ("accounts",),
                   "payment_dishonoured": ("accounts", "staff"), "receipt_blocked": ("accounts",),
-                  "payments_attention": ("accounts",), "commission_queries_overdue": ("accounts",)}
+                  "payments_attention": ("accounts",), "commission_queries_overdue": ("accounts",),
+                  "handover_blocked": ("operations",), "service_request_raised": ("operations",),
+                  "service_requests_overdue": ("operations",)}
+_HANDOVER_REASONS = {"held": "its text still contains placeholders (O&M terms or company details not yet supplied)",
+                     "no_customer_email": "the customer has no email address on file",
+                     "render_failed": "the handover PDF could not be generated",
+                     "no_public_api_base_url": "PUBLIC_API_BASE_URL is not set"}
 _RECEIPT_REASONS = {"held": "it would contain placeholder text (company or wording not yet supplied)",
                     "no_customer_email": "the customer has no email address on file",
                     "render_failed": "the receipt PDF could not be generated",
@@ -267,6 +279,26 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"Receipt {payload.get('receipt_number')} (customer #{payload.get('onboarding_id')}) was not "
                  f"emailed because {reason}.", "The payment itself is verified."],
                 "Open the customer", lead_url)
+    if event_type == "handover_blocked":
+        reason = _HANDOVER_REASONS.get(str(payload.get("reason")), str(payload.get("reason")))
+        who = payload.get("customer_name") or "a customer"
+        return (f"Handover pack not sent: {who} ({payload.get('project_reference_id')})",
+                [f"The handover pack for {who} (customer #{payload.get('onboarding_id')}) was not emailed because "
+                 f"{reason}.", "The handover itself is recorded."], "Open the customer", lead_url)
+    if event_type == "service_request_raised":
+        who = payload.get("customer_name") or "a customer"
+        warranty = {True: "within warranty", False: "outside warranty"}.get(payload.get("within_warranty"),
+                                                                           "warranty not known")
+        return (f"Service request: {who} ({payload.get('project_reference_id')})",
+                [f"A service request ({str(payload.get('category')).replace('_', ' ')}) was raised for {who} by "
+                 f"{payload.get('raised_via')} ({warranty}).", f"Request #{payload.get('request_id')}."],
+                "Open the customer", lead_url)
+    if event_type == "service_requests_overdue":
+        rows = payload.get("requests") or []
+        return (f"{len(rows)} service request{'s' if len(rows) != 1 else ''} past the target time",
+                [f"Request #{r.get('request_id')} — {r.get('customer_name') or 'a customer'} "
+                 f"({r.get('project_reference_id')}), {r.get('hours_overdue')} hours past" for r in rows],
+                "Open the dashboard", f"{base_url}/dashboard")
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
     if event_type == "manager_signoff_required":
         value = payload.get("total_value")
@@ -505,6 +537,17 @@ class EmailNotifier(Notifier):
         html_body, text_body = _render(lines, "Download your receipt", receipt_url)
         sent = self._send([customer_email], f"Payment receipt {receipt_number} — Grid Nova Energy",
                           html_body, text_body, "receipt_customer_email")
+        return (True, None) if sent else (False, "send_failed")
+
+    def send_handover_to_customer(self, customer_email, customer_name, project_reference,
+                                  pack_url) -> tuple[bool, Optional[str]]:
+        lines = [f"Dear {customer_name or 'Customer'},",
+                 f"Your solar system ({project_reference}) has been handed over. Your handover pack and warranty "
+                 "details are ready.",
+                 "You can download them using the link below, and use the same link to raise a service request."]
+        html_body, text_body = _render(lines, "Download your handover pack", pack_url)
+        sent = self._send([customer_email], f"Your handover pack and warranty — {project_reference} — Grid Nova Energy",
+                          html_body, text_body, "handover_customer_email")
         return (True, None) if sent else (False, "send_failed")
 
     def send_proposal_to_customer(self, proposal_id, version, customer_email, customer_name,
