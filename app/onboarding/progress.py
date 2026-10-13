@@ -143,6 +143,9 @@ def record(db: Session, onboarding: CustomerOnboarding, stage: ProjectStage, rec
     if stage == ProjectStage.agreement_signed:
         from app.execution import service as execution
         execution.start(db, onboarding, recorded_by)
+        # The agreement date is the commission rate date (policy 4.1).
+        from app.commissions import service as commissions
+        commissions.on_agreement_signed(db, onboarding, recorded_by)
     if stage == ProjectStage.accepted:
         # The payment schedule is made against the accepted proposal's total (nothing
         # happens, and nothing fails, while there is no total yet).

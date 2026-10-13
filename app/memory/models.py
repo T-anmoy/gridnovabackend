@@ -1048,8 +1048,10 @@ APPLICATION_DOCUMENTS = ("masked_aadhaar", "pan_card", "photo", "cancelled_chequ
 class _ApplicationKyc:
     """Columns shared by both registration tables. The full Aadhaar number is never
     stored — only its last four digits, after a Verhoeff check. The bank account
-    number is stored Fernet-encrypted (app/security/encryption.py) with its last four
-    digits alongside for display."""
+    number and the PAN are stored Fernet-encrypted (app/security/encryption.py) with
+    their last four characters alongside for display; reading either back goes through
+    the audited helper app/security/pii.py (BE-4). Duplicate registrations are found by
+    the keyed HMACs in associate_identity_claims, never by the plaintext."""
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     status: Mapped[ApplicationStatus] = mapped_column(
@@ -1066,7 +1068,9 @@ class _ApplicationKyc:
     mobile: Mapped[str] = mapped_column(String(10), nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
     aadhaar_last4: Mapped[str] = mapped_column(String(4), nullable=False)
-    pan: Mapped[str] = mapped_column(String(10), nullable=False)
+    # BE-4 (migration 0048): encrypted at rest; the plaintext `pan` column is gone.
+    pan_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    pan_last4: Mapped[str] = mapped_column(String(4), nullable=False)
     bank_account_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     bank_account_last4: Mapped[str] = mapped_column(String(4), nullable=False)
     bank_ifsc: Mapped[str] = mapped_column(String(11), nullable=False)
@@ -1942,3 +1946,296 @@ class SurveyCorrectionRequest(Base):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_now)
+
+
+# ── Commissions, TDS and payouts (Phase 5A / BE-4) ──────────────────────────────
+# Commission & Payout Policy §4. app/commissions/ holds the rules; config/commissions.yaml
+# the values Grid Nova has not confirmed. Rates are versioned schedules (never edited
+# once published); entries are an append-only ledger whose amounts, once set, never
+# change — a correction is a new entry (reversal / recovery / adjustment).
+
+class CommissionRole(str, enum.Enum):
+    """Why an associate earns an entry (4.1, 4.3)."""
+    personal_sale = "personal_sale"            # the associate the customer is attributed to
+    territory_state = "territory_state"        # a State Head of the site's state
+    territory_district = "territory_district"  # the District Head of the site's district
+    territory_block = "territory_block"        # a Block Associate of the site's block
+
+
+class CommissionEntryKind(str, enum.Enum):
+    earn = "earn"              # a verified payment (4.2)
+    reversal = "reversal"      # the payment was reversed before the entry reached a payout (4.7)
+    recovery = "recovery"      # … after it reached a payout: netted against later payouts (4.7)
+    adjustment = "adjustment"  # reserved for a manual correction; no endpoint creates one yet
+
+
+class CommissionEntryStatus(str, enum.Enum):
+    earned = "earned"      # payment verified (4.4)
+    approved = "approved"  # checked by Grid Nova
+    paid = "paid"          # in a paid payout batch, with its bank reference
+    reversed = "reversed"  # an earn entry and its reversal: cancelled out, never paid
+
+
+class PayoutBatchStatus(str, enum.Enum):
+    draft = "draft"
+    approved = "approved"
+    paid = "paid"
+    cancelled = "cancelled"   # a draft discarded (its entries return to the pool)
+
+
+class CommissionQueryStatus(str, enum.Enum):
+    open = "open"
+    answered = "answered"
+
+
+class CommissionRateSchedule(Base):
+    """One published version of the commission rates (4.1). Never edited or deleted
+    (a database trigger refuses both): a change is a new version. The schedule in
+    force on a date is the one with the latest effective_from on or before it."""
+    __tablename__ = "commission_rate_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # Rates nobody has confirmed (development / staging): entries under it are recorded
+    # without an amount and no payout includes them.
+    is_placeholder: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    published_by: Mapped[str] = mapped_column(String, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class CommissionRate(Base):
+    """One rate of a schedule: a percentage of the commission basis for one rate key
+    (app/commissions/rates.py RATE_KEYS)."""
+    __tablename__ = "commission_rates"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "rate_key", name="uq_commission_rates_key"),
+        CheckConstraint("rate_percent >= 0 AND rate_percent <= 100", name="ck_commission_rates_percent"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("commission_rate_schedules.id"), nullable=False, index=True)
+    rate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    rate_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+
+
+class PayoutBatch(Base):
+    """One month's payout (4.5): draft (prepared) → approved (by someone else) → paid
+    (bank references recorded). At most one batch per month that is not cancelled —
+    the partial unique index refuses a second, however the request arrives."""
+    __tablename__ = "payout_batches"
+    __table_args__ = (
+        Index("uq_payout_batches_period", "period", unique=True,
+              sqlite_where=text("status != 'cancelled'"), postgresql_where=text("status != 'cancelled'")),
+        CheckConstraint("status NOT IN ('approved', 'paid') OR approved_by IS NOT NULL",
+                        name="ck_payout_batches_approved"),
+        CheckConstraint("status != 'paid' OR paid_at IS NOT NULL", name="ck_payout_batches_paid"),
+        CheckConstraint("status != 'cancelled' OR cancel_reason IS NOT NULL", name="ck_payout_batches_cancelled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)               # "2026-10"
+    financial_year: Mapped[str] = mapped_column(String(7), nullable=False)       # "2026-27"
+    status: Mapped[PayoutBatchStatus] = mapped_column(SAEnum(PayoutBatchStatus), nullable=False,
+                                                      default=PayoutBatchStatus.draft)
+    prepared_by: Mapped[str] = mapped_column(String, nullable=False)
+    prepared_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approval_override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    paid_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PayoutLine(Base):
+    """One associate's payout in a batch — every figure frozen when the batch is
+    prepared (the TDS ledger is these rows: FY totals are sums over them). Bank details
+    are the associate's own application's (last four digits only; the full number is
+    decrypted only into the Accounts bank export)."""
+    __tablename__ = "payout_lines"
+    __table_args__ = (UniqueConstraint("batch_id", "associate_id", name="uq_payout_lines_associate"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("payout_batches.id"), nullable=False, index=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False, index=True)
+    gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)          # positive entries
+    recoveries: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)     # negative entries, as a positive
+    carried_in: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)     # unrecovered balance brought in
+    taxable: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)        # max(gross − recoveries − carried_in, 0)
+    tds: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    net: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)            # taxable − tds
+    carry_forward: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)  # still to recover (≥ 0)
+    tds_rate_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+    pan_on_file: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fy_taxable_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    fy_tds_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    account_holder_name: Mapped[str] = mapped_column(String, nullable=False)
+    bank_account_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    bank_ifsc: Mapped[str] = mapped_column(String(11), nullable=False)
+    bank_reference: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class CommissionEntry(Base):
+    """The commission ledger (4.2–4.4, 4.7). Append-only: never deleted, and the
+    amount, rate, basis and parties of an entry never change once set (database
+    triggers refuse it). An entry recorded while its rate cannot be known yet carries
+    pending_reason and no amount; rating it later fills the amount in once.
+    Status moves earned → approved → paid (or earned/approved → reversed)."""
+    __tablename__ = "commission_entries"
+    __table_args__ = (
+        Index("ix_commission_entries_associate_status", "associate_id", "status"),
+        Index("ix_commission_entries_payment", "payment_id"),
+        Index("ix_commission_entries_project", "project_id"),
+        Index("ix_commission_entries_batch", "batch_id"),
+        Index("ix_commission_entries_created_at", "created_at"),
+        # One earn entry per payment, associate and role — a second verification hook
+        # (or a race) cannot pay twice.
+        Index("uq_commission_entries_earn_once", "payment_id", "associate_id", "earning_role", unique=True,
+              sqlite_where=text("kind = 'earn'"), postgresql_where=text("kind = 'earn'")),
+        CheckConstraint(
+            "(kind = 'earn' AND reverses_entry_id IS NULL AND payment_id IS NOT NULL "
+            "AND (amount IS NULL OR amount >= 0)) OR "
+            "(kind IN ('reversal', 'recovery') AND reverses_entry_id IS NOT NULL AND (amount IS NULL OR amount <= 0)) OR "
+            "(kind = 'adjustment' AND reverses_entry_id IS NULL AND amount IS NOT NULL AND reason IS NOT NULL)",
+            name="ck_commission_entries_shape"),
+        CheckConstraint("(amount IS NULL AND pending_reason IS NOT NULL) OR "
+                        "(amount IS NOT NULL AND pending_reason IS NULL)", name="ck_commission_entries_pending"),
+        CheckConstraint("status != 'paid' OR batch_id IS NOT NULL", name="ck_commission_entries_paid"),
+        CheckConstraint("status NOT IN ('approved', 'paid') OR (approved_by IS NOT NULL AND amount IS NOT NULL)",
+                        name="ck_commission_entries_approved"),
+        CheckConstraint("holders >= 1", name="ck_commission_entries_holders"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    earning_role: Mapped[CommissionRole] = mapped_column(SAEnum(CommissionRole), nullable=False)
+    kind: Mapped[CommissionEntryKind] = mapped_column(SAEnum(CommissionEntryKind), nullable=False)
+    status: Mapped[CommissionEntryStatus] = mapped_column(SAEnum(CommissionEntryStatus), nullable=False,
+                                                          default=CommissionEntryStatus.earned)
+    onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    payment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payments.id"), nullable=True)
+    # The amount the rate applies to (config commissions.basis) — NULL while unknown.
+    basis_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    rate_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 4), nullable=True)
+    # Seat holders sharing a territory rate (multiple_territory_holders: split_equally).
+    holders: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    schedule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commission_rate_schedules.id"), nullable=True)
+    # placeholder_rates | agreement_not_signed | basis_unavailable — NULL once rated.
+    pending_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # The date the customer's agreement was signed (IST) — the rate date (4.1).
+    agreement_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    reverses_entry_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commission_entries.id"), unique=True,
+                                                             nullable=True)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payout_batches.id"), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    rated_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class CommissionQuery(Base):
+    """An associate's query about one of their entries (4.8). Raised within
+    queries.window_days of the entry appearing; due queries.response_working_days
+    working days later. At most one open query per entry."""
+    __tablename__ = "commission_queries"
+    __table_args__ = (
+        Index("ix_commission_queries_status_due", "status", "due_at"),
+        Index("ix_commission_queries_associate", "associate_id"),
+        Index("uq_commission_queries_one_open", "entry_id", unique=True,
+              sqlite_where=text("status = 'open'"), postgresql_where=text("status = 'open'")),
+        CheckConstraint("status != 'answered' OR (response IS NOT NULL AND responded_by IS NOT NULL)",
+                        name="ck_commission_queries_answered"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("commission_entries.id"), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[CommissionQueryStatus] = mapped_column(SAEnum(CommissionQueryStatus), nullable=False,
+                                                          default=CommissionQueryStatus.open)
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    responded_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    responded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    due_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    overdue_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+# Rate schedules and their rates are never edited or deleted once published.
+COMMISSION_SCHEDULES_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION commission_schedules_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION USING MESSAGE = TG_TABLE_NAME || ' is append-only: publish a new schedule version';
+END;
+$$ LANGUAGE plpgsql
+"""
+COMMISSION_SCHEDULES_PG_TRIGGERS = tuple(
+    f"CREATE TRIGGER {t}_append_only BEFORE UPDATE OR DELETE ON {t} "
+    f"FOR EACH ROW EXECUTE FUNCTION commission_schedules_append_only()"
+    for t in ("commission_rate_schedules", "commission_rates")
+)
+COMMISSION_SCHEDULES_SQLITE_TRIGGERS = tuple(
+    f"CREATE TRIGGER {t}_no_{op.lower()} BEFORE {op} ON {t} "
+    f"BEGIN SELECT RAISE(ABORT, '{t} is append-only: publish a new schedule version'); END"
+    for t in ("commission_rate_schedules", "commission_rates") for op in ("UPDATE", "DELETE")
+)
+
+# A commission entry is never deleted, and what it says — who, why, for which payment,
+# on what basis, at what rate, for how much — never changes once set. Status, approval,
+# batch and pending_reason move; a NULL amount/rate/basis/agreement date/schedule may be
+# filled in once (rating a pending entry).
+_ENTRY_FIXED = ("associate_id", "earning_role", "kind", "payment_id", "onboarding_id", "project_id",
+                "reverses_entry_id", "created_by", "created_at", "holders")
+_ENTRY_SET_ONCE = ("amount", "rate_percent", "basis_amount", "agreement_date", "schedule_id")
+COMMISSION_ENTRIES_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION commission_entries_guard() RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'commission_entries is append-only';
+    END IF;
+    IF """ + " OR ".join(f"NEW.{c} IS DISTINCT FROM OLD.{c}" for c in _ENTRY_FIXED) + " OR " + " OR ".join(
+    f"(OLD.{c} IS NOT NULL AND NEW.{c} IS DISTINCT FROM OLD.{c})" for c in _ENTRY_SET_ONCE) + """ THEN
+        RAISE EXCEPTION 'commission_entries: a recorded amount is never changed; write a new entry';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+"""
+COMMISSION_ENTRIES_PG_TRIGGER = (
+    "CREATE TRIGGER commission_entries_guard BEFORE UPDATE OR DELETE ON commission_entries "
+    "FOR EACH ROW EXECUTE FUNCTION commission_entries_guard()"
+)
+COMMISSION_ENTRIES_SQLITE_TRIGGERS = (
+    "CREATE TRIGGER commission_entries_no_delete BEFORE DELETE ON commission_entries "
+    "BEGIN SELECT RAISE(ABORT, 'commission_entries is append-only'); END",
+    "CREATE TRIGGER commission_entries_guard BEFORE UPDATE ON commission_entries WHEN "
+    + " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in _ENTRY_FIXED) + " OR "
+    + " OR ".join(f"(OLD.{c} IS NOT NULL AND NEW.{c} IS NOT OLD.{c})" for c in _ENTRY_SET_ONCE)
+    + " BEGIN SELECT RAISE(ABORT, 'commission_entries: a recorded amount is never changed; write a new entry'); END",
+)
+for _table in (CommissionRateSchedule.__table__, CommissionRate.__table__):
+    event.listen(_table, "after_create", DDL(COMMISSION_SCHEDULES_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(CommissionRateSchedule.__table__, "after_create",
+             DDL(COMMISSION_SCHEDULES_PG_TRIGGERS[0]).execute_if(dialect="postgresql"))
+event.listen(CommissionRate.__table__, "after_create",
+             DDL(COMMISSION_SCHEDULES_PG_TRIGGERS[1]).execute_if(dialect="postgresql"))
+for _sql in COMMISSION_SCHEDULES_SQLITE_TRIGGERS:
+    _target = CommissionRate.__table__ if " ON commission_rates " in _sql else CommissionRateSchedule.__table__
+    event.listen(_target, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+event.listen(CommissionEntry.__table__, "after_create",
+             DDL(COMMISSION_ENTRIES_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(CommissionEntry.__table__, "after_create",
+             DDL(COMMISSION_ENTRIES_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in COMMISSION_ENTRIES_SQLITE_TRIGGERS:
+    event.listen(CommissionEntry.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))

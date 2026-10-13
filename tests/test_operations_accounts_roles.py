@@ -36,7 +36,9 @@ def restricted_headers(role: str, employee_id: str = "emp-restricted-1") -> dict
 # Every can_*() gate each role is granted. Anything else must deny.
 GRANTED = {
     "operations": {"can_view_execution", "can_verify_execution", "can_record_execution"},
-    "accounts": {"can_view_payments", "can_record_payment", "can_process_payments"},
+    "accounts": {"can_view_payments", "can_record_payment", "can_process_payments",
+                 # BE-4: commissions and payouts; the bank file is Accounts only.
+                 "can_view_commissions", "can_process_commissions", "can_export_payout_bank_file"},
 }
 
 

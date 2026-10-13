@@ -55,3 +55,8 @@ jobs:
     path: /api/v1/dashboard/internal/check-execution-alerts
     # Projects stuck at an execution stage (thresholds: placeholder E2, in days).
     schedule: "45 9 * * *"        # daily 09:45 IST [UNCONFIRMED]
+  - name: gridnova-check-commission-queries
+    path: /api/v1/dashboard/internal/check-commission-queries
+    # Associate commission queries past their response date (policy 4.8): one Accounts
+    # email per run, each query alerted once (BE-4).
+    schedule: "0 10 * * 1-5"      # weekdays 10:00 IST [UNCONFIRMED]

@@ -153,14 +153,15 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
                       "survey_review_overdue",
                       "catalogue_unmatched",
-                      "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention")
+                      "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
+                      "commission_queries_overdue")
 # Events for one team rather than all staff: sent to that team's own recipients
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
                   "dcr_mismatch": ("operations", "staff"), "catalogue_unmatched": ("operations",),
                   "payment_recorded": ("accounts",),
                   "payment_dishonoured": ("accounts", "staff"), "receipt_blocked": ("accounts",),
-                  "payments_attention": ("accounts",)}
+                  "payments_attention": ("accounts",), "commission_queries_overdue": ("accounts",)}
 _RECEIPT_REASONS = {"held": "it would contain placeholder text (company or wording not yet supplied)",
                     "no_customer_email": "the customer has no email address on file",
                     "render_failed": "the receipt PDF could not be generated",
@@ -359,6 +360,22 @@ def _render_payments_attention(payload: dict, base_url: str) -> tuple[str, str, 
     return subject, f"<div><ul>{''.join(rows_html)}</ul></div>", "\n".join(rows_text)
 
 
+def _render_commission_queries_overdue(payload: dict, base_url: str) -> tuple[str, str, str]:
+    items = payload.get("queries") or []
+    subject = f"Commission queries past their response date: {len(items)}"
+    url = f"{base_url}/dashboard/commission-queries"
+    rows_html, rows_text = [], []
+    for item in items:
+        line = (f"Query #{item.get('query_id')} from {item.get('associate_name') or item.get('associate_id')} "
+                f"on commission entry #{item.get('entry_id')} — due {item.get('due_at')}")
+        rows_html.append(f"<li>{_esc(line)}</li>")
+        rows_text.append(f"- {line}")
+    intro = "These associate queries have passed the response time in the Commission & Payout Policy."
+    return subject, (f"<div><p>{_esc(intro)}</p><ul>{''.join(rows_html)}</ul>"
+                     f'<p><a href="{_esc(url)}">Open the query queue</a></p></div>'), \
+        intro + "\n\n" + "\n".join(rows_text) + f"\n\nOpen the query queue: {url}"
+
+
 def _render(lines: list[str], link_label: Optional[str] = None, link_url: Optional[str] = None) -> tuple[str, str]:
     """(html, text) bodies. Every interpolated value is escaped — customer names and
     anything else a visitor typed end up here."""
@@ -434,6 +451,10 @@ class EmailNotifier(Notifier):
                 if not payload.get("surveys"):
                     return
                 subject, html_body, text_body = _render_survey_review_overdue(payload, self._base_url)
+            elif event_type == "commission_queries_overdue":
+                if not payload.get("queries"):
+                    return
+                subject, html_body, text_body = _render_commission_queries_overdue(payload, self._base_url)
             else:
                 message = _staff_message(event_type, payload, self._base_url)
                 if message is None:

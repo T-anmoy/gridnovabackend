@@ -462,6 +462,10 @@ def verify(db: Session, payment_id: int, actor: str, *, is_admin: bool = False,
                         performed_by=actor, after_value={"recorded_by": payment.recorded_by, "reason": override}))
     from app.payments import receipts
     receipts.on_verified(db, payment, onboarding_of(db, payment), actor)
+    # Commission is earned on verification (policy 4.2) — in this transaction, under
+    # this payment's row lock (app/commissions/service.py).
+    from app.commissions import service as commissions
+    commissions.on_payment_verified(db, payment, actor)
     return payment
 
 
@@ -492,6 +496,10 @@ def dishonour(db: Session, payment_id: int, actor: str, reason: str) -> Payment:
     if reversal is not None:
         from app.payments import receipts
         receipts.void(db, payment, actor, reason)
+        # The same state change reverses the commission earned on it (policy 4.7) —
+        # same transaction as the ledger reversal and the void receipt.
+        from app.commissions import service as commissions
+        commissions.on_payment_reversed(db, payment, actor, reason)
     db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="dishonoured", performed_by=actor,
                     before_value={"status": before},
                     after_value={"status": "dishonoured", "reason": reason,

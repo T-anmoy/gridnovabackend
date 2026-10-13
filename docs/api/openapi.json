@@ -75,6 +75,42 @@
         "title": "ApplicationStatusRequest",
         "type": "object"
       },
+      "ApproveBatchIn": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "ApproveBatchIn",
+        "type": "object"
+      },
+      "ApproveEntriesIn": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Entry Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entry_ids"
+        ],
+        "title": "ApproveEntriesIn",
+        "type": "object"
+      },
       "ApproveRequest": {
         "properties": {
           "verification_call_completed": {
@@ -181,6 +217,21 @@
           "slots"
         ],
         "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "BatchIn": {
+        "properties": {
+          "period": {
+            "maxLength": 7,
+            "minLength": 7,
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period"
+        ],
+        "title": "BatchIn",
         "type": "object"
       },
       "Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post": {
@@ -1186,6 +1237,45 @@
         ],
         "title": "ClearReverification",
         "type": "object"
+      },
+      "CommissionEntryKind": {
+        "enum": [
+          "earn",
+          "reversal",
+          "recovery",
+          "adjustment"
+        ],
+        "title": "CommissionEntryKind",
+        "type": "string"
+      },
+      "CommissionEntryStatus": {
+        "enum": [
+          "earned",
+          "approved",
+          "paid",
+          "reversed"
+        ],
+        "title": "CommissionEntryStatus",
+        "type": "string"
+      },
+      "CommissionQueryStatus": {
+        "enum": [
+          "open",
+          "answered"
+        ],
+        "title": "CommissionQueryStatus",
+        "type": "string"
+      },
+      "CommissionRole": {
+        "description": "Why an associate earns an entry (4.1, 4.3).",
+        "enum": [
+          "personal_sale",
+          "territory_state",
+          "territory_district",
+          "territory_block"
+        ],
+        "title": "CommissionRole",
+        "type": "string"
       },
       "ConnectionPhase": {
         "enum": [
@@ -2788,6 +2878,23 @@
           "source"
         ],
         "title": "ManualLeadCreate",
+        "type": "object"
+      },
+      "MarkPaidIn": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PaidLineIn"
+            },
+            "maxItems": 5000,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "MarkPaidIn",
         "type": "object"
       },
       "MatchIn": {
@@ -4609,6 +4716,27 @@
         "title": "OverrideIn",
         "type": "object"
       },
+      "PaidLineIn": {
+        "properties": {
+          "associate_id": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "bank_reference": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Bank Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "associate_id"
+        ],
+        "title": "PaidLineIn",
+        "type": "object"
+      },
       "PaymentIn": {
         "properties": {
           "amount": {
@@ -4713,6 +4841,16 @@
           "cancelled"
         ],
         "title": "PaymentStatus",
+        "type": "string"
+      },
+      "PayoutBatchStatus": {
+        "enum": [
+          "draft",
+          "approved",
+          "paid",
+          "cancelled"
+        ],
+        "title": "PayoutBatchStatus",
         "type": "string"
       },
       "PipelineStage": {
@@ -5327,18 +5465,19 @@
         "title": "PublicEstimateRequest",
         "type": "object"
       },
-      "ReasonIn": {
+      "QueryIn": {
         "properties": {
-          "reason": {
+          "message": {
             "maxLength": 2000,
-            "title": "Reason",
+            "minLength": 1,
+            "title": "Message",
             "type": "string"
           }
         },
         "required": [
-          "reason"
+          "message"
         ],
-        "title": "ReasonIn",
+        "title": "QueryIn",
         "type": "object"
       },
       "RecordExecutionStageRequest": {
@@ -5470,6 +5609,21 @@
           "note"
         ],
         "title": "ResolveRequest",
+        "type": "object"
+      },
+      "RespondIn": {
+        "properties": {
+          "response": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response"
+        ],
+        "title": "RespondIn",
         "type": "object"
       },
       "ReviewRequest": {
@@ -5627,22 +5781,6 @@
           "width_m"
         ],
         "title": "RoofSection",
-        "type": "object"
-      },
-      "ScheduleIn": {
-        "properties": {
-          "milestones": {
-            "items": {
-              "$ref": "#/components/schemas/MilestoneIn"
-            },
-            "title": "Milestones",
-            "type": "array"
-          }
-        },
-        "required": [
-          "milestones"
-        ],
-        "title": "ScheduleIn",
         "type": "object"
       },
       "ScheduleMeetingRequest": {
@@ -6619,6 +6757,90 @@
         "title": "EstimateRequest",
         "type": "object"
       },
+      "app__api__routes__associate_payments__ReasonIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonIn",
+        "type": "object"
+      },
+      "app__api__routes__commissions_admin__ReasonIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonIn",
+        "type": "object"
+      },
+      "app__api__routes__commissions_admin__ScheduleIn": {
+        "properties": {
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "is_placeholder": {
+            "default": false,
+            "title": "Is Placeholder",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "rates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Rates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "effective_from",
+          "rates"
+        ],
+        "title": "ScheduleIn",
+        "type": "object"
+      },
+      "app__api__routes__payments_admin__ScheduleIn": {
+        "properties": {
+          "milestones": {
+            "items": {
+              "$ref": "#/components/schemas/MilestoneIn"
+            },
+            "title": "Milestones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "milestones"
+        ],
+        "title": "ScheduleIn",
+        "type": "object"
+      },
       "app__api__routes__proposal_inputs__ConsumptionMonth": {
         "properties": {
           "bill_inr": {
@@ -6905,6 +7127,188 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/associate/commissions": {
+      "get": {
+        "description": "The caller's own commission entries, newest first, with a summary.",
+        "operationId": "my_commissions_api_v1_associate_commissions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Commissions"
+      }
+    },
+    "/api/v1/associate/commissions/{entry_id}/queries": {
+      "get": {
+        "operationId": "entry_queries_api_v1_associate_commissions__entry_id__queries_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Entry Queries"
+      },
+      "post": {
+        "description": "Query one of your own entries (within queries.window_days of it appearing).",
+        "operationId": "raise_query_api_v1_associate_commissions__entry_id__queries_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Query"
+      }
+    },
     "/api/v1/associate/equipment": {
       "get": {
         "description": "Active catalogue items. `category`: module | inverter | structure | bos_component.\n`q`: case-insensitive match on brand or model name.",
@@ -8318,7 +8722,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -9050,6 +9454,28 @@
           }
         ],
         "summary": "Payment Instructions"
+      }
+    },
+    "/api/v1/associate/payouts": {
+      "get": {
+        "description": "The caller's payouts in approved or paid batches, newest month first.",
+        "operationId": "my_payouts_api_v1_associate_payouts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Payouts"
       }
     },
     "/api/v1/associate/territory/members": {
@@ -10235,6 +10661,577 @@
         "summary": "Get Audit Log"
       }
     },
+    "/api/v1/dashboard/commission-queries": {
+      "get": {
+        "description": "Associate queries, oldest due first. `overdue=true`: open and past due.",
+        "operationId": "list_commission_queries_api_v1_dashboard_commission_queries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionQueryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Commission Queries"
+      }
+    },
+    "/api/v1/dashboard/commission-queries/{query_id}/respond": {
+      "post": {
+        "description": "Accounts/Admin answer a query (once). The associate sees it on their home feed.",
+        "operationId": "respond_to_commission_query_api_v1_dashboard_commission_queries__query_id__respond_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_id",
+            "required": true,
+            "schema": {
+              "title": "Query Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Respond To Commission Query"
+      }
+    },
+    "/api/v1/dashboard/commission-rate-schedules": {
+      "get": {
+        "description": "Every published version, newest first, and which is in force today.",
+        "operationId": "list_rate_schedules_api_v1_dashboard_commission_rate_schedules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Rate Schedules"
+      },
+      "post": {
+        "description": "Admin: publish a new version (never an edit). Every rate key is required.",
+        "operationId": "publish_rate_schedule_api_v1_dashboard_commission_rate_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ScheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Rate Schedule"
+      }
+    },
+    "/api/v1/dashboard/commission-rate-schedules/{schedule_id}/re-rate": {
+      "post": {
+        "description": "Admin, audited: compute every entry still waiting for confirmed rates — at the\nschedule in force on its agreement date where that is a real schedule, otherwise\nat this (real) schedule.",
+        "operationId": "re_rate_api_v1_dashboard_commission_rate_schedules__schedule_id__re_rate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Re Rate"
+      }
+    },
+    "/api/v1/dashboard/commissions": {
+      "get": {
+        "description": "The commission ledger, newest first. Dates are IST days on created_at.",
+        "operationId": "list_commissions_api_v1_dashboard_commissions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "associate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Associate Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "earning_role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionRole"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Earning Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pending",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pending"
+            }
+          },
+          {
+            "in": "query",
+            "name": "onboarding_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Onboarding Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "payment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Payment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "batch_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Batch Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Commissions"
+      }
+    },
+    "/api/v1/dashboard/commissions/approve": {
+      "post": {
+        "description": "earned → approved, all or nothing (409 entries_not_approvable lists why each\nrefused entry cannot be approved).",
+        "operationId": "approve_commissions_api_v1_dashboard_commissions_approve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveEntriesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Commissions"
+      }
+    },
+    "/api/v1/dashboard/commissions/{entry_id}/reverse": {
+      "post": {
+        "description": "Admin (policy 4.7): reverse commission obtained through false information or a\nbreach of the Network Terms. Not yet paid out → a reversal; already in an\napproved or paid batch → a recovery from the next payouts.",
+        "operationId": "reverse_commission_api_v1_dashboard_commissions__entry_id__reverse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reverse Commission"
+      }
+    },
     "/api/v1/dashboard/customers/{customer_id}/memory": {
       "get": {
         "description": "Everything remembered about one customer — the profile, then the raw\nmemories. This is the audit view: what the agent believes and why.",
@@ -10837,6 +11834,73 @@
         "summary": "Verify Submission"
       }
     },
+    "/api/v1/dashboard/exports/commissions.csv": {
+      "get": {
+        "operationId": "export_commissions_api_v1_dashboard_exports_commissions_csv_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Commissions"
+      }
+    },
     "/api/v1/dashboard/exports/ledger.csv": {
       "get": {
         "operationId": "export_ledger_api_v1_dashboard_exports_ledger_csv_get",
@@ -10971,6 +12035,49 @@
         "summary": "Export Payments"
       }
     },
+    "/api/v1/dashboard/exports/payout-bank-{batch_id}.csv": {
+      "get": {
+        "description": "Accounts only: the bank upload file for an approved (or paid) batch — the only\nplace a full account number leaves the system. Every export is audited.",
+        "operationId": "export_payout_bank_api_v1_dashboard_exports_payout_bank__batch_id__csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Payout Bank"
+      }
+    },
     "/api/v1/dashboard/exports/receipts.csv": {
       "get": {
         "operationId": "export_receipts_api_v1_dashboard_exports_receipts_csv_get",
@@ -11036,6 +12143,56 @@
           }
         ],
         "summary": "Export Receipts"
+      }
+    },
+    "/api/v1/dashboard/exports/tds.csv": {
+      "get": {
+        "description": "One row per payout line of the financial year (default: the current one), with\nthe associate's PAN — decrypted through the audited helper.",
+        "operationId": "export_tds_api_v1_dashboard_exports_tds_csv_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "financial_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Financial Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Tds"
       }
     },
     "/api/v1/dashboard/governance/activity": {
@@ -11150,6 +12307,28 @@
           }
         ],
         "summary": "Governance Runs"
+      }
+    },
+    "/api/v1/dashboard/internal/check-commission-queries": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Emails Accounts once about each open\nquery past its due time. Idempotent; an overlapping run answers\n{\"status\": \"skipped\", \"reason\": \"already_running\"}.",
+        "operationId": "run_check_commission_queries_api_v1_dashboard_internal_check_commission_queries_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Check Commission Queries"
       }
     },
     "/api/v1/dashboard/internal/check-execution-alerts": {
@@ -12043,6 +13222,74 @@
           }
         ],
         "summary": "Ask Customer Memory"
+      }
+    },
+    "/api/v1/dashboard/network/summary": {
+      "get": {
+        "description": "Counts and money for the whole network. The period (IST days, inclusive)\ndefaults to this month so far and applies to revenue and commission figures.",
+        "operationId": "network_summary_api_v1_dashboard_network_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Network Summary"
       }
     },
     "/api/v1/dashboard/onboardings": {
@@ -13335,7 +14582,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleIn"
+                "$ref": "#/components/schemas/app__api__routes__payments_admin__ScheduleIn"
               }
             }
           },
@@ -14294,7 +15541,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -14388,7 +15635,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -14615,6 +15862,303 @@
           }
         ],
         "summary": "Verify"
+      }
+    },
+    "/api/v1/dashboard/payout-batches": {
+      "get": {
+        "operationId": "list_payout_batches_api_v1_dashboard_payout_batches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PayoutBatchStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Payout Batches"
+      },
+      "post": {
+        "description": "Accounts/Admin: prepare the batch for a month that has ended.",
+        "operationId": "create_payout_batch_api_v1_dashboard_payout_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}": {
+      "get": {
+        "operationId": "get_payout_batch_api_v1_dashboard_payout_batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/approve": {
+      "post": {
+        "description": "Accounts/Admin, never the preparer (an Admin may, with a reason).",
+        "operationId": "approve_payout_batch_api_v1_dashboard_payout_batches__batch_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ApproveBatchIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/cancel": {
+      "post": {
+        "description": "Accounts/Admin: discard a draft (its entries can be batched again).",
+        "operationId": "cancel_payout_batch_api_v1_dashboard_payout_batches__batch_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/mark-paid": {
+      "post": {
+        "description": "Accounts/Admin: the bank reference of every transfer, in one call.",
+        "operationId": "mark_payout_batch_paid_api_v1_dashboard_payout_batches__batch_id__mark_paid_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkPaidIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Payout Batch Paid"
       }
     },
     "/api/v1/dashboard/placeholders": {

@@ -8,9 +8,9 @@ with the old key (before BE-3 the claim key was derived from FERNET_ENCRYPTION_K
 again whenever IDENTITY_HMAC_KEY itself is changed. A fresh staging or production
 database has no old claims and never needs it.
 
-Each claim is recomputed from its application's stored data — PAN, mobile, the bank
-account (decrypted with FERNET_ENCRYPTION_KEY), and Aadhaar last 4 + date of birth +
-name — exactly as app/associates/service.identity_claims() signs a new registration, so
+Each claim is recomputed from its application's stored data — PAN and bank account
+(decrypted with FERNET_ENCRYPTION_KEY through the audited helper app/security/pii.py),
+mobile, and Aadhaar last 4 + date of birth + name — exactly as app/associates/service.identity_claims() signs a new registration, so
 the result does not depend on the old key at all. Idempotent: a second run changes
 nothing. Until it has run, duplicate detection does not recognise the old claims.
 """
@@ -30,10 +30,13 @@ from sqlalchemy.orm import Session  # noqa: E402
 from app.config import settings  # noqa: E402
 
 
+ACTOR = "script:rehash_identity_claims"
+
+
 def rehash(db: Session) -> dict:
     from app.associates import service, validation
     from app.memory.models import AssociateIdentityClaim
-    from app.security.encryption import decrypt
+    from app.security import pii
 
     key = service.identity_claim_key()
     counts = {"claims": 0, "changed": 0, "missing_application": 0}
@@ -45,7 +48,9 @@ def rehash(db: Session) -> dict:
         if owner not in expected:
             app = service.get_application(db, *owner)
             expected[owner] = {} if app is None else service.identity_claims(
-                pan=app.pan, mobile=app.mobile, ifsc=app.bank_ifsc, account=decrypt(app.bank_account_encrypted),
+                pan=pii.reveal(db, app, "pan", actor=ACTOR, purpose="identity_claim_rehash"), mobile=app.mobile,
+                ifsc=app.bank_ifsc,
+                account=pii.reveal(db, app, "bank_account", actor=ACTOR, purpose="identity_claim_rehash"),
                 aadhaar_last4=app.aadhaar_last4, dob=app.date_of_birth,
                 name_key=validation.name_key(app.full_name), key=key)
         if not expected[owner]:

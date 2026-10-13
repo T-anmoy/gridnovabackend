@@ -432,6 +432,17 @@ deployers. A run that overlaps the previous one answers `{"status": "skipped", "
 "already_running"}` — retries never double an alert. The schedules themselves are not
 confirmed by Grid Nova (placeholder BE3-1).
 
+The jobs (one per `POST /api/v1/dashboard/internal/check-*`, all in `deploy/scheduler.yaml`):
+
+| Job | What it does |
+|---|---|
+| `gridnova-check-stale-leads` | Quiet-lead alerts and the proposal-PDF sweeper |
+| `gridnova-check-onboarding-escalations` | Overdue associate-customer verification calls move up the chain |
+| `gridnova-check-survey-reviews` | Surveys waiting past their review target |
+| `gridnova-check-payment-alerts` | Overdue milestones, unverified payments, receipt sweeper |
+| `gridnova-check-execution-alerts` | Projects stuck at an execution stage |
+| `gridnova-check-commission-queries` | Associate commission queries past their response date (BE-4, policy 4.8) — one Accounts email per run |
+
 ## 10. Custom domain and CORS
 
 Cloud Run domain mappings are **not available in asia-south1** (and are Preview

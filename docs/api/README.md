@@ -15,6 +15,7 @@ these files disagree, the code wins — fix the file.
 | [be1_public_contracts.md](be1_public_contracts.md) | BE-1: website chat sessions (`session_token`), paged leads list, accept-link codes, public booking limits, estimate-request calculator fields, health, auth changes, territory documents, validation, CSV, PDFs |
 | [be3_deploy_contracts.md](be3_deploy_contracts.md) | BE-3: associate approval answers before the invitation/PDFs, scheduled-job `skipped` answer and new counters, readiness cache, stricter token claims, per-instance rate limits |
 | [staff_contracts.md](staff_contracts.md) | BE-6: response shapes, roles, scoping and error strings for the staff lead endpoints (list/detail/assign/fields/stage/export/schedule-meeting), customer memory, memory ask and reflect; server-side lead filters; chat `locale` |
+| [commissions.md](commissions.md) | BE-4: commission rate schedules, the commission ledger (earn / reversal / recovery), approval, monthly payout batches and TDS, Accounts exports (commissions, TDS, payout bank file), commission queries and their overdue job, the associate commission/payout views and home-feed items, the network summary; PAN encrypted at rest |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)

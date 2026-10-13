@@ -946,10 +946,117 @@ entries:
   - id: BE3-1
     area: policies
     location: {file: deploy/scheduler.yaml, key: jobs}
-    description: "How often the scheduled checks run (cron, IST): stale leads, onboarding escalations and survey reviews hourly; payment alerts at 09:30, 13:30 and 17:30; execution alerts daily at 09:45. Chosen by engineering, not confirmed."
+    description: "How often the scheduled checks run (cron, IST): stale leads, onboarding escalations and survey reviews hourly; payment alerts at 09:30, 13:30 and 17:30; execution alerts daily at 09:45; overdue commission queries weekdays at 10:00 (BE-4). Chosen by engineering, not confirmed."
     dummy_value: "hourly / 3× daily / daily"
     needed_from_grid_nova: At what times of day (and how often) should staff receive the stale-lead, escalation, survey-review, payment and stuck-project alerts?
     blocking: tunable
+    probe: yaml_contains_marker
+
+  # ── BE-4: commissions, TDS and payouts (Commission & Payout Policy §4) ───────────
+  - id: C5-RATES
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions}
+    description: "No confirmed commission rate schedule is published. Until an Admin publishes one (POST /api/v1/dashboard/commission-rate-schedules, not a placeholder), commission entries are recorded with their basis but no amount, and no payout batch can include them (409 placeholder_rates)."
+    dummy_value: no published non-placeholder schedule
+    needed_from_grid_nova: What commission percentage applies to each associate type, capability and level (Sales Associate, Execution Associate, State Head, District Head, Block Associate) for their own customers, and what territory commission do State Heads, District Heads and Block Associates earn on their territory?
+    blocking: blocks_launch
+    probe: count_query
+    query: commission_rates_not_confirmed
+  - id: C5-1
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.rate_change_notice_days}
+    description: Days of notice before a new commission rate schedule takes effect (policy 4.1 / A14 draft "[15]").
+    dummy_value: 15
+    needed_from_grid_nova: How many days' notice will Grid Nova give associates before a commission rate change takes effect?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: C5-2
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.basis}
+    description: "What a commission percentage is applied to: the verified amount without GST (basic_pro_rata, default) or the verified amount as received (gross). Custom-quoted proposals have no stored basic price, so under basic_pro_rata their entries wait (basis_unavailable)."
+    dummy_value: basic_pro_rata
+    needed_from_grid_nova: Is commission calculated on the amount the customer paid including GST, or on the price before GST?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: C5-3
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.territory_seat_holder_at}
+    description: "Which seat holder earns a territory commission when a seat changes hands: the holder on the agreement-signed date (default) or on the payment-verified date."
+    dummy_value: agreement_signed
+    needed_from_grid_nova: When a State Head, District Head or Block Associate seat changes hands, who earns the territory commission on a customer's payments — the holder when the customer signed the agreement, or the holder when each payment is verified?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-4
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.agreement_date_source}
+    description: "\"The date the customer's agreement is signed\" (policy 4.1, which fixes the rate) is taken as the day the signed agreement is recorded in the system (default), or the stamp paper's date."
+    dummy_value: stage_recorded
+    needed_from_grid_nova: For choosing the commission rate, which date counts as the agreement signing date — the date the signed agreement is uploaded, or the date on the stamp paper?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-5
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.multiple_territory_holders}
+    description: "A state has up to two State Heads and a block any number of Block Associates. Default: they share the territory rate equally (split_equally); alternative: each earns the full rate."
+    dummy_value: split_equally
+    needed_from_grid_nova: When two State Heads (or several Block Associates) cover the same territory, do they share the territory commission or does each earn the full rate?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-6
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.territory_on_own_customers}
+    description: A Preferred Associate who onboards a customer in their own territory earns both the personal-sale and the territory commission on it (default true).
+    dummy_value: true
+    needed_from_grid_nova: Does a Preferred Associate who brings in a customer in their own territory earn the territory commission on that customer as well as their own commission?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-7
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.deactivated_associates_earn}
+    description: "A payment verified after an associate is deactivated earns that associate nothing (engineering reading of Network Terms A11); commission already earned stays payable."
+    dummy_value: false
+    needed_from_grid_nova: Does an associate whose association has ended earn commission on customer payments verified after the end date?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-8
+    area: policies
+    location: {file: config/commissions.yaml, key: queries.window_days}
+    description: Window to raise a commission query (30 days) and Grid Nova's response time (15 working days) — policy 4.8 draft values.
+    dummy_value: 30 days / 15 working days
+    needed_from_grid_nova: Within how many days may an associate query a commission entry, and within how many working days will Grid Nova respond?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: C5-9
+    area: policies
+    location: {file: config/commissions.yaml, key: queries.working_weekdays}
+    description: Working days used for the query response deadline (Monday to Friday; public holidays not counted as holidays).
+    dummy_value: Monday-Friday
+    needed_from_grid_nova: Which days of the week are Grid Nova's working days for responding to associate queries (and should public holidays be excluded)?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: C5-10
+    area: policies
+    location: {file: config/commissions.yaml, key: payout.pay_by_day_of_following_month}
+    description: "Payout timing shown to associates: monthly, by the 10th of the following month (policy 4.5 draft)."
+    dummy_value: 10
+    needed_from_grid_nova: On what schedule will approved commission be paid (draft says monthly, by the 10th of the following month)?
+    blocking: blocks_launch
+    probe: yaml_contains_marker
+  - id: C5-11
+    area: policies
+    location: {file: config/commissions.yaml, key: tds}
+    description: "TDS on commission is computed by one function (app/commissions/payouts.py tds_due): once an associate's taxable commission in the financial year (April-March, IST) exceeds the threshold, TDS is due on the whole FY-to-date amount less TDS already deducted; without a PAN on file the higher rate applies; the taxable amount of a payout is commission less recoveries; rounded to the paisa. Not yet reviewed by a Chartered Accountant."
+    dummy_value: draft rule from policy 4.6
+    needed_from_grid_nova: Please have your Chartered Accountant confirm the TDS logic and rates for associate commission (rate, annual threshold, rate without PAN, whether TDS is computed before or after recoveries, rounding to the rupee, and when the threshold is crossed).
+    blocking: blocks_launch
+    probe: manual
+  - id: C5-12
+    area: policies
+    location: {file: config/commissions.yaml, key: tds.rate_percent}
+    description: "TDS rates and threshold: 2% once FY commission exceeds INR 20,000, 20% without a valid PAN (policy 4.6 draft)."
+    dummy_value: 2% / INR 20,000 / 20%
+    needed_from_grid_nova: What TDS rate, annual threshold and no-PAN rate should be applied to associate commission?
+    blocking: blocks_launch
     probe: yaml_contains_marker
 
 exemptions:

@@ -43,7 +43,7 @@ def associate(db_session, territories):
     app = AssociateApplication(
         full_name="A One", date_of_birth=datetime(1990, 1, 1).date(), address_line="x", state_id=state.id,
         district_id=district.id, pin_code="700001", mobile="9876543210", email="a1@example.test",
-        aadhaar_last4="1234", pan="ABCPE1234F", bank_account_encrypted="enc", bank_account_last4="9012",
+        aadhaar_last4="1234", pan_encrypted="enc", pan_last4="234F", bank_account_encrypted="enc", bank_account_last4="9012",
         bank_ifsc="SBIN0001234", kyc_consent_version="v", kyc_consent_accepted_at=now, documents={},
         capability=AssociateCapability.sales, verification_call_completed=False,
     )

@@ -24,6 +24,9 @@ from app.api.routes.execution_register_admin import router as execution_register
 from app.api.routes.health import router as health_router
 from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.payments_admin import router as payments_admin_router
+from app.api.routes.commissions_admin import router as commissions_admin_router
+from app.api.routes.associate_commissions import router as associate_commissions_router
+from app.api.routes.network_admin import router as network_admin_router
 from app.api.routes.placeholders_admin import router as placeholders_admin_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.survey_admin import router as survey_admin_router
@@ -64,6 +67,9 @@ async def lifespan(app: FastAPI):
     # And the on-site survey (config/site_survey.yaml).
     from app.survey.config import load as load_survey_config
     load_survey_config()
+    # And commissions, TDS and payouts (config/commissions.yaml).
+    from app.commissions.config import load as load_commission_config
+    load_commission_config()
     # And Grid Nova's price list + pricing policy (config/price_list.yaml,
     # config/pricing_policy.yaml) — a tampered table must stop the boot.
     from app.pricing.price_list import load as load_price_list
@@ -151,6 +157,9 @@ app.include_router(execution_register_admin_router)
 app.include_router(execution_admin_router)
 app.include_router(associate_payments_router)
 app.include_router(payments_admin_router)
+app.include_router(commissions_admin_router)
+app.include_router(associate_commissions_router)
+app.include_router(network_admin_router)
 app.include_router(public_receipts_router)
 
 

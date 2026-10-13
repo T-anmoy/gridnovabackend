@@ -224,6 +224,7 @@ def _persist_application(db: Session, application_type: AssociateType, common: d
         raise _error(exc)
 
     from app.security.encryption import EncryptionKeyMissingError, encrypt
+    from app.security.pii import protect_pan
     from app.storage import r2
 
     try:
@@ -233,6 +234,7 @@ def _persist_application(db: Session, application_type: AssociateType, common: d
             name_key=validation.name_key(common["full_name"]),
         )
         bank_account_encrypted = encrypt(common["bank_account"])
+        pan_encrypted, pan_last4 = protect_pan(common["pan"])
     except EncryptionKeyMissingError:
         raise HTTPException(status_code=503, detail={
             "code": "encryption_not_configured", "message": "Registrations cannot be accepted right now.",
@@ -254,7 +256,7 @@ def _persist_application(db: Session, application_type: AssociateType, common: d
         address_line=common["address_line"], state_id=place.state.id, district_id=place.district.id,
         block_id=place.block.id if place.block else None, pin_code=common["pin_code"],
         mobile=common["mobile"], email=common["email"], aadhaar_last4=common["aadhaar_last4"],
-        pan=common["pan"], bank_account_encrypted=bank_account_encrypted,
+        pan_encrypted=pan_encrypted, pan_last4=pan_last4, bank_account_encrypted=bank_account_encrypted,
         bank_account_last4=common["bank_account"][-4:], bank_ifsc=common["bank_ifsc"],
         kyc_consent_version=common["kyc_consent_version"], kyc_consent_accepted_at=now,
         documents={}, submitted_at=now, status_changed_at=now, verification_call_completed=False,

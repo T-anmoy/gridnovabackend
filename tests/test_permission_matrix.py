@@ -30,13 +30,15 @@ MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balanc
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
-                   "survey_admin")
+                   "survey_admin", "commissions_admin", "associate_commissions", "network_admin")
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
 PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
 PAY_PROCESSORS = {"admin", "accounts"}
+COMM_READERS = {"admin", "management", "accounts"}
+COMM_PROCESSORS = {"admin", "accounts"}
 NEFT = {"amount": "100.00", "mode": "neft", "reference": "UTR-MATRIX-{role}"}
 UNIT = {"category": "module", "equipment_id": "{equipment_id}", "serial_number": "MATRIX-NEW", "rating_wp": "540",
         "is_dcr": True}
@@ -171,6 +173,30 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/catalogue"):
         (EXECUTION_ACTORS, {"json": {"category": "structure", "brand": "Matrix Fab", "model_name": "GI-{role}",
                                      "is_dcr_compliant": False}}),
+    # BE-4 commissions: Management reads, Accounts/Admin act, Admin sets rates; the bank
+    # file (full account numbers) is Accounts only.
+    ("GET", "/api/v1/dashboard/commissions"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commissions/approve"): (COMM_PROCESSORS, {"json": {"entry_ids": [999999]}}),
+    ("POST", "/api/v1/dashboard/commissions/{entry_id}/reverse"): (ADMIN_ONLY, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/commission-rate-schedules"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commission-rate-schedules"):
+        (ADMIN_ONLY, {"json": {"effective_from": "2026-01-01", "rates": {}}}),
+    ("POST", "/api/v1/dashboard/commission-rate-schedules/{schedule_id}/re-rate"):
+        (ADMIN_ONLY, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/payout-batches"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/payout-batches"): (COMM_PROCESSORS, {"json": {"period": "2000-01"}}),
+    ("GET", "/api/v1/dashboard/payout-batches/{batch_id}"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/approve"): (COMM_PROCESSORS, {"json": {}}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/mark-paid"): (COMM_PROCESSORS, {"json": {"lines": []}}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/cancel"): (COMM_PROCESSORS, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/exports/commissions.csv"): (COMM_PROCESSORS, {}),
+    ("GET", "/api/v1/dashboard/exports/tds.csv"): (COMM_PROCESSORS, {}),
+    ("GET", "/api/v1/dashboard/exports/payout-bank-{batch_id}.csv"): ({"accounts"}, {}),
+    ("GET", "/api/v1/dashboard/commission-queries"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commission-queries/{query_id}/respond"):
+        (COMM_PROCESSORS, {"json": {"response": "x"}}),
+    ("POST", "/api/v1/dashboard/internal/check-commission-queries"): (ADMIN_ONLY, {}),
+    ("GET", "/api/v1/dashboard/network/summary"): ({"admin", "management"}, {}),
     # The placeholder engine's internal breakdown (PM-A: never customer-facing).
     ("POST", "/api/v1/pricing/breakdown"):
         ({"admin", "sales"}, {"json": {"segment": "residential", "size_kw": 5, "state": "West Bengal"}}),
@@ -240,6 +266,10 @@ ASSOCIATE = {
     ("GET", "/api/v1/associate/payments/instructions"): ("own", {}),
     ("GET", "/api/v1/associate/home"): ("own", {}),
     ("GET", "/api/v1/associate/equipment"): ("own", {}),
+    ("GET", "/api/v1/associate/commissions"): ("own", {}),
+    ("GET", "/api/v1/associate/payouts"): ("own", {}),
+    ("POST", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {"json": {"message": "x"}}),
+    ("GET", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {"json": NEFT}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments/{payment_id}/proof"): ("owner", upload_form()),
@@ -294,11 +324,14 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "onboarding_id": oid, "stage": "portal_agreement_approved", "entry_id": "A1", "file_ref": "none",
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
-              "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999}
+              "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999,
+              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 
 def _fill(path: str, values: dict, method: str) -> str:
+    if "/commissions/{entry_id}" in path:   # a commission entry id, not a placeholder-registry id
+        values = {**values, "entry_id": values["commission_entry_id"]}
     if path.endswith("/execution/{stage}"):
         values = {**values, "stage": "feasibility_submitted"}
     if "/me/documents/" in path or path.endswith("/associates/{associate_id}/documents/{document}"):

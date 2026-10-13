@@ -108,7 +108,10 @@ class TestReviewStateMachine:
         actions = [e.action for e in db_session.execute(
             select(AuditLog).where(AuditLog.entity_type == "associate_application",
                                    AuditLog.entity_id == str(app_id)).order_by(AuditLog.id)).scalars()]
-        assert actions == ["submitted", "status_under_review", "status_approved"]
+        # BE-4: every response showing the Admin the PAN decrypts it, audited as pii_decrypted.
+        assert [a for a in actions if a != "pii_decrypted"] == ["submitted", "status_under_review",
+                                                                "status_approved"]
+        assert actions.count("pii_decrypted") == 2   # the under-review and the approval responses
 
     @pytest.mark.parametrize("headers", [SALES, MGMT, {"X-Employee-Id": "e-ops", "X-Employee-Role": "operations"},
                                          {"X-Employee-Id": "e-acc", "X-Employee-Role": "accounts"}])

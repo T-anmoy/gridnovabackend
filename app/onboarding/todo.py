@@ -22,6 +22,11 @@ into English, Hindi or Bengali.
     execution_next_step       todo.execution_next_step            2  (params: stage, stage_label)
     payment_due               todo.payment_due                    2  (params: milestone_number, label, outstanding)
     receipt_available         todo.receipt_available              3  (params: receipt_number) — home feed only
+    commission_payout_paid    todo.commission_payout_paid         3  (params: batch_id, period, net, bank_reference,
+                                                                     bank_account_last4) — home feed only; not about
+                                                                     one customer, so onboarding_id/customer_name null
+    commission_query_answered todo.commission_query_answered      3  (params: query_id, entry_id) — home feed only;
+                                                                     onboarding_id is the entry's customer (or null)
 
 Priority 1 = do now, 2 = do soon, 3 = for information. Closed customers have none.
 """
@@ -199,6 +204,37 @@ def home(db: Session, associate) -> dict:
                        or (ProjectStage.proposal_requested in events and ProjectStage.proposal_prepared not in events)
                        or o.id in unverified)
             awaiting += 1 if waiting else 0
-    items.sort(key=lambda i: (i["priority"], i["onboarding_id"]))
+    items += commission_items(db, associate)
+    items.sort(key=lambda i: (i["priority"], i["onboarding_id"] or 0))
     return {"items": items, "totals": {"customers": len(own), "awaiting_grid_nova": awaiting,
                                        "needing_action": needing}}
+
+
+def commission_items(db: Session, associate) -> list[dict]:
+    """BE-4: a payout paid, or a commission query answered, in the last
+    payout.recent_days days (config/commissions.yaml). Two queries."""
+    from app.commissions import config as commission_config
+    from app.commissions.serialize import s
+    from app.memory.models import (
+        CommissionEntry, CommissionQuery, CommissionQueryStatus, PayoutBatch, PayoutBatchStatus, PayoutLine,
+    )
+
+    since = datetime.now(timezone.utc) - timedelta(days=commission_config.payout()["recent_days"])
+    out = []
+    for line, batch in db.execute(select(PayoutLine, PayoutBatch).join(PayoutBatch, PayoutBatch.id == PayoutLine.batch_id)
+                                  .where(PayoutLine.associate_id == associate.id,
+                                         PayoutBatch.status == PayoutBatchStatus.paid, PayoutBatch.paid_at >= since)
+                                  .order_by(PayoutBatch.period)).all():
+        out.append({"kind": "commission_payout_paid", "message_key": "todo.commission_payout_paid",
+                    "onboarding_id": None, "customer_name": None, "priority": 3,
+                    "params": {"batch_id": batch.id, "period": batch.period, "net": s(line.net),
+                               "bank_reference": line.bank_reference, "bank_account_last4": line.bank_account_last4}})
+    for query, onboarding_id in db.execute(
+            select(CommissionQuery, CommissionEntry.onboarding_id)
+            .join(CommissionEntry, CommissionEntry.id == CommissionQuery.entry_id)
+            .where(CommissionQuery.associate_id == associate.id, CommissionQuery.status == CommissionQueryStatus.answered,
+                   CommissionQuery.responded_at >= since).order_by(CommissionQuery.id)).all():
+        out.append({"kind": "commission_query_answered", "message_key": "todo.commission_query_answered",
+                    "onboarding_id": onboarding_id, "customer_name": None, "priority": 3,
+                    "params": {"query_id": query.id, "entry_id": query.entry_id}})
+    return out

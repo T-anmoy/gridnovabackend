@@ -9,7 +9,7 @@ The rotation (deploy/RUNBOOK.md, "Rotating FERNET_ENCRYPTION_KEY"):
   3. FERNET_ENCRYPTION_KEY="<new>"; deploy. The old key can now be destroyed.
 
 Covers employees.google_refresh_token and both associate application tables'
-bank_account_encrypted. Idempotent. A value no configured key can decrypt is reported
+bank_account_encrypted and pan_encrypted (BE-4). Idempotent. A value no configured key can decrypt is reported
 and left unchanged (it was already unreadable).
 """
 from __future__ import annotations
@@ -36,7 +36,8 @@ def rotate_all(db: Session) -> dict:
 
     counts = {"rotated": 0, "unreadable": 0}
     targets = [(Employee, "google_refresh_token"), (AssociateApplication, "bank_account_encrypted"),
-               (PreferredAssociateApplication, "bank_account_encrypted")]
+               (PreferredAssociateApplication, "bank_account_encrypted"),
+               (AssociateApplication, "pan_encrypted"), (PreferredAssociateApplication, "pan_encrypted")]
     for model, column in targets:
         for row in db.execute(select(model).where(getattr(model, column).is_not(None))).scalars():
             try:
