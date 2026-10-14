@@ -74,7 +74,8 @@ reverification_fields:               # [UNCONFIRMED]
   - desired_output_kw
 
 # DISCOMs the app offers (plus free text under "Other"). Stored as entered.
-discom_options:                      # [UNCONFIRMED]
+# Stored values are short names; the frontend shows longer display labels.
+discom_options:
   - WBSEDCL
   - CESC
   - NBPDCL

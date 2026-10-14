@@ -86,7 +86,7 @@ def _packages_block() -> str:
 
 COMPANY_FACTS = f"""GRID NOVA ENERGY — VERIFIED FACTS
 
-Company: Grid Nova Energy Pvt. Ltd. — "Eco-Energy Initiative"
+Company: Grid Nova Energy — "Eco-Energy Initiative"
 Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal
 Contact: +91 98747 74440, info@gridnova.in, www.gridnova.in
 Business hours: {_business_days_phrase()}, {_business_hours_phrase()}
