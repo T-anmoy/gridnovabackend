@@ -156,7 +156,7 @@ payments:
     pending_alert_minutes: 60           # [UNCONFIRMED]
     # P5 — company block printed on every receipt and on the "pay only here" reminder.
     company:
-      legal_name: "GRID NOVA ENERGY"    # [UNCONFIRMED] — legal form pending
+      legal_name: "Grid Nova Energy"    # [UNCONFIRMED] — legal form pending
       address: "Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal, India"
       phone: "+91 98747 74440"
       email: "info@gridnova.in"
