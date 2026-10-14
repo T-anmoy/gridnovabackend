@@ -56,19 +56,22 @@ assured_basic_inr:   # SOURCE input. mrp_reference = supplied MRP (must equal co
     10: {basic: '610000.00', mrp_reference: '664290.00'}
 
 equipment:   # wording reproduced from the source; 'or equivalent' is allowed but never expanded
+  # or_equivalent: true means a substitute of the same tier if the listed make is out of stock (decided by Tanmoy Halder, 14 Oct 2026). No other brands are named.
   NOVA_SIGNATURE:
     solar_panel: {makes: [TATA, Waaree, Adani, Vikram], or_equivalent: true, technology: [Mono PERC, TOPCon], models: null}
     inverter:    {makes: [Sungrow, Growatt, Deye, Delta], or_equivalent: true, models: null}
-    cables:      {makes: [Finolex, Havells, RR cable, Mescab], or_equivalent: true, note: Finolex confirmed}
+    cables:      {makes: [Finolex, Havells, RR Kabel, Mescab], or_equivalent: true, note: Finolex confirmed}
   NOVA_ASSURED:
     solar_panel: {makes: [Sova Solar, HR Solar, V-Sole], or_equivalent: true, technology: [Mono PERC], models: null}
     inverter:    {makes: [Deye, V-Sole, Micro Tech, Power One], or_equivalent: true, models: null}
+    # Same cables as Nova Signature (decided by Tanmoy Halder, 14 Oct 2026). Which cable brand list applies is still open (D5).
+    cables:      {makes: [Finolex, Havells, RR Kabel, Mescab], or_equivalent: true, note: Finolex confirmed}
   dcr_status: null   # [NOT SUPPLIED] DCR compliance per make/model is not in the source — required for PM Surya Ghar
 
 electrical_spec_up_to_5kw:   # common to both packages; NOT supplied for 6–10 kW
-  ac_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR KABEL]}
-  dc_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR KABEL]}
-  earthing_cable: {spec: 6 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR KABEL]}
+  ac_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
+  dc_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
+  earthing_cable: {spec: 6 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
   conduit_pipe:  {spec: Water SDP pipe, makes: [Supreme]}
   flex_pipe:     {spec: Branded; use only inner side, makes: null}
 
@@ -78,9 +81,8 @@ commercial_terms:
     - {number: 2, percent: '60', label: Against Material Bill}
     - {number: 3, percent: '20', label: Before Commissioning}
   standard_warranty: 5 years from handover
-  solar_panel_life_span: 20–25 years      # a life span, NOT a warranty
+  solar_panel_life_span: 25 years         # a life span, NOT a warranty
   o_and_m: First year free
 
 source_inconsistencies_to_confirm:
-  - "Cable maker written 'RR cable' (Signature list) and 'RR KABEL' (electrical spec) — keep as supplied until Grid Nova confirms one spelling."
-  - "Signature cable list (Finolex, Havells, RR cable, Mescab) differs from the common spec list (Polycab, Mescab, Finolex, KEI, RR KABEL)."
+  - "Signature cable list (Finolex, Havells, RR Kabel, Mescab) differs from the common spec list (Polycab, Mescab, Finolex, KEI, RR Kabel)."

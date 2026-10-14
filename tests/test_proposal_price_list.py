@@ -44,7 +44,7 @@ class TestListPriced:
         assert p.total_value == 225640.8 and p.content["pricing"]["package"] == "NOVA_SIGNATURE"
         eq = _section(p.content, "equipment_makes")["body"]
         assert "TATA / Waaree / Adani / Vikram or equivalent (Mono PERC, TOPCon)" in eq
-        assert "Cables: Finolex / Havells / RR cable / Mescab or equivalent" in eq
+        assert "Cables: Finolex / Havells / RR Kabel / Mescab or equivalent" in eq
 
     def test_deterministic_sections(self, client, db_session, onboarding_ready):
         p = _proposal(client, db_session, **LISTED)
@@ -52,13 +52,13 @@ class TestListPriced:
         assert "Solar panels: Sova Solar / HR Solar / V-Sole or equivalent (Mono PERC)" in eq
         assert "Inverter: Deye / V-Sole / Micro Tech / Power One or equivalent" in eq
         spec = _section(p.content, "electrical_specification")["body"]
-        assert "AC cable: 4 sqmm Copper — Polycab / Mescab / Finolex / KEI / RR KABEL" in spec
+        assert "AC cable: 4 sqmm Copper — Polycab / Mescab / Finolex / KEI / RR Kabel" in spec
         assert "Conduit pipe: Water SDP pipe — Supreme" in spec and "use only inner side" in spec
         assert _section(p.content, "payment_terms")["body"] == \
             "20% On Order\n60% Against Material Bill\n20% Before Commissioning"
         warranty = _section(p.content, "warranty_and_service")["body"]
         assert "Standard warranty: 5 years from handover." in warranty and "First year free" in warranty
-        assert "Solar panel life span: 20–25 years (a life span, not a warranty)." in warranty
+        assert "Solar panel life span: 25 years (a life span, not a warranty)." in warranty
         terms = _section(p.content, "price_terms")["body"]
         assert "within West Bengal" in terms and "Company reserves right to change price" in terms
         for sid in ("equipment_makes", "electrical_specification", "payment_terms", "warranty_and_service",

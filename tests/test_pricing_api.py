@@ -32,7 +32,7 @@ class TestPublicEstimate:
         assert (body["priced_kw"], body["priced_kw_differs"]) == (5, True)
 
     def test_outside_the_price_list_is_a_custom_quote(self, client):
-        for overrides in ({"state": "Bihar"}, {"segment": "commercial"}, {"connection_phase": None},
+        for overrides in ({"state": "Odisha"}, {"segment": "commercial"}, {"connection_phase": None},
                           {"size_kw": 12}):
             body = client.post("/api/v1/pricing/estimate",
                                json={k: v for k, v in _payload(**overrides).items() if v is not None}).json()

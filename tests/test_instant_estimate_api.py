@@ -89,7 +89,7 @@ class TestSubsidy:
 
 class TestCustomQuote:
     @pytest.mark.parametrize("overrides,reason", [
-        ({"state": "Bihar"}, "outside_west_bengal"),
+        ({"state": "Odisha"}, "outside_west_bengal"),
         ({"segment": "commercial"}, "segment_not_in_price_list"),
         ({"connection_type": "hybrid"}, "battery_or_off_grid"),
         ({"connection_type": "off_grid"}, "battery_or_off_grid"),
