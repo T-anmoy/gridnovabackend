@@ -249,7 +249,9 @@ h1 {{ font-size: 16pt; margin: 0 0 4mm; }} th {{ text-align: left; padding: 2mm 
 </style></head><body>
 {void_mark}
 <div class="company"><strong>{e(company["legal_name"])}</strong><br>{e(company["address"])}<br>
-{e(company["phone"])} · {e(company["email"])}<br>GSTIN: {e(company["gstin"])}</div>
+{e(company["phone"])} · {e(company["email"])}<br>GSTIN: {e(company["gstin"])}<br>
+{e(company["legal_form"])} · Account name: {e(company["account_name"])} · {e(company["bank_name"])}, {e(company["branch"])}<br>
+A/c no. {e(company["account_number"])} ({e(company["account_type"])}) · IFSC {e(company["ifsc"])}</div>
 <h1>{e(wording["heading"])}</h1>
 <table>{body}</table>
 <div class="footer">{e(wording["footer"])}</div>

@@ -29,11 +29,11 @@ from app.pricing.engine import PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT
 # than engine.py's PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW (a single flat annual
 # national assumption feeding the older, single-method bill->kW helper). Kept as
 # its own constant rather than silently repurposing that one for a subtly
-# different (daily, state-varying) meaning. [PLACEHOLDER — real regional
-# generation data pending Raju Paul]
+# different (daily, state-varying) meaning. Grid Nova (Raju Paul, 15 Oct 2026):
+# 4 units per kW per day on average, for West Bengal, Bihar and the default.
 PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: dict[str, float] = {
     "west bengal": 4.0,
-    "bihar": 4.2,
+    "bihar": 4.0,
 }
 PLACEHOLDER_DEFAULT_GENERATION_FACTOR = 4.0  # any state outside the primary two
 

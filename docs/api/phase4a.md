@@ -193,8 +193,8 @@ due status is computed against the cumulative verified total.
 **Instructions:** while the bank details are placeholders →
 `{available: false, reason: "placeholder_content", account: null, message_key:
 "payments.instructions.not_ready"}`; otherwise `{available: true, reason: null,
-message_key: "payments.instructions.pay_only_here", account: {payee, bank_name,
-account_number, ifsc}, cash_accepted: false}`.
+message_key: "payments.instructions.pay_only_here", account: {payee, account_name, bank_name, branch,
+account_number, account_type, ifsc}, cash_accepted: false}`.
 
 **Overview:** `{onboarding_id, totals, milestones[], payments[] (associate shape),
 enabled_modes[], proof_required}`.

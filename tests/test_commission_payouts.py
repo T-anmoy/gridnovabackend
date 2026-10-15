@@ -111,7 +111,7 @@ class TestFinancialYear:
         body = march.json()
         assert body["financial_year"] == "2026-27"
         ln = line_of(body, owner)
-        assert (ln["gross"], ln["taxable"], ln["tds"], ln["net"]) == ("30000.00", "30000.00", "600.00", "29400.00")
+        assert (ln["gross"], ln["taxable"], ln["tds"], ln["net"]) == ("30000.00", "30000.00", "0.00", "30000.00")
         assert approve(client, body["batch_id"]).status_code == 200
         assert pay(client, body["batch_id"], {owner: "NEFT-1"}).status_code == 200
         at(monkeypatch, datetime(2027, 4, 2, tzinfo=UTC), date(2027, 5, 5))

@@ -57,21 +57,24 @@ assured_basic_inr:   # SOURCE input. mrp_reference = supplied MRP (must equal co
 
 equipment:   # wording reproduced from the source; 'or equivalent' is allowed but never expanded
   # or_equivalent: true means a substitute of the same tier if the listed make is out of stock (decided by Tanmoy Halder, 14 Oct 2026). No other brands are named.
+  # Default package: Nova Assured; Nova Signature on customer request (Grid Nova, 16 Oct 2026).
+  # No fixed models: makes + or equivalent; the exact model is recorded per unit at installation.
+  # Panel technology Mono PERC / TOPCon and wattage options 550 / 560 / 580 / 600 Wp apply to both packages (Grid Nova, 15–16 Oct 2026).
   NOVA_SIGNATURE:
-    solar_panel: {makes: [TATA, Waaree, Adani, Vikram], or_equivalent: true, technology: [Mono PERC, TOPCon], models: null}
+    solar_panel: {makes: [TATA, Waaree, Adani, Vikram], or_equivalent: true, technology: [Mono PERC, TOPCon], wattage_options_wp: [550, 560, 580, 600], models: null}
     inverter:    {makes: [Sungrow, Growatt, Deye, Delta], or_equivalent: true, models: null}
-    cables:      {makes: [Finolex, Havells, RR Kabel, Mescab], or_equivalent: true, note: Finolex confirmed}
+    cables:      {makes: [Polycab, Mescab, Finolex, KEI, RR Kabel, Havells], or_equivalent: true}
   NOVA_ASSURED:
-    solar_panel: {makes: [Sova Solar, HR Solar, V-Sole], or_equivalent: true, technology: [Mono PERC], models: null}
+    solar_panel: {makes: [Sova Solar, HR Solar, V-Sole], or_equivalent: true, technology: [Mono PERC, TOPCon], wattage_options_wp: [550, 560, 580, 600], models: null}
     inverter:    {makes: [Deye, V-Sole, Micro Tech, Power One], or_equivalent: true, models: null}
-    # Same cables as Nova Signature (decided by Tanmoy Halder, 14 Oct 2026). Which cable brand list applies is still open (D5).
-    cables:      {makes: [Finolex, Havells, RR Kabel, Mescab], or_equivalent: true, note: Finolex confirmed}
+    # Same approved cable makes as Nova Signature and the common electrical spec (Grid Nova, 15 Oct 2026).
+    cables:      {makes: [Polycab, Mescab, Finolex, KEI, RR Kabel, Havells], or_equivalent: true}
   dcr_status: null   # [NOT SUPPLIED] DCR compliance per make/model is not in the source — required for PM Surya Ghar
 
 electrical_spec_up_to_5kw:   # common to both packages; NOT supplied for 6–10 kW
-  ac_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
-  dc_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
-  earthing_cable: {spec: 6 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel]}
+  ac_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel, Havells], or_equivalent: true}
+  dc_cable:      {spec: 4 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel, Havells], or_equivalent: true}
+  earthing_cable: {spec: 6 sqmm Copper, makes: [Polycab, Mescab, Finolex, KEI, RR Kabel, Havells], or_equivalent: true}
   conduit_pipe:  {spec: Water SDP pipe, makes: [Supreme]}
   flex_pipe:     {spec: Branded; use only inner side, makes: null}
 
@@ -84,5 +87,4 @@ commercial_terms:
   solar_panel_life_span: 25 years         # a life span, NOT a warranty
   o_and_m: First year free
 
-source_inconsistencies_to_confirm:
-  - "Signature cable list (Finolex, Havells, RR Kabel, Mescab) differs from the common spec list (Polycab, Mescab, Finolex, KEI, RR Kabel)."
+source_inconsistencies_to_confirm: []   # D5 resolved: one approved cable list everywhere (Grid Nova, 15 Oct 2026)

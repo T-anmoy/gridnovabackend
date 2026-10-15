@@ -11,12 +11,12 @@
 commissions:
   # Policy 4.1 / Network Terms A14: "[15] days' notice" before a rate change takes effect.
   # A non-placeholder schedule must have effective_from >= today (IST) + this many days.
-  # [UNCONFIRMED] draft value from the policy (C5-1)
+  # Confirmed by Grid Nova, 15 Oct 2026.
   rate_change_notice_days: 15
   # What a commission percentage is applied to. basic_pro_rata = the verified amount ×
   # the accepted proposal's basic price ÷ its final price (i.e. the verified amount
   # without GST); gross = the verified amount as received.
-  # [UNCONFIRMED] engineering default (C5-2)
+  # Confirmed by Grid Nova, 15 Oct 2026: commission on the base price, excluding GST.
   basis: basic_pro_rata
   # Which seat holder earns a territory commission: the one holding the seat on the date
   # the customer's agreement was signed, or on the date the payment was verified.
@@ -44,7 +44,9 @@ commissions:
 queries:
   # Policy 4.8: raise a query "within [30] days of it appearing"; Grid Nova responds
   # "within [15] working days".
-  # [UNCONFIRMED] draft values from the policy (C5-8)
+  # window_days (30) confirmed by Grid Nova, 15 Oct 2026. response_working_days (15) is
+  # still the draft value: the response time was not asked.
+  # [UNCONFIRMED] response_working_days — draft value from the policy (C5-8)
   window_days: 30
   response_working_days: 15
   # Working days for the response deadline (0 = Monday … 6 = Sunday). Public holidays
@@ -55,18 +57,16 @@ queries:
 payout:
   # Policy 4.5: approved commission paid "[monthly, by the 10th of the following month]".
   # Batches are monthly; this is the day shown to associates as the expected payout date.
-  # [UNCONFIRMED] draft value from the policy (C5-10)
+  # Confirmed by Grid Nova, 15 Oct 2026: monthly, by the 10th of the following month.
   pay_by_day_of_following_month: 10
   # How many days a paid payout stays on the associate's home feed.
   recent_days: 7
 
 tds:
-  # Policy 4.6 (draft): TDS on commission is 2% once an associate's commission in a
-  # financial year (April–March, IST) crosses ₹20,000, and 20% without a valid PAN. A
-  # Chartered Accountant must confirm the rule, the rates and the threshold (C5-11),
-  # and whether TDS is rounded to the rupee.
-  # [UNCONFIRMED] draft values from the policy (C5-12)
-  rate_percent: "2"
+  # Grid Nova decision 15–16 Oct 2026 (Raju Paul): no TDS deducted; to be revisited with
+  # Grid Nova's Chartered Accountant (C5-11). Policy 4.6 draft was 2% above ₹20,000 a
+  # financial year (April–March, IST) and 20% without a valid PAN.
+  rate_percent: "0"
   fy_threshold_inr: "20000"
-  no_pan_rate_percent: "20"
+  no_pan_rate_percent: "0"
   rounding: "0.01"

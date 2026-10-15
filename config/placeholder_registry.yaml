@@ -274,8 +274,10 @@ entries:
     location: {file: app/pricing/sizing.py, symbols: [PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY, PLACEHOLDER_DEFAULT_GENERATION_FACTOR]}
     description: Daily generation per kW by state, used to size the recommended system.
     dummy_value:
-      PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: {west bengal: 4.0, bihar: 4.2}
-      PLACEHOLDER_DEFAULT_GENERATION_FACTOR: 4.0
+      # Sentinel, not a real figure: Grid Nova confirmed 4.0 kWh/kW/day for West Bengal, Bihar and the default (D-2,
+      # 15 Oct 2026), which equals the original dummy, so the probe now compares against -1.0 (reopens if reverted to it).
+      PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: {west bengal: -1.0, bihar: -1.0}
+      PLACEHOLDER_DEFAULT_GENERATION_FACTOR: -1.0
     needed_from_grid_nova: How many units per kW per day does a system generate in West Bengal, Bihar, and elsewhere?
     blocking: blocks_launch
     probe: constant_equals

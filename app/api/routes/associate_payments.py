@@ -76,8 +76,10 @@ def payment_instructions(db: Session = Depends(get_db),
         return {"available": False, "reason": "placeholder_content", "account": None,
                 "message_key": "payments.instructions.not_ready"}
     return {"available": True, "reason": None, "message_key": "payments.instructions.pay_only_here",
-            "account": {"payee": company["legal_name"], "bank_name": company["bank_name"],
-                        "account_number": company["account_number"], "ifsc": company["ifsc"]},
+            "account": {"payee": company["legal_name"], "account_name": company["account_name"],
+                        "bank_name": company["bank_name"], "branch": company["branch"],
+                        "account_number": company["account_number"], "account_type": company["account_type"],
+                        "ifsc": company["ifsc"]},
             "cash_accepted": False}
 
 

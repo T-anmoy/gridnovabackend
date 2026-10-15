@@ -105,6 +105,8 @@ def sections(*, package: Optional[str], kw, list_priced: bool) -> list[dict]:
             line = f"{_COMPONENT_LABELS.get(component, component)}: {_makes(spec)}"
             if spec.get("technology"):
                 line += f" ({', '.join(spec['technology'])})"
+            if spec.get("wattage_options_wp"):
+                line += f", {' / '.join(str(w) for w in spec['wattage_options_wp'])} Wp"
             lines.append(line)
         out.append({"id": "equipment_makes", "category": "note",
                     "body": f"{price_list.display_name(package)} equipment:\n" + "\n".join(lines)})

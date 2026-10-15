@@ -67,6 +67,8 @@ def _packages_block() -> str:
             text = f"{labels.get(component, component)}: {makes}" + (", or equivalent" if spec.get("or_equivalent") else "")
             if spec.get("technology"):
                 text += f" ({' or '.join(spec['technology'])})"
+            if spec.get("wattage_options_wp"):
+                text += f", wattage options {' / '.join(str(w) for w in spec['wattage_options_wp'])} Wp"
             parts.append(text)
         lines.append(f"- {price_list.display_name(package)} — " + "; ".join(parts))
     spec_makes = sorted({m for item in data["electrical_spec_up_to_5kw"].values() for m in (item.get("makes") or [])})
@@ -91,7 +93,7 @@ Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107,
 Contact: +91 98747 74440, info@gridnova.in, www.gridnova.in
 Business hours: {_business_days_phrase()}, {_business_hours_phrase()}
 
-Track record (verified, exact figures — never round or approximate these):
+Track record of Grid Nova's team and branches (verified, exact figures — never round or approximate these):
 - 4,800+ street lamps delivered
 - 330+ 10kW WBREDA schools powered
 - 2,350+ PM-KUSUM solar pumps installed
