@@ -19,12 +19,17 @@ route's auth dependency, and this docstring exists so nobody removes it by accid
 GROUNDING
 The answer is generated from retrieved records alone. Anything not on record must
 come back as not on record, never as a plausible guess — this is a CRM lookup.
+That is enforced, not just asked for: app/agents/grounding.py checks every citation
+and every stated fact against the records. A failing answer is retried once with the
+failures listed; if it still fails, the employee gets the records themselves and the
+attempt is written to the audit log as `ungrounded_answer`.
 """
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
 
+from app.agents import grounding
 from app.llm.client import llm_client
 from app.memory import recall
 
@@ -83,11 +88,7 @@ class MemoryAgent:
         context_block = retrieved["context_block"]
         memories = retrieved["memories"]
 
-        answer = llm_client.answer_from_memory(
-            question=question,
-            context_block=context_block,
-            customer_label=self._label(customer),
-        )
+        answer = self._grounded_answer(memory, customer, question, context_block, performed_by)
 
         logger.info(
             "Memory recall answered",
@@ -107,6 +108,26 @@ class MemoryAgent:
             ],
             "mode": retrieved["mode"],
         }
+
+    def _grounded_answer(self, memory: "MemoryManager", customer, question: str, context_block: str,
+                         performed_by: str) -> str:
+        label = self._label(customer)
+        attempts, failures = [], []
+        feedback = None
+        for _ in range(2):
+            answer = llm_client.answer_from_memory(
+                question=question, context_block=context_block, customer_label=label, feedback=feedback,
+            )
+            check = grounding.check_grounding(answer, context_block, evidence=label)
+            if check.ok:
+                return answer
+            attempts.append(answer)
+            failures.append(check.violations)
+            feedback = check.describe()
+        logger.warning("Memory answer failed grounding twice — sending the records found",
+                       extra={"customer_id": customer.id, "violations": feedback})
+        memory.record_ungrounded_answer(customer.id, question, attempts, failures, performed_by=performed_by)
+        return grounding.records_found_answer(context_block, label)
 
     @staticmethod
     def _label(customer) -> str:

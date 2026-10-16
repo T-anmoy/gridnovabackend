@@ -165,10 +165,12 @@ PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT = 9.0       # ₹/kWh
 PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW = 1_460.0   # kWh/kW/year (4 kWh/kW/day × 365)
 
 
-def estimate_size_kw_from_monthly_bill(monthly_bill_inr: float) -> float:
-    monthly_units = monthly_bill_inr / PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT
-    annual_units = monthly_units * 12
-    return round(annual_units / PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW, 2)
+# BE-7 N6: estimate_size_kw_from_monthly_bill() (annual yield, no offset) was the
+# second bill-sizing rule, used only by /pricing/estimate and /breakdown. They now
+# size through app/pricing/sizing.py like every other caller, and the helper is gone.
+# PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW stays as Grid Nova's confirmed figure
+# (config/placeholder_registry.yaml tracks it); no code reads it any more. sizing.py
+# uses the same 4 kWh/kW/day as its own per-state generation factor.
 
 
 def _size_band(size_kw: float) -> str:

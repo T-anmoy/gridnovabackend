@@ -152,8 +152,10 @@ def on_verified(db: Session, payment: Payment, onboarding: CustomerOnboarding, a
 
 def _content_has_dummy() -> bool:
     from app.placeholders.registry import DUMMY_TEXT_PREFIX
+    from app.proposals.content_engine import branch_offices
     receipt_cfg = config.payments()["receipt"]
-    blob = " ".join(str(v) for v in [*receipt_cfg["company"].values(), *receipt_cfg["wording"].values()])
+    blob = " ".join(str(v) for v in [*receipt_cfg["company"].values(), *receipt_cfg["wording"].values(),
+                                     *branch_offices()])
     return DUMMY_TEXT_PREFIX in blob or "DUMMY" in blob
 
 
@@ -217,6 +219,8 @@ def receipt_html(db: Session, receipt: PaymentReceipt) -> str:
     milestone = db.get(PaymentMilestone, payment.milestone_id) if payment.milestone_id else None
     total_paid, balance = _ledger_position(db, payment)
     e = lambda v: html.escape("" if v is None else str(v))  # noqa: E731
+    from app.proposals.content_engine import branch_offices
+    branches = "".join(f"{e(b)}<br>\n" for b in branch_offices())
     rows = [
         ("Receipt number", receipt.receipt_number),
         ("Date received", format_ist_date(payment.verified_at)),
@@ -249,7 +253,7 @@ h1 {{ font-size: 16pt; margin: 0 0 4mm; }} th {{ text-align: left; padding: 2mm 
 </style></head><body>
 {void_mark}
 <div class="company"><strong>{e(company["legal_name"])}</strong><br>{e(company["address"])}<br>
-{e(company["phone"])} · {e(company["email"])}<br>GSTIN: {e(company["gstin"])}<br>
+{branches}{e(company["phone"])} · {e(company["email"])}<br>GSTIN: {e(company["gstin"])}<br>
 {e(company["legal_form"])} · Account name: {e(company["account_name"])} · {e(company["bank_name"])}, {e(company["branch"])}<br>
 A/c no. {e(company["account_number"])} ({e(company["account_type"])}) · IFSC {e(company["ifsc"])}</div>
 <h1>{e(wording["heading"])}</h1>

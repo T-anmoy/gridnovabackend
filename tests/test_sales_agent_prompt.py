@@ -240,7 +240,11 @@ class TestExpandedCompanyFacts:
 
     def test_nationwide_coverage_supersedes_the_old_regional_limit(self):
         assert "serves customers across India" in COMPANY_FACTS
-        assert "West Bengal and Bihar" not in COMPANY_FACTS
+        # BE-7 N2: West Bengal and Bihar appear only as the ONLINE-PRICING scope (built
+        # from config/pricing_policy.yaml), never as a limit on where Grid Nova works.
+        assert "only West Bengal" not in COMPANY_FACTS and "serves West Bengal" not in COMPANY_FACTS
+        assert ("Online package prices and the Solar Calculator currently cover West Bengal and Bihar; "
+                "for other states a team member will follow up.") in COMPANY_FACTS
 
     def test_subsidy_figures_match_the_real_pricing_module_not_a_second_copy(self):
         from app.pricing import subsidy as subsidy_module
@@ -292,3 +296,39 @@ class TestFactBoundaryRuleStillEnforced:
         result = guardrails.enforce(real_reply, allowed_text=allowed, fallback="fallback reply")
         assert result.blocked is False
         assert result.reply == real_reply
+
+
+class TestBE7CompanyFacts:
+    """BE-7 N2: the branch office and the online-pricing coverage line come from
+    config, never typed by hand."""
+
+    def test_branch_office_line_comes_from_proposal_content(self):
+        from app.proposals.content_engine import branch_offices
+
+        assert branch_offices() == [
+            "Patna Branch: C/O Parbati Bhawan, West Ram Krishna Nagar, New Bypass Road, Opposite Metro "
+            "Pillar No. 81, P.O.- New Jaganpura, Patna – 800027, Bihar"]
+        assert f"Branch office: {branch_offices()[0]}" in COMPANY_FACTS
+
+    def test_coverage_line_follows_the_pricing_config(self, monkeypatch):
+        from app.llm import company_facts
+        from app.pricing import policy
+
+        monkeypatch.setattr(policy, "applicability", lambda: {"states": ["West Bengal", "Bihar", "Odisha"]})
+        assert company_facts._online_pricing_coverage() == (
+            "Online package prices and the Solar Calculator currently cover West Bengal, Bihar and Odisha; "
+            "for other states a team member will follow up.")
+        monkeypatch.setattr(policy, "applicability", lambda: {"states": ["Bihar"]})
+        assert "currently cover Bihar;" in company_facts._online_pricing_coverage()
+
+    def test_guardrails_accept_the_new_facts_when_repeated(self):
+        """_justifiable_text carries COMPANY_FACTS, so the PIN, pillar number and states
+        in the new lines never read as an invented figure or someone's personal data."""
+        from app.agents import guardrails
+        from app.agents.sales_agent import _justifiable_text
+
+        reply = ("Our Patna branch is at Parbati Bhawan, New Bypass Road, Patna – 800027. Online prices "
+                 "currently cover West Bengal and Bihar; for other states a team member will follow up.")
+        allowed = _justifiable_text("where are you based?", [], {}, None)
+        result = guardrails.enforce(reply, allowed_text=allowed, user_message="where are you based?")
+        assert not result.blocked, result.violations

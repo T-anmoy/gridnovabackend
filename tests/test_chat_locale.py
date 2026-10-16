@@ -31,8 +31,12 @@ def test_reply_locale_normalisation(value, expected):
 
 @pytest.mark.parametrize("locale, language", [("hi", "Hindi"), ("bn", "Bengali")])
 def test_prompt_carries_the_language_line(client, prompts, locale, language):
+    # BE-7: Hindi/Bengali replies are written in English, guarded, then translated
+    # (tests/test_translation_guard.py) — the line now says so.
     assert chat(client, "hi, thinking about solar", locale=locale).status_code == 200
-    assert f"Write your reply in {language}" in prompts[-1]
+    assert f"The customer reads {language}" in prompts[-1]
+    assert "Write your reply in English anyway" in prompts[-1]
+    assert f"Write your reply in {language}" not in prompts[-1]
 
 
 @pytest.mark.parametrize("extra", [{}, {"locale": "en"}, {"locale": "xx"}, {"locale": ""}])

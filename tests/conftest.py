@@ -389,3 +389,16 @@ def management_headers(employee_id: str = "emp-mgmt-1") -> dict:
 
 def engineer_headers(employee_id: str = "emp-eng-1") -> dict:
     return {"X-Employee-Id": employee_id, "X-Employee-Role": "engineer"}
+
+
+# ── Live LLM evaluation (BE-7 N4) ─────────────────────────────────────────────
+# Tests marked live_llm call the real configured model and cost money. CI stays
+# mock-only: they run only when RUN_LIVE_LLM_EVALS=1 is set deliberately.
+
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get("RUN_LIVE_LLM_EVALS") == "1":
+        return
+    skip = pytest.mark.skip(reason="live LLM evaluation: set RUN_LIVE_LLM_EVALS=1 (and LLM_API_KEY) to run")
+    for item in items:
+        if "live_llm" in item.keywords:
+            item.add_marker(skip)

@@ -139,6 +139,15 @@ class TestIssue:
                          "19ABCDE1234F1Z5", "not a GST tax invoice"):
             assert expected in html
 
+    def test_letterhead_prints_the_patna_branch_under_the_head_office(self, client, db_session, onboarding_ready,
+                                                                      stub_pdf, real_receipt_text):
+        """BE-7 N2: config/proposal_content.yaml company.branch_offices."""
+        _verified(client, db_session, customer_email="asha@example.test")
+        html = receipts.receipt_html(db_session, db_session.execute(select(PaymentReceipt)).scalar_one())
+        head = html.index("Kolkata – 700107")
+        assert html.index("Patna Branch: C/O Parbati Bhawan") > head
+        assert "Patna – 800027, Bihar" in html
+
 
 class TestResendAndPublic:
     def test_resend(self, client, db_session, onboarding_ready, stub_pdf, real_receipt_text, notifications):

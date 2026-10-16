@@ -1608,6 +1608,27 @@ class MemoryManager:
             },
         )
 
+    def record_ungrounded_answer(
+        self,
+        customer_id: int,
+        question: str,
+        answers: list,
+        violations: list,
+        performed_by: str = "memory_agent",
+    ) -> None:
+        """Write a memory answer that failed grounding to the audit trail.
+
+        The employee got the records-found answer instead; the generated attempts are
+        kept, truncated, so a model that keeps answering from outside the records is
+        visible rather than silently corrected.
+        """
+        self._audit(
+            "customer", str(customer_id), "ungrounded_answer", performed_by,
+            before={"question": (question or "")[:500],
+                    "generated_answers": [(a or "")[:1000] for a in answers]},
+            after={"violations": violations, "sent": "records_found"},
+        )
+
     def add_customer_memory(
         self,
         customer_id: int,

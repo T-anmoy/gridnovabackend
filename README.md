@@ -496,6 +496,51 @@ model download and takes ~3s, once, lazily on the first reply that uses it. If i
 size matters more than this rail, drop the line from `requirements.txt` -- the code
 degrades to Layer 1 on its own when the package is absent.
 
+### Hindi and Bengali replies
+
+Every check above reads English. So a Hindi or Bengali conversation (`locale` `hi` /
+`bn` on `POST /chat/message`) is **generated in English**, guarded in English exactly
+as above, and only then translated by a separate, tightly constrained model call
+(`operation=translate_reply`, temperature 0). The translation is sent only if
+`app/agents/translation_check.py` agrees it says exactly what the guarded English said:
+the same amounts, percentages, numbers, times, dates, emails, phone numbers and URLs
+(Devanagari/Bengali digits and लाख/লাখ-style scale words normalised first); mostly in the
+target script; a sane length; and no warranty, guarantee, subsidy-certainty, "you are
+eligible", approved/sent or DCR statement the English did not already make. On any
+failure, or if the call fails, the customer gets the **guarded English** reply and
+`translation_rejected` is recorded against the lead (non-blocking). A reply the model
+writes in Hindi/Bengali anyway is blocked (`unverifiable_language_reply`), because no
+check could read it. The existing checks also read a customer's own "३ लाख" as 3 lakh.
+
+## Grounded staff memory answers
+
+`POST /dashboard/memory/ask` is checked by `app/agents/grounding.py`: every bracketed
+citation must exist in the retrieved records, and every amount, size, percentage, date,
+email, phone number and `GNE-…`/`GNR-…` reference stated must appear in them (the
+question itself is not evidence). A failing answer is retried once with the failures
+listed; if it fails again the employee gets the records themselves ("Records found
+for …") and `ungrounded_answer` is written to the audit log.
+
+## Live evaluation of the real model
+
+Every test in `tests/` runs in mock mode, so the configured model's real behaviour is
+measured separately:
+
+```
+python scripts/eval_nova.py --suite customer --live   # 66 cases, en/hi/bn
+python scripts/eval_nova.py --suite staff --live      # 22 memory-answer cases
+```
+
+Cases live in `evals/customer_nova.yaml` and `evals/staff_memory.yaml`. The runner
+drives the real routes in-process against a throwaway SQLite database, prints a
+pass/fail table, writes `eval_reports/<timestamp>.json` (git-ignored) and exits
+non-zero on any failure. `--live` refuses to run without `LLM_API_KEY`; `--mock` is a
+smoke run of the harness itself. Under pytest the live runs are marked `live_llm` and
+skipped unless `RUN_LIVE_LLM_EVALS=1`; CI stays mock-only.
+
+**Run both suites on the staging key before Gate 1 sign-off and again before go-live.
+A launch requires 100% pass on blocking cases.**
+
 ## Customer memory (episodic + self-reflection)
 
 The Sales Agent only sees the last few messages of a conversation. Anything older

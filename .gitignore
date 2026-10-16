@@ -33,3 +33,6 @@ build/
 
 .venv-win/
 uvicorn.log
+
+# Live LLM evaluation reports (scripts/eval_nova.py)
+eval_reports/

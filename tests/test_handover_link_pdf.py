@@ -81,6 +81,15 @@ class TestRendered:
         assert "Handover pack and warranty certificate" in html and "O&amp;M terms after the first free year to be supplied" not in html
         assert "Annual maintenance plan" in html
 
+    def test_letterhead_prints_the_patna_branch_under_the_head_office(
+            self, client, db_session, onboarding_ready, catalogue, notifications, storage, stub_pdf, real_handover_text):
+        from app.handover import pdf
+        from app.memory.models import CustomerOnboarding
+        oid = handed_over(client, db_session, catalogue, notifications)
+        html = pdf.build_html(db_session, db_session.get(CustomerOnboarding, oid), pack_of(db_session))
+        assert html.index("Patna Branch: C/O Parbati Bhawan") > html.index("Kolkata – 700107")
+        assert "P.O.- New Jaganpura, Patna – 800027, Bihar" in html
+
     def test_hindi_and_bengali_names_are_escaped_not_dropped(self, client, db_session, onboarding_ready, catalogue,
                                                              notifications, storage, stub_pdf, real_handover_text):
         from app.handover import pdf

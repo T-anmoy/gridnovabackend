@@ -60,6 +60,13 @@ def load_content_config(force_reload: bool = False) -> dict:
     return _CONTENT_CONFIG
 
 
+def branch_offices(cfg: Optional[dict] = None) -> list[str]:
+    """`company.branch_offices` — printed under the head-office address on every PDF
+    letterhead and stated by the chat. One source for all of them."""
+    company = (cfg if cfg is not None else load_content_config()).get("company") or {}
+    return [str(b) for b in (company.get("branch_offices") or []) if str(b).strip()]
+
+
 def _tier_bounds(tier: dict) -> tuple[float, float]:
     """Return (min, max) for a tier; a null/absent max means unbounded (+inf)."""
     lo = tier.get("capacity_min_kw", 0) or 0

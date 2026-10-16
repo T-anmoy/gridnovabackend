@@ -41,7 +41,8 @@ def service_contact() -> dict:
 def _printed_text() -> list[str]:
     main = company()
     contact = service_contact()
-    return [main["legal_name"], main["address"], contact["phone"], contact["email"],
+    from app.proposals.content_engine import branch_offices
+    return [main["legal_name"], main["address"], *branch_offices(), contact["phone"], contact["email"],
             config.warranty()["om_after_free_terms"]]
 
 
@@ -85,6 +86,7 @@ def build_html(db: Session, onboarding: CustomerOnboarding, pack: HandoverPack) 
     from sqlalchemy import select
 
     from app.execution import register
+    from app.proposals.content_engine import branch_offices
     from app.timezones import format_ist_date
 
     customer = db.get(Customer, onboarding.customer_id)
@@ -145,6 +147,7 @@ table.grid {{ width: 100%; border-collapse: collapse; }} table.grid th, table.gr
   padding: 1.5mm 2mm; width: auto; }} .company {{ margin-bottom: 5mm; }} .sig {{ max-height: 28mm; display: block; }}
 </style></head><body>
 <div class="company"><strong>{_e(main["legal_name"])}</strong><br>{_e(main["address"])}<br>
+{"".join(f"{_e(b)}<br>" for b in branch_offices())}
 {_e(contact["phone"])} · {_e(contact["email"])}</div>
 <h1>Handover pack and warranty certificate</h1>
 <h2>System</h2>{_table(system_rows)}

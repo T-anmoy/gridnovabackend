@@ -49,6 +49,25 @@ def _business_hours_phrase() -> str:
     return f"{_fmt(settings.business_hours_start_ist)} – {_fmt(settings.business_hours_end_ist)} IST"
 
 
+def _branch_offices_block() -> str:
+    """Branch offices from config/proposal_content.yaml — the same lines every PDF
+    letterhead prints under the head office."""
+    from app.proposals.content_engine import branch_offices
+
+    return "".join(f"\nBranch office: {branch}" for branch in branch_offices())
+
+
+def _online_pricing_coverage() -> str:
+    """Which states online prices cover, built from config/pricing_policy.yaml
+    `applicability.states` so the chat can never drift from the pricing config."""
+    from app.pricing import policy
+
+    states = [str(s) for s in policy.applicability()["states"]]
+    listed = states[0] if len(states) == 1 else ", ".join(states[:-1]) + " and " + states[-1]
+    return (f"Online package prices and the Solar Calculator currently cover {listed}; "
+            "for other states a team member will follow up.")
+
+
 def _packages_block() -> str:
     """Packages, makes and terms from Grid Nova's Pricing & Equipment Master Data
     (config/price_list.yaml) — makes "or equivalent" as supplied, never models, never
@@ -89,7 +108,7 @@ def _packages_block() -> str:
 COMPANY_FACTS = f"""GRID NOVA ENERGY — VERIFIED FACTS
 
 Company: Grid Nova Energy — "Eco-Energy Initiative"
-Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal
+Head office: Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal{_branch_offices_block()}
 Contact: +91 98747 74440, info@gridnova.in, www.gridnova.in
 Business hours: {_business_days_phrase()}, {_business_hours_phrase()}
 
@@ -109,6 +128,7 @@ offer these as current services).
 
 Service coverage: Grid Nova now serves customers across India, not a limited
 region — this supersedes any earlier West Bengal/Bihar-only guidance.
+{_online_pricing_coverage()}
 
 PM Surya Ghar residential rooftop subsidy (Central Financial Assistance):
 ₹{RATE_PER_KW_FIRST_2KW:,.0f}/kW for the first 2kW, ₹{RATE_PER_KW_THIRD_KW:,.0f} for the 3rd kW,

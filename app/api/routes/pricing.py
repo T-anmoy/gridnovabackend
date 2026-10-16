@@ -54,9 +54,14 @@ class _BaseEstimateRequest(BaseModel):
         return self
 
     def resolved_size_kw(self) -> float:
+        """The given size, or the size the bill implies under the ONE bill-sizing rule
+        the Solar Calculator, onboarding and the survey use (app/pricing/sizing.py,
+        state-aware) — the same bill never gets two sizes (BE-7 N6). Rounded exactly
+        as the instant estimate hands its consumption size to the price list."""
         if self.size_kw is not None:
             return self.size_kw
-        return pricing_engine.estimate_size_kw_from_monthly_bill(self.monthly_bill_inr)
+        from app.pricing import sizing
+        return round(sizing.estimate_size_from_bill(self.monthly_bill_inr, self.state), 2)
 
 
 class PublicEstimateRequest(_BaseEstimateRequest):
