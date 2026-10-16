@@ -26,7 +26,7 @@ env:
 
 jobs:
   lint-and-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
         run: pip-audit --require-hashes --disable-pip -r requirements.lock
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -75,8 +75,8 @@ jobs:
   # Same suite against a real PostgreSQL (the production engine). SQLite does not
   # enforce foreign keys, varchar lengths or native enum types; this job does.
   test-postgres:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
 
     services:
       postgres:
@@ -135,7 +135,7 @@ jobs:
         run: python -m pytest -q
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
