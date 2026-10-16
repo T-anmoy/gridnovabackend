@@ -33,7 +33,8 @@ COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
                    "survey_admin", "commissions_admin", "associate_commissions", "network_admin", "handover_admin",
-                   "associate_handover")
+                   "associate_handover", "archive_admin")
+ARCHIVE_READERS = set(ROLES)
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
 PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
@@ -130,6 +131,16 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link/revoke"): (EXECUTION_ACTORS, {}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf/regenerate"): (EXECUTION_ACTORS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf"): (EXECUTION_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/template.csv"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/archive/imports"):
+        (ADMIN_ONLY, {"files": {"file": ("a.csv", b"scheme_or_segment,state,district,commissioning_date,capacity_kw\n",
+                                          "text/csv")}}),
+    ("GET", "/api/v1/dashboard/archive/imports"): (ADMIN_ONLY, {}),
+    ("GET", "/api/v1/dashboard/archive/imports/{batch_id}"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/archive/imports/{batch_id}/void"): (ADMIN_ONLY, {"json": {"reason": "matrix test"}}),
+    ("GET", "/api/v1/dashboard/archive/projects"): (ARCHIVE_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/projects/{project_id}"): (ARCHIVE_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/stats"): (ARCHIVE_READERS, {}),
     ("GET", "/api/v1/dashboard/service-requests"): (EXECUTION_READERS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (EXECUTION_READERS, {}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (SERVICE_ACTORS, SR_FORM),
@@ -354,7 +365,8 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
               "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999,
-              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999, "request_id": 999999}
+              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999, "request_id": 999999,
+              "project_id": 999999}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 

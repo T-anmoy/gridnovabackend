@@ -1135,6 +1135,25 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  # ── BE-8: Project Archive (config/archive.yaml) ─────────────────────────────────
+  - id: ARC-1
+    area: policies
+    location: {file: config/archive.yaml, key: import}
+    description: "The Project Archive is empty: Grid Nova's completed-project list has not been imported. Resolved once a non-voided import batch holds at least one project."
+    dummy_value: no imported archive rows
+    needed_from_grid_nova: Please send Grid Nova's completed-project list in the Project Archive template (one row per project).
+    blocking: blocks_feature
+    probe: count_query
+    query: project_archive_empty
+  - id: ARC-2
+    area: policies
+    location: {file: config/archive.yaml, key: visibility}
+    description: "Which roles see which fields of an archived or live project (customer contact, money, address, notes). Engineering's reading of the 15 Oct decision: Admin and Management everything; Accounts everything except customer phone, email and consumer number; Operations and Engineer technical, location, dates, no contact and no money; Sales technical, state and district, dates only."
+    dummy_value: engineering's role-to-field map
+    needed_from_grid_nova: Please confirm who may see what in the project archive - in particular customer names, phone numbers, addresses and contract values - for Admin, Management, Accounts, Operations, Engineers and Sales.
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.

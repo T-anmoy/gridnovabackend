@@ -2400,3 +2400,141 @@ event.listen(ServiceRequestEvent.__table__, "after_create",
              DDL(SERVICE_EVENTS_PG_TRIGGER).execute_if(dialect="postgresql"))
 for _sql in SERVICE_EVENTS_SQLITE_TRIGGERS:
     event.listen(ServiceRequestEvent.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+
+
+# ── Project Archive (BE-8) — app/archive/, app/projects/view.py ───────────────────
+# Grid Nova's completed projects that never went through this system, imported from a
+# CSV (Admin only). Nothing is hard-deleted: voiding a batch stamps voided_at on its
+# rows, and every read path hides them.
+
+class ArchiveScheme(str, enum.Enum):
+    pm_surya_ghar_residential = "pm_surya_ghar_residential"
+    housing_society = "housing_society"
+    commercial = "commercial"
+    industrial = "industrial"
+    institutional_govt = "institutional_govt"
+    wbreda_school = "wbreda_school"
+    pm_kusum_pump = "pm_kusum_pump"
+    street_lighting = "street_lighting"
+    ground_mounted = "ground_mounted"
+    other = "other"
+
+
+class ArchiveSystemType(str, enum.Enum):
+    on_grid = "on_grid"
+    off_grid = "off_grid"
+    hybrid = "hybrid"
+    pump = "pump"
+    street_light = "street_light"
+    other = "other"
+
+
+class ArchiveBatchStatus(str, enum.Enum):
+    validated = "validated"
+    imported = "imported"
+    voided = "voided"
+
+
+class ArchiveImportBatch(Base):
+    __tablename__ = "archive_import_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uploaded_by: Mapped[str] = mapped_column(String, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ArchiveBatchStatus] = mapped_column(SAEnum(ArchiveBatchStatus), nullable=False,
+                                                       default=ArchiveBatchStatus.imported)
+    # The validation report as it stood at import (errors, warnings, counts).
+    report: Mapped[dict] = mapped_column(JSON, nullable=False)
+    voided_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    voided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    void_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ArchivedProject(Base):
+    """One completed (or historical) project from an import. Personal columns
+    (customer_phone/email, consumer_number) and money are role-restricted on every read
+    path (config/archive.yaml, app/projects/view.py)."""
+    __tablename__ = "archived_projects"
+    __table_args__ = (
+        Index("uq_archived_projects_ref", "grid_nova_ref", unique=True,
+              sqlite_where=text("grid_nova_ref IS NOT NULL AND voided_at IS NULL"),
+              postgresql_where=text("grid_nova_ref IS NOT NULL AND voided_at IS NULL")),
+        Index("uq_archived_projects_project", "project_id", unique=True,
+              sqlite_where=text("project_id IS NOT NULL AND voided_at IS NULL"),
+              postgresql_where=text("project_id IS NOT NULL AND voided_at IS NULL")),
+        Index("ix_archived_projects_state", "state"),
+        Index("ix_archived_projects_district", "district"),
+        Index("ix_archived_projects_scheme", "scheme_or_segment"),
+        Index("ix_archived_projects_commissioning", "commissioning_date"),
+        Index("ix_archived_projects_capacity", "capacity_kw"),
+        Index("ix_archived_projects_batch", "import_batch_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    grid_nova_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    import_batch_id: Mapped[int] = mapped_column(ForeignKey("archive_import_batches.id"), nullable=False)
+    source_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    voided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+    scheme_or_segment: Mapped[ArchiveScheme] = mapped_column(SAEnum(ArchiveScheme), nullable=False)
+    system_type: Mapped[Optional[ArchiveSystemType]] = mapped_column(SAEnum(ArchiveSystemType), nullable=True)
+    capacity_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+    pump_hp: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    street_lamp_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Where: the text as sent is kept; the ids are set when it matched the territory master.
+    state: Mapped[str] = mapped_column(String(120), nullable=False)
+    district: Mapped[str] = mapped_column(String(120), nullable=False)
+    block: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    state_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_states.id"), nullable=True)
+    district_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_districts.id"), nullable=True)
+    block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    address_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pincode: Mapped[Optional[str]] = mapped_column(String(6), nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Restricted: customer.
+    customer_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    customer_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    customer_email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    discom: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    consumer_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+    # Restricted: money (exact decimals, never floats).
+    contract_value_inr: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    subsidy_amount_inr: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
+    module_make: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    module_model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    module_wattage_wp: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    module_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    module_dcr: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)   # yes | no | unknown
+    inverter_make: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    inverter_model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    inverter_capacity_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 3), nullable=True)
+    inverter_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    structure_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    battery_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    other_equipment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    order_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    installation_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    commissioning_date: Mapped[date] = mapped_column(Date, nullable=False)
+    net_meter_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end_modules: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end_inverter: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+
+    om_status: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # [{"label", "url"}] — URLs are stored as given and never fetched.
+    documents: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Set by the importer: [{"code", "column"?, "message"}].
+    data_quality_flags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

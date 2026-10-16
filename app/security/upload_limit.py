@@ -27,6 +27,7 @@ _HANDOVER_ACK_PATH = re.compile(r"^/api/v1/dashboard/onboardings/\d+/handover/ac
 _SERVICE_REQUEST_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/service-requests|dashboard/onboardings/\d+/service-requests"
     r"|public/handover/[^/]+/service-requests)/?$")
+_ARCHIVE_IMPORT_PATH = re.compile(r"^/api/v1/dashboard/archive/imports/?$")
 _FILE_ROUTES = (
     (_ONBOARDING_FILE_PATH, "app.api.routes.associate_onboarding", "MAX_FILE_BYTES"),
     (_EXECUTION_FILE_PATH, "app.execution.files", "MAX_FILE_BYTES"),
@@ -71,6 +72,10 @@ def limit_for(path: str):
         from app.handover import config as handover_config   # read at call time: config decides
         kb = handover_config.handover()["signature_max_kb"]
         return kb * 1024 + MULTIPART_OVERHEAD_BYTES, f"Signature exceeds the {kb} KB limit."
+    if _ARCHIVE_IMPORT_PATH.match(path):
+        from app.archive import config as archive_config   # read at call time: config decides
+        mb = archive_config.import_limits()["max_file_mb"]
+        return mb * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES, f"File exceeds the {mb}MB limit."
     if _SERVICE_REQUEST_PATH.match(path):
         from app.associates import uploads
         from app.handover import config as handover_config

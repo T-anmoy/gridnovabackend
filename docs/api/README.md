@@ -17,6 +17,7 @@ these files disagree, the code wins — fix the file.
 | [staff_contracts.md](staff_contracts.md) | BE-6: response shapes, roles, scoping and error strings for the staff lead endpoints (list/detail/assign/fields/stage/export/schedule-meeting), customer memory, memory ask and reflect; server-side lead filters; chat `locale` |
 | [commissions.md](commissions.md) | BE-4: commission rate schedules, the commission ledger (earn / reversal / recovery), approval, monthly payout batches and TDS, Accounts exports (commissions, TDS, payout bank file), commission queries and their overdue job, the associate commission/payout views and home-feed items, the network summary; PAN encrypted at rest |
 | [handover_warranty.md](handover_warranty.md) | BE-5: handover pack and gate, warranty register, handover PDF and the customer's tokenised link, service requests (staff / associate / customer), work-queue counts, `check-service-requests`, home-feed items |
+| [project_archive.md](project_archive.md) | BE-8: Project Archive — Admin CSV import (template, dry run, commit, void), archived-project list / detail / statistics, the live-and-archive project view, per-role field visibility |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)
