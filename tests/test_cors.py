@@ -41,3 +41,10 @@ def test_production_cannot_run_on_the_default_origins():
 def test_production_accepts_explicit_origins():
     errors, _ = production_config_problems(Settings(_env_file=None, **GOOD))
     assert not any("ALLOWED_ORIGINS" in e for e in errors)
+
+def test_retry_after_is_readable_by_the_dashboard(client):
+    """A 429 from Nova Records carries Retry-After; the browser only lets the dashboard read it
+    when the response exposes it."""
+    r = client.get(URL, headers={"Origin": "http://localhost:3000"})
+    exposed = [h.strip().lower() for h in r.headers.get("access-control-expose-headers", "").split(",")]
+    assert "retry-after" in exposed

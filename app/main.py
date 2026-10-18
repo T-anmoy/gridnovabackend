@@ -142,6 +142,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The dashboard reads Retry-After on a 429 to show when Nova can be asked again.
+    expose_headers=["Retry-After"],
 )
 
 # Routes
