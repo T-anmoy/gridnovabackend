@@ -12,6 +12,7 @@ from app.api.routes.agent_governance import router as agent_governance_router
 from app.api.routes.associate_handover import router as associate_handover_router
 from app.api.routes.handover_admin import router as handover_admin_router
 from app.api.routes.archive_admin import router as archive_admin_router
+from app.api.routes.nova_records import router as nova_records_router
 from app.api.routes.public_handover import router as public_handover_router
 from app.api.routes.associate_onboarding import router as associate_onboarding_router
 from app.api.routes.associate_execution import router as associate_execution_router
@@ -74,6 +75,9 @@ async def lifespan(app: FastAPI):
     # And the project archive (config/archive.yaml).
     from app.archive.config import load as load_archive_config
     load_archive_config()
+    # And Nova Records, the staff assistant (config/nova_records.yaml).
+    from app.records.config import load as load_records_config
+    load_records_config()
     # And the on-site survey (config/site_survey.yaml).
     from app.survey.config import load as load_survey_config
     load_survey_config()
@@ -173,6 +177,7 @@ app.include_router(network_admin_router)
 app.include_router(public_receipts_router)
 app.include_router(handover_admin_router)
 app.include_router(archive_admin_router)
+app.include_router(nova_records_router)
 app.include_router(associate_handover_router)
 app.include_router(public_handover_router)
 

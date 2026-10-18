@@ -21,7 +21,7 @@ class TestListAgents:
         body = response.json()
 
         agents = {a["id"]: a for a in body["agents"]}
-        assert set(agents) == {"sales_agent", "proposal_agent", "memory_agent"}
+        assert set(agents) == {"sales_agent", "proposal_agent", "memory_agent", "nova_records"}
         assert agents["sales_agent"]["enabled"] is True
         assert agents["sales_agent"]["override_source"] == "env_var"
         assert body["action_budget"]["replies_per_lead_per_24h"] > 0

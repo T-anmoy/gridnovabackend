@@ -178,6 +178,8 @@ def reset_chat_inmemory_state():
     import app.api.routes.public_receipts as public_receipts
     associate_equipment._request_log.clear()
     public_receipts._receipt_request_log.clear()
+    from app.records import store as nova_records_store
+    nova_records_store._minute_log.clear()
     yield
     for log in (public_associates._apply_request_log, public_associates._verify_request_log,
                 public_associates._lookup_request_log):

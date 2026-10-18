@@ -31,8 +31,8 @@ from app.archive import config
 from app.memory.models import (
     Associate, ArchivedProject, Customer, CustomerOnboarding, Equipment, EmployeeRole, InstalledUnit,
     InstalledUnitCategory, InstalledUnitStatus, Lead, Project, ProjectExecution, ProjectStageEvent, ProjectWarranty,
-    Proposal, ProposalInputs, ProposalStatus, ServiceRequest, ServiceRequestStatus, TerritoryDistrict, TerritoryState,
-    WarrantyItem,
+    Proposal, ProposalInputs, ProposalStatus, ServiceRequest, ServiceRequestStatus, TerritoryBlock, TerritoryDistrict,
+    TerritoryState, WarrantyItem,
 )
 
 CARD_FIELDS = ("scheme_or_segment", "system_type", "capacity_kw", "pump_hp", "street_lamp_count", "state", "district",
@@ -243,7 +243,9 @@ def _live_fields(db: Session, project: Project, ctx: dict) -> tuple[dict, dict]:
     put("state", state_name or project.state, ot if state_name else pt, onboarding.id if state_name else project.id)
     put("district", district_name or (inputs.district if inputs else None), ot if district_name else "proposal_inputs",
         onboarding.id if district_name else (inputs.id if inputs else None))
-    put("block", None, ot, onboarding.id if onboarding else None)
+    # The onboarding's territory block, like the archive's block; none on record → null (never guessed).
+    block_row = db.get(TerritoryBlock, onboarding.block_id) if onboarding is not None and onboarding.block_id else None
+    put("block", block_row.name if block_row else None, ot, onboarding.id if onboarding else None)
     put("address_text", (inputs.full_address if inputs and inputs.full_address else project.location),
         "proposal_inputs" if inputs and inputs.full_address else pt, inputs.id if inputs and inputs.full_address else project.id)
     put("pincode", inputs.pin_code if inputs else None, "proposal_inputs", inputs.id if inputs else None)

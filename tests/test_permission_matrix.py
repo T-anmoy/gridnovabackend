@@ -33,7 +33,7 @@ COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
                    "survey_admin", "commissions_admin", "associate_commissions", "network_admin", "handover_admin",
-                   "associate_handover", "archive_admin")
+                   "associate_handover", "archive_admin", "nova_records")
 ARCHIVE_READERS = set(ROLES)
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
@@ -141,6 +141,13 @@ STAFF = {
     ("GET", "/api/v1/dashboard/archive/projects"): (ARCHIVE_READERS, {}),
     ("GET", "/api/v1/dashboard/archive/projects/{project_id}"): (ARCHIVE_READERS, {}),
     ("GET", "/api/v1/dashboard/archive/stats"): (ARCHIVE_READERS, {}),
+    # BE-9 Nova Records: every staff role may ask (answers are scoped per role, tests/
+    # test_records_tools.py); conversations and feedback are the caller's own (404 otherwise).
+    ("POST", "/api/v1/dashboard/nova/ask"): (set(ROLES), {"json": {"question": "How many projects by district?"}}),
+    ("GET", "/api/v1/dashboard/nova/conversations"): (set(ROLES), {}),
+    ("GET", "/api/v1/dashboard/nova/conversations/{conversation_id}"): (set(ROLES), {}),
+    ("POST", "/api/v1/dashboard/nova/turns/{turn_id}/feedback"): (set(ROLES), {"json": {"helpful": True}}),
+    ("POST", "/api/v1/dashboard/nova/internal/check-nova-records-retention"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/service-requests"): (EXECUTION_READERS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (EXECUTION_READERS, {}),
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (SERVICE_ACTORS, SR_FORM),
@@ -366,7 +373,7 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
               "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999,
               "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999, "request_id": 999999,
-              "project_id": 999999}
+              "project_id": 999999, "conversation_id": "0" * 32, "turn_id": "0" * 32}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 

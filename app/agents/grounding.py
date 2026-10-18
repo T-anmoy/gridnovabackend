@@ -182,6 +182,13 @@ def check_grounding(answer: str, context_block: str, evidence: str = "") -> Grou
         result.violations.append({"code": NO_CITATION,
                                   "detail": "cites no record and is not the not-on-record answer"})
 
+    for item in _unsupported(facts, corpus):
+        result.violations.append({"code": UNSUPPORTED_FACT, "detail": f"states {item}, which no record holds"})
+    return result
+
+
+def _unsupported(facts: dict, corpus: str) -> list[str]:
+    """Each stated fact the corpus does not hold, as "<kind> <value>"."""
     have = extract_facts(corpus)
     numbers = _evidence_numbers(corpus)
     unsupported = []
@@ -192,9 +199,7 @@ def check_grounding(answer: str, context_block: str, evidence: str = "") -> Grou
     unsupported += [f"date {d} {m}" for d, m in sorted(facts["day_month"] - have_day_months)]
     for kind in ("emails", "phones", "references"):
         unsupported += [f"{kind[:-1]} {v}" for v in sorted(facts[kind] - have[kind])]
-    for item in unsupported:
-        result.violations.append({"code": UNSUPPORTED_FACT, "detail": f"states {item}, which no record holds"})
-    return result
+    return unsupported
 
 
 def records_found_answer(context_block: str, customer_label: str) -> str:
@@ -205,3 +210,123 @@ def records_found_answer(context_block: str, customer_label: str) -> str:
         return f"Nothing is on record for {customer_label} that matches that question."
     return (f"Records found for {customer_label} (the written answer could not be verified "
             f"against them, so here they are in relevance order):\n\n{context_block}")
+
+
+# ── Nova Records (BE-9) ────────────────────────────────────────────────────────
+# A staff answer composed from read-only tool results. Same fact checks as above, plus
+# what only a records answer can get wrong: citing a record no tool returned, stating a
+# total, count or average that no tool computed (the model must never do arithmetic),
+# and stating a kind of value the caller's role may not see.
+
+MODEL_ARITHMETIC = "model_arithmetic"
+HIDDEN_FIELD = "hidden_field"
+CLAIMED_ACTION = "claimed_action"
+RECORDS_UNVERIFIED = "records_answer_unverified"   # the audit action when a fallback was sent
+
+# A citation is whatever sits in brackets and looks like a reference (it has a digit or
+# a hyphen): [GNE-WB-RES-2026-00125], [ARC-17], [L45], [C12], [M3], [SR-4], [COMPANY].
+_RE_RECORD_CITATION = re.compile(r"\[([A-Za-z0-9][A-Za-z0-9/_.-]{0,99})\]")
+_RE_RECORD_REF = re.compile(r"(?<![\w-])(?:GN[ERA]|ARC|SR|PKG|EQ|PRICE)-[A-Z0-9]+(?:[-_][A-Z0-9]+)*\b", re.I)
+_RE_AGGREGATE_WORDS = re.compile(
+    r"\b(?:total(?:s|ling|ing)?|sum|in all|altogether|combined|average|avg|mean|overall|"
+    r"how many|number of|count(?:s|ed)?)\b", re.I)
+_RE_COUNTED = re.compile(r"\b(\d[\d,]*)\s+(?:\w+\s+){0,2}?(?:projects?|leads?|customers?|installations?|systems?|"
+                         r"requests?|associates?|results?|records?|matches|sites?)\b", re.I)
+_RE_SENTENCE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
+_RE_MONEY_MARK = re.compile(r"(?:₹|\brs\.?\s*\d|\binr\b|\blakhs?\b|\bcrores?\b|\brupees?\b)", re.I)
+_SCALES = (1e3, 1e5, 1e7)
+# Nova Records changes nothing, so an answer that says it did something is wrong however
+# well its facts check out ("I have approved the refund", "the request has been closed").
+_ACTION_VERBS = (r"approved|sent|emailed|messaged|updated|changed|marked|assigned|reassigned|booked|scheduled|"
+                 r"deleted|removed|cancelled|canceled|refunded|recorded|closed|resolved|created|added|notified|paid")
+_RE_CLAIMED_ACTION = re.compile(
+    rf"\b(?:i(?:'ve| have)?|nova(?: records)? has)\s+(?:now\s+|just\s+|already\s+)?(?:{_ACTION_VERBS})\b|"
+    rf"\b(?:has|have)\s+been\s+(?:{_ACTION_VERBS})\s+(?:by me|for you|as (?:you )?requested|now)\b|"
+    rf"\bi(?:'ll| will)\s+(?:now\s+)?(?:approve|send|email|update|change|mark|assign|book|delete|cancel|refund|"
+    rf"record|close|resolve|notify|pay)\b", re.I)
+
+
+def record_citations(text: str) -> set[str]:
+    return {m for m in _RE_RECORD_CITATION.findall(text or "") if any(ch.isdigit() for ch in m) or "-" in m
+            or m.isupper() and len(m) > 3}
+
+
+def _scrub_for_numbers(text: str) -> str:
+    text = _RE_RECORD_CITATION.sub(" ", text)
+    text = _RE_RECORD_REF.sub(" ", text)
+    for pattern in (_RE_ISO_DATE, _RE_DMY_SLASH, _RE_D_MON_Y, _RE_MON_D_Y, _RE_D_MON):
+        text = pattern.sub(" ", text)
+    return guardrails._RE_PHONE.sub(" ", guardrails._RE_EMAIL.sub(" ", text))
+
+
+def _numbers_ok(sentence: str, allowed: set) -> list[float]:
+    """Raw numbers in `sentence` that are neither allowed themselves nor the leading
+    figure of an allowed scaled amount ("₹4.5 lakh" for 450000)."""
+    scaled = {v for v in guardrails._numbers_in(sentence) if not isinstance(v, tuple)}
+    bad = []
+    for raw in _RE_ANY_NUMBER.findall(sentence):
+        v = _value(raw)
+        if v in allowed or any(m in allowed and abs(m - v * k) < 0.5 for m in scaled for k in _SCALES):
+            continue
+        bad.append(v)
+    return bad
+
+
+def check_records_answer(answer: str, evidence: str, *, known_refs: set, computed: set, counts: set,
+                         searched_text: str = "", sees_money: bool = True, sees_contact: bool = True,
+                         allow_no_citation: bool = False) -> GroundingResult:
+    """Check a Nova Records answer.
+
+    evidence   the tool results the answer may state facts from (customer-written free
+               text excluded by the caller, so an instruction inside a note cannot make
+               its own numbers "true")
+    known_refs every ref a tool returned (case-insensitive)
+    computed   every total / average / count a tool computed in SQL (as floats)
+    counts     every count a tool returned (search totals, row counts, group sizes)
+    searched_text  the filters as applied — numbers the employee asked about (a year,
+               a size) may be repeated in a total's sentence
+    """
+    answer = answer or ""
+    result = GroundingResult(citations=record_citations(answer), facts=extract_facts(answer))
+    known = {r.upper() for r in known_refs}
+    for marker in sorted(result.citations):
+        if marker.upper() not in known:
+            result.violations.append({"code": UNKNOWN_CITATION,
+                                      "detail": f"cites [{marker}], which no tool returned"})
+    for ref in sorted({r.upper() for r in _RE_RECORD_REF.findall(answer)} - known):
+        result.violations.append({"code": UNSUPPORTED_FACT, "detail": f"names {ref}, which no tool returned"})
+    facts = result.facts
+    stated_any = any(facts[k] for k in facts)
+    if not result.citations and not allow_no_citation and not (_RE_NOT_ON_RECORD.search(answer) and not stated_any):
+        result.violations.append({"code": NO_CITATION, "detail": "cites no record and is not the not-on-record answer"})
+    for item in _unsupported(facts, f"{evidence}\n{' '.join(known_refs)}"):
+        result.violations.append({"code": UNSUPPORTED_FACT, "detail": f"states {item}, which no record holds"})
+
+    searched_numbers = {_value(n) for n in _RE_ANY_NUMBER.findall(searched_text or "")}
+    allowed_totals = set(computed) | set(counts) | searched_numbers
+    scrubbed = _scrub_for_numbers(indic.normalise(answer))
+    for sentence in _RE_SENTENCE.findall(scrubbed):
+        if _RE_AGGREGATE_WORDS.search(sentence):
+            for v in _numbers_ok(sentence, allowed_totals):
+                result.violations.append({"code": MODEL_ARITHMETIC,
+                                          "detail": f"states {v:g} as a total, count or average no tool computed"})
+    for raw in _RE_COUNTED.findall(scrubbed):
+        v = _value(raw)
+        if v not in counts and v not in computed and v not in searched_numbers:
+            result.violations.append({"code": MODEL_ARITHMETIC, "detail": f"counts {v:g}, which no tool counted"})
+
+    if _RE_CLAIMED_ACTION.search(answer):
+        result.violations.append({"code": CLAIMED_ACTION,
+                                  "detail": "says an action was or will be taken; Nova Records only reads records"})
+    if not sees_money and _RE_MONEY_MARK.search(answer):
+        result.violations.append({"code": HIDDEN_FIELD, "detail": "states an amount of money; the role sees none"})
+    if not sees_contact and (facts["emails"] or facts["phones"]):
+        result.violations.append({"code": HIDDEN_FIELD, "detail": "states contact details; the role sees none"})
+    # One violation per distinct detail.
+    seen, unique = set(), []
+    for v in result.violations:
+        if v["detail"] not in seen:
+            seen.add(v["detail"])
+            unique.append(v)
+    result.violations = unique
+    return result

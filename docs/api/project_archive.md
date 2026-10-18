@@ -144,7 +144,8 @@ has one, else `ARC-<id>`; `GNE-…` for a live project. **Every value carries `s
 an aggregate (installed units grouped by make and model). A card holds `scheme_or_segment,
 system_type, capacity_kw, pump_hp, street_lamp_count, state, district, block,
 commissioning_date, module_make, inverter_make, customer_name` (as the role allows). A live
-project's fields add `current_stage`, `amount_received_inr`, `amount_outstanding_inr`,
+project's `block` is its onboarding's territory block (`source_table: customer_onboardings`;
+`null` when the onboarding has none). A live project's fields add `current_stage`, `amount_received_inr`, `amount_outstanding_inr`,
 `open_service_requests`, `associate_id`, `associate_name`; its sections come from installed
 units, stage events, the warranty register and open service requests. `GET /projects/{id}` takes an
 **archived** project id; a live project is reached through `project_dossier` (BE-9) or the live

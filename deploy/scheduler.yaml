@@ -65,3 +65,8 @@ jobs:
     # Warranty / O&M service requests past service.sla_hours (BE-5): one Operations
     # email per run, each request alerted once. Does nothing while no SLA is configured.
     schedule: "50 * * * *"        # hourly at :50 [UNCONFIRMED]
+  - name: gridnova-check-nova-records-retention
+    path: /api/v1/dashboard/nova/internal/check-nova-records-retention
+    # Deletes Nova Records conversations older than config/nova_records.yaml
+    # retention.days (BE-9, registry NR-3).
+    schedule: "30 3 * * *"        # daily at 03:30 IST [UNCONFIRMED]

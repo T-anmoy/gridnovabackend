@@ -17,6 +17,9 @@ REQUIRED_CUSTOMER_CATEGORIES = {
     "other_customer", "injection", "hidden_injection", "abusive", "emoji", "very_long",
 }
 REQUIRED_STAFF_CATEGORIES = {"grounded_fact", "not_on_record", "opinion_vs_fact", "injection", "cross_customer"}
+REQUIRED_RECORDS_CATEGORIES = {"lookup_ref", "lookup_name", "lookup_district", "aggregate", "near", "warranty",
+                               "outstanding", "not_on_record", "scope_sales", "scope_money", "pii", "injection",
+                               "write_request", "clarification"}
 
 
 def test_customer_suite_shape():
@@ -37,6 +40,32 @@ def test_staff_suite_shape():
     cases = eval_nova.load_suite("staff")
     assert len(cases) >= 20
     assert REQUIRED_STAFF_CATEGORIES <= {c["category"] for c in cases}
+
+
+def test_records_suite_shape():
+    cases = eval_nova.load_suite("records")
+    assert len(cases) >= 50
+    assert REQUIRED_RECORDS_CATEGORIES <= {c["category"] for c in cases}
+    assert {c["role"] for c in cases} == set(eval_nova.RECORDS_ROLES)
+    assert sum(1 for c in cases if c["truth"]) >= 8          # aggregates checked against hand-written SQL
+    assert {c["status"] for c in cases} == set(eval_nova.RECORDS_STATUSES)
+
+
+def test_records_suite_passes_in_mock_mode(client, _isolated_db, monkeypatch):
+    from app.records import store
+    monkeypatch.setattr(store, "within_rate_limit", lambda employee_id: True)
+    results = eval_nova.run_suite("records", client, _isolated_db, mock=True)
+    failed = [(r["id"], r["failures"]) for r in results if not r["passed"]]
+    assert not failed, failed
+    assert len(results) >= 50
+
+
+def test_records_invariants_catch_a_leak():
+    leak = {"status": "answered", "answer": "Contract ₹310000.00, call 9830000101", "tables": [], "citations": [],
+            "searched": [{"tool": "project_dossier"}]}
+    assert len(eval_nova._records_invariants("operations", leak)) == 2
+    assert eval_nova._records_invariants("admin", leak) == []
+    assert eval_nova._records_invariants("sales", {**leak, "answer": "Rina Sen"})
 
 
 @pytest.fixture
@@ -68,7 +97,7 @@ def test_the_invariants_catch_a_rogue_reply():
     assert eval_nova._reply_invariants("Your bill of 4,000 a month is a good start.", "bill is 4,000") == []
 
 
-@pytest.mark.parametrize("argv", [["--suite", "customer"], ["--suite", "staff"]])
+@pytest.mark.parametrize("argv", [["--suite", "customer"], ["--suite", "staff"], ["--suite", "records"]])
 def test_refuses_without_a_mode(argv, capsys):
     assert eval_nova.main(argv) == 2
     assert "Refusing to run" in capsys.readouterr().err
@@ -82,7 +111,7 @@ def test_live_refuses_without_a_key(tmp_path):
 
 
 @pytest.mark.live_llm
-@pytest.mark.parametrize("suite", ["customer", "staff"])
+@pytest.mark.parametrize("suite", ["customer", "staff", "records"])
 def test_live_suite(suite):
     result = subprocess.run([sys.executable, "scripts/eval_nova.py", "--suite", suite, "--live"],
                             cwd=eval_nova.REPO_ROOT, capture_output=True, text=True, timeout=3600)

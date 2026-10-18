@@ -2538,3 +2538,59 @@ class ArchivedProject(Base):
     documents: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Set by the importer: [{"code", "column"?, "message"}].
     data_quality_flags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+# ── Nova Records (BE-9) ───────────────────────────────────────────────────────────
+# The staff assistant's conversations. Ids are random hex, never sequential, so one
+# employee cannot walk another's conversation ids. Kept for config/nova_records.yaml
+# retention.days (registry NR-3), then deleted by the retention job.
+
+class NovaConversation(Base):
+    __tablename__ = "nova_conversations"
+    __table_args__ = (Index("ix_nova_conversations_employee_updated", "employee_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    # The role the employee held when the conversation started (answers are scoped per turn).
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class NovaTurn(Base):
+    """One question and its answer. `response` is the body the API returned (answer,
+    citations, tables, searched, suggestions), so a conversation reads back exactly as it
+    was shown; `tool_calls`, `refs` and `verifier` are how it was produced."""
+    __tablename__ = "nova_turns"
+    __table_args__ = (
+        Index("ix_nova_turns_conversation_created", "conversation_id", "created_at"),
+        Index("ix_nova_turns_employee_created", "employee_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("nova_conversations.id"), nullable=False)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[dict] = mapped_column(JSON, nullable=False)
+    intent: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    planner: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # model | keyword
+    composer: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # model | template
+    tool_calls: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    verifier: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    run_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    feedback_helpful: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    feedback_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feedback_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)

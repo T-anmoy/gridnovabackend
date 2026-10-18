@@ -185,3 +185,24 @@ class TestNothingExposesPersonalDocuments:
             text = str(view.project_dossier(db_session, subject, EMPLOYEE("admin"))).lower()
             for banned in ("aadhaar", "pan_number", "bank_account", "ifsc", "fernet"):
                 assert banned not in text
+
+
+class TestLiveBlock:
+    def test_the_onboardings_block_is_shown(self, db_session, live):
+        from app.memory.models import TerritoryBlock
+        onboarding = db_session.execute(select(CustomerOnboarding).where(
+            CustomerOnboarding.project_id == live.id)).scalar_one()
+        expected = db_session.get(TerritoryBlock, onboarding.block_id).name
+        field = view.project_dossier(db_session, live, EMPLOYEE("engineer"))["fields"]["block"]
+        assert field == {"value": expected, "source_table": "customer_onboardings", "record_id": onboarding.id}
+        assert view.project_card(db_session, live, EMPLOYEE("admin"))["fields"]["block"]["value"] == expected
+
+    def test_no_block_id_is_null_not_guessed(self, db_session, live):
+        onboarding = db_session.execute(select(CustomerOnboarding).where(
+            CustomerOnboarding.project_id == live.id)).scalar_one()
+        onboarding.block_id = None
+        db_session.flush()
+        assert view.project_dossier(db_session, live, EMPLOYEE("admin"))["fields"]["block"]["value"] is None
+
+    def test_sales_never_sees_block(self, db_session, live):
+        assert "block" not in view.project_dossier(db_session, live, EMPLOYEE("sales", "emp-sales-1"))["fields"]

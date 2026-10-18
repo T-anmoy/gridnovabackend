@@ -1154,6 +1154,31 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  - id: NR-1
+    area: policies
+    location: {file: config/nova_records.yaml, key: limits.requests_per_minute}
+    description: "How many questions one employee may ask Nova Records per minute (per app instance). Engineering's default is 10."
+    dummy_value: 10
+    needed_from_grid_nova: How many questions a minute should one staff member be able to ask Nova Records before being asked to slow down?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: NR-2
+    area: policies
+    location: {file: config/nova_records.yaml, key: limits.daily_questions}
+    description: "How many questions one employee may ask Nova Records per IST day (each question can cost two model calls). Engineering's default is 200."
+    dummy_value: 200
+    needed_from_grid_nova: What daily question limit per staff member should Nova Records have?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: NR-3
+    area: policies
+    location: {file: config/nova_records.yaml, key: retention.days}
+    description: "How long Nova Records keeps staff conversations (questions, answers and the records they cited) before the retention job deletes them. Engineering's default is 365 days."
+    dummy_value: 365
+    needed_from_grid_nova: How long should staff conversations with Nova Records be kept before they are deleted?
+    blocking: tunable
+    probe: yaml_contains_marker
+
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,
   # so a stale exemption fails the build too.
