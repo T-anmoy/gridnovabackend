@@ -1,13 +1,13 @@
 # Grid Nova Energy — sales, booking and chat policy.
 #
 # Values Grid Nova has not supplied: each is the developer's working default, carries
-# an [UNCONFIRMED] marker and has an entry in config/placeholder_registry.yaml until
+# an "unconfirmed" marker and has an entry in config/placeholder_registry.yaml until
 # Grid Nova confirms or replaces it. Read by app/rules/sales_policy.py and validated
 # at startup (a malformed file stops the boot).
 
 # How long a sent proposal can be accepted (online link or in person), in days from
 # the day it was sent or handed over. Also printed in the proposal PDF footer.
-proposal_validity_days: 30                       # [UNCONFIRMED]
+proposal_validity_days: 15                       # Grid Nova, 15 Oct 2026
 
 # true = every proposal (not only associate-sourced ones) must be approved by a
 # different employee from the one who drafted it. false = only associate-sourced

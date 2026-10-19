@@ -369,5 +369,39 @@ class Orchestrator:
         result = _recall_graph.invoke(state)
         return dict(result)
 
+    def answer_records_question(self, *, viewer, question: str, context: Optional[dict] = None,
+                                history: Optional[list] = None, today=None, turn_id: str = "") -> dict:
+        """Nova Records (BE-9, agent nova_records): a signed-in employee's question about anything on record,
+        answered from read-only tools within that employee's role. Employee-facing only —
+        see app/agents/records_agent.py. Runs on its own session, like the memory recall."""
+        from app.agents import harness
+        from app.agents.records_agent import records_agent
+        from app.governance import registry
+        from app.memory.db import SessionLocal
+        from app.memory.memory_manager import MemoryManager
+
+        db = SessionLocal()
+        try:
+            memory = MemoryManager(db)
+            run = harness.run(
+                registry.NOVA_RECORDS.id,
+                registry.ANSWER_STAFF_RECORDS_QUESTION,
+                lambda: records_agent.answer(db, viewer, question=question, context=context, history=history,
+                                             today=today, turn_id=turn_id),
+                memory=memory,
+                on_denied=lambda decision: {"status": "refused", "answer": decision.reason, "denied": True},
+                on_error=lambda exc: {"status": "error",
+                                      "answer": "I couldn't reach the records just now. Try again shortly."},
+            )
+            if run.code == harness.FAILED:
+                db.rollback()
+            # Read-only as far as records go; the commit keeps the harness's run record and
+            # any refusal / unverified-answer audit rows.
+            db.commit()
+            return {**run.result, "agent_run_id": run.run_id, "run_code": run.code,
+                    "llm_calls": run.llm_calls}
+        finally:
+            db.close()
+
 
 orchestrator = Orchestrator()

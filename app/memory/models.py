@@ -1048,8 +1048,10 @@ APPLICATION_DOCUMENTS = ("masked_aadhaar", "pan_card", "photo", "cancelled_chequ
 class _ApplicationKyc:
     """Columns shared by both registration tables. The full Aadhaar number is never
     stored — only its last four digits, after a Verhoeff check. The bank account
-    number is stored Fernet-encrypted (app/security/encryption.py) with its last four
-    digits alongside for display."""
+    number and the PAN are stored Fernet-encrypted (app/security/encryption.py) with
+    their last four characters alongside for display; reading either back goes through
+    the audited helper app/security/pii.py (BE-4). Duplicate registrations are found by
+    the keyed HMACs in associate_identity_claims, never by the plaintext."""
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     status: Mapped[ApplicationStatus] = mapped_column(
@@ -1066,7 +1068,9 @@ class _ApplicationKyc:
     mobile: Mapped[str] = mapped_column(String(10), nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
     aadhaar_last4: Mapped[str] = mapped_column(String(4), nullable=False)
-    pan: Mapped[str] = mapped_column(String(10), nullable=False)
+    # BE-4 (migration 0048): encrypted at rest; the plaintext `pan` column is gone.
+    pan_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    pan_last4: Mapped[str] = mapped_column(String(4), nullable=False)
     bank_account_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     bank_account_last4: Mapped[str] = mapped_column(String(4), nullable=False)
     bank_ifsc: Mapped[str] = mapped_column(String(11), nullable=False)
@@ -1942,3 +1946,651 @@ class SurveyCorrectionRequest(Base):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_now)
+
+
+# ── Commissions, TDS and payouts (Phase 5A / BE-4) ──────────────────────────────
+# Commission & Payout Policy §4. app/commissions/ holds the rules; config/commissions.yaml
+# the values Grid Nova has not confirmed. Rates are versioned schedules (never edited
+# once published); entries are an append-only ledger whose amounts, once set, never
+# change — a correction is a new entry (reversal / recovery / adjustment).
+
+class CommissionRole(str, enum.Enum):
+    """Why an associate earns an entry (4.1, 4.3)."""
+    personal_sale = "personal_sale"            # the associate the customer is attributed to
+    territory_state = "territory_state"        # a State Head of the site's state
+    territory_district = "territory_district"  # the District Head of the site's district
+    territory_block = "territory_block"        # a Block Associate of the site's block
+
+
+class CommissionEntryKind(str, enum.Enum):
+    earn = "earn"              # a verified payment (4.2)
+    reversal = "reversal"      # the payment was reversed before the entry reached a payout (4.7)
+    recovery = "recovery"      # … after it reached a payout: netted against later payouts (4.7)
+    adjustment = "adjustment"  # reserved for a manual correction; no endpoint creates one yet
+
+
+class CommissionEntryStatus(str, enum.Enum):
+    earned = "earned"      # payment verified (4.4)
+    approved = "approved"  # checked by Grid Nova
+    paid = "paid"          # in a paid payout batch, with its bank reference
+    reversed = "reversed"  # an earn entry and its reversal: cancelled out, never paid
+
+
+class PayoutBatchStatus(str, enum.Enum):
+    draft = "draft"
+    approved = "approved"
+    paid = "paid"
+    cancelled = "cancelled"   # a draft discarded (its entries return to the pool)
+
+
+class CommissionQueryStatus(str, enum.Enum):
+    open = "open"
+    answered = "answered"
+
+
+class CommissionRateSchedule(Base):
+    """One published version of the commission rates (4.1). Never edited or deleted
+    (a database trigger refuses both): a change is a new version. The schedule in
+    force on a date is the one with the latest effective_from on or before it."""
+    __tablename__ = "commission_rate_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # Rates nobody has confirmed (development / staging): entries under it are recorded
+    # without an amount and no payout includes them.
+    is_placeholder: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    published_by: Mapped[str] = mapped_column(String, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class CommissionRate(Base):
+    """One rate of a schedule: a percentage of the commission basis for one rate key
+    (app/commissions/rates.py RATE_KEYS)."""
+    __tablename__ = "commission_rates"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "rate_key", name="uq_commission_rates_key"),
+        CheckConstraint("rate_percent >= 0 AND rate_percent <= 100", name="ck_commission_rates_percent"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("commission_rate_schedules.id"), nullable=False, index=True)
+    rate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    rate_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+
+
+class PayoutBatch(Base):
+    """One month's payout (4.5): draft (prepared) → approved (by someone else) → paid
+    (bank references recorded). At most one batch per month that is not cancelled —
+    the partial unique index refuses a second, however the request arrives."""
+    __tablename__ = "payout_batches"
+    __table_args__ = (
+        Index("uq_payout_batches_period", "period", unique=True,
+              sqlite_where=text("status != 'cancelled'"), postgresql_where=text("status != 'cancelled'")),
+        CheckConstraint("status NOT IN ('approved', 'paid') OR approved_by IS NOT NULL",
+                        name="ck_payout_batches_approved"),
+        CheckConstraint("status != 'paid' OR paid_at IS NOT NULL", name="ck_payout_batches_paid"),
+        CheckConstraint("status != 'cancelled' OR cancel_reason IS NOT NULL", name="ck_payout_batches_cancelled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)               # "2026-10"
+    financial_year: Mapped[str] = mapped_column(String(7), nullable=False)       # "2026-27"
+    status: Mapped[PayoutBatchStatus] = mapped_column(SAEnum(PayoutBatchStatus), nullable=False,
+                                                      default=PayoutBatchStatus.draft)
+    prepared_by: Mapped[str] = mapped_column(String, nullable=False)
+    prepared_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approval_override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    paid_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PayoutLine(Base):
+    """One associate's payout in a batch — every figure frozen when the batch is
+    prepared (the TDS ledger is these rows: FY totals are sums over them). Bank details
+    are the associate's own application's (last four digits only; the full number is
+    decrypted only into the Accounts bank export)."""
+    __tablename__ = "payout_lines"
+    __table_args__ = (UniqueConstraint("batch_id", "associate_id", name="uq_payout_lines_associate"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("payout_batches.id"), nullable=False, index=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False, index=True)
+    gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)          # positive entries
+    recoveries: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)     # negative entries, as a positive
+    carried_in: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)     # unrecovered balance brought in
+    taxable: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)        # max(gross − recoveries − carried_in, 0)
+    tds: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    net: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)            # taxable − tds
+    carry_forward: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)  # still to recover (≥ 0)
+    tds_rate_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
+    pan_on_file: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fy_taxable_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    fy_tds_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    account_holder_name: Mapped[str] = mapped_column(String, nullable=False)
+    bank_account_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    bank_ifsc: Mapped[str] = mapped_column(String(11), nullable=False)
+    bank_reference: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class CommissionEntry(Base):
+    """The commission ledger (4.2–4.4, 4.7). Append-only: never deleted, and the
+    amount, rate, basis and parties of an entry never change once set (database
+    triggers refuse it). An entry recorded while its rate cannot be known yet carries
+    pending_reason and no amount; rating it later fills the amount in once.
+    Status moves earned → approved → paid (or earned/approved → reversed)."""
+    __tablename__ = "commission_entries"
+    __table_args__ = (
+        Index("ix_commission_entries_associate_status", "associate_id", "status"),
+        Index("ix_commission_entries_payment", "payment_id"),
+        Index("ix_commission_entries_project", "project_id"),
+        Index("ix_commission_entries_batch", "batch_id"),
+        Index("ix_commission_entries_created_at", "created_at"),
+        # One earn entry per payment, associate and role — a second verification hook
+        # (or a race) cannot pay twice.
+        Index("uq_commission_entries_earn_once", "payment_id", "associate_id", "earning_role", unique=True,
+              sqlite_where=text("kind = 'earn'"), postgresql_where=text("kind = 'earn'")),
+        CheckConstraint(
+            "(kind = 'earn' AND reverses_entry_id IS NULL AND payment_id IS NOT NULL "
+            "AND (amount IS NULL OR amount >= 0)) OR "
+            "(kind IN ('reversal', 'recovery') AND reverses_entry_id IS NOT NULL AND (amount IS NULL OR amount <= 0)) OR "
+            "(kind = 'adjustment' AND reverses_entry_id IS NULL AND amount IS NOT NULL AND reason IS NOT NULL)",
+            name="ck_commission_entries_shape"),
+        CheckConstraint("(amount IS NULL AND pending_reason IS NOT NULL) OR "
+                        "(amount IS NOT NULL AND pending_reason IS NULL)", name="ck_commission_entries_pending"),
+        CheckConstraint("status != 'paid' OR batch_id IS NOT NULL", name="ck_commission_entries_paid"),
+        CheckConstraint("status NOT IN ('approved', 'paid') OR (approved_by IS NOT NULL AND amount IS NOT NULL)",
+                        name="ck_commission_entries_approved"),
+        CheckConstraint("holders >= 1", name="ck_commission_entries_holders"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    earning_role: Mapped[CommissionRole] = mapped_column(SAEnum(CommissionRole), nullable=False)
+    kind: Mapped[CommissionEntryKind] = mapped_column(SAEnum(CommissionEntryKind), nullable=False)
+    status: Mapped[CommissionEntryStatus] = mapped_column(SAEnum(CommissionEntryStatus), nullable=False,
+                                                          default=CommissionEntryStatus.earned)
+    onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    payment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payments.id"), nullable=True)
+    # The amount the rate applies to (config commissions.basis) — NULL while unknown.
+    basis_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    rate_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 4), nullable=True)
+    # Seat holders sharing a territory rate (multiple_territory_holders: split_equally).
+    holders: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    schedule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commission_rate_schedules.id"), nullable=True)
+    # placeholder_rates | agreement_not_signed | basis_unavailable — NULL once rated.
+    pending_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # The date the customer's agreement was signed (IST) — the rate date (4.1).
+    agreement_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    reverses_entry_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commission_entries.id"), unique=True,
+                                                             nullable=True)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payout_batches.id"), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    rated_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class CommissionQuery(Base):
+    """An associate's query about one of their entries (4.8). Raised within
+    queries.window_days of the entry appearing; due queries.response_working_days
+    working days later. At most one open query per entry."""
+    __tablename__ = "commission_queries"
+    __table_args__ = (
+        Index("ix_commission_queries_status_due", "status", "due_at"),
+        Index("ix_commission_queries_associate", "associate_id"),
+        Index("uq_commission_queries_one_open", "entry_id", unique=True,
+              sqlite_where=text("status = 'open'"), postgresql_where=text("status = 'open'")),
+        CheckConstraint("status != 'answered' OR (response IS NOT NULL AND responded_by IS NOT NULL)",
+                        name="ck_commission_queries_answered"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("commission_entries.id"), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[CommissionQueryStatus] = mapped_column(SAEnum(CommissionQueryStatus), nullable=False,
+                                                          default=CommissionQueryStatus.open)
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    responded_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    responded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    due_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    overdue_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+# Rate schedules and their rates are never edited or deleted once published.
+COMMISSION_SCHEDULES_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION commission_schedules_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION USING MESSAGE = TG_TABLE_NAME || ' is append-only: publish a new schedule version';
+END;
+$$ LANGUAGE plpgsql
+"""
+COMMISSION_SCHEDULES_PG_TRIGGERS = tuple(
+    f"CREATE TRIGGER {t}_append_only BEFORE UPDATE OR DELETE ON {t} "
+    f"FOR EACH ROW EXECUTE FUNCTION commission_schedules_append_only()"
+    for t in ("commission_rate_schedules", "commission_rates")
+)
+COMMISSION_SCHEDULES_SQLITE_TRIGGERS = tuple(
+    f"CREATE TRIGGER {t}_no_{op.lower()} BEFORE {op} ON {t} "
+    f"BEGIN SELECT RAISE(ABORT, '{t} is append-only: publish a new schedule version'); END"
+    for t in ("commission_rate_schedules", "commission_rates") for op in ("UPDATE", "DELETE")
+)
+
+# A commission entry is never deleted, and what it says — who, why, for which payment,
+# on what basis, at what rate, for how much — never changes once set. Status, approval,
+# batch and pending_reason move; a NULL amount/rate/basis/agreement date/schedule may be
+# filled in once (rating a pending entry).
+_ENTRY_FIXED = ("associate_id", "earning_role", "kind", "payment_id", "onboarding_id", "project_id",
+                "reverses_entry_id", "created_by", "created_at", "holders")
+_ENTRY_SET_ONCE = ("amount", "rate_percent", "basis_amount", "agreement_date", "schedule_id")
+COMMISSION_ENTRIES_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION commission_entries_guard() RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'commission_entries is append-only';
+    END IF;
+    IF """ + " OR ".join(f"NEW.{c} IS DISTINCT FROM OLD.{c}" for c in _ENTRY_FIXED) + " OR " + " OR ".join(
+    f"(OLD.{c} IS NOT NULL AND NEW.{c} IS DISTINCT FROM OLD.{c})" for c in _ENTRY_SET_ONCE) + """ THEN
+        RAISE EXCEPTION 'commission_entries: a recorded amount is never changed; write a new entry';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+"""
+COMMISSION_ENTRIES_PG_TRIGGER = (
+    "CREATE TRIGGER commission_entries_guard BEFORE UPDATE OR DELETE ON commission_entries "
+    "FOR EACH ROW EXECUTE FUNCTION commission_entries_guard()"
+)
+COMMISSION_ENTRIES_SQLITE_TRIGGERS = (
+    "CREATE TRIGGER commission_entries_no_delete BEFORE DELETE ON commission_entries "
+    "BEGIN SELECT RAISE(ABORT, 'commission_entries is append-only'); END",
+    "CREATE TRIGGER commission_entries_guard BEFORE UPDATE ON commission_entries WHEN "
+    + " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in _ENTRY_FIXED) + " OR "
+    + " OR ".join(f"(OLD.{c} IS NOT NULL AND NEW.{c} IS NOT OLD.{c})" for c in _ENTRY_SET_ONCE)
+    + " BEGIN SELECT RAISE(ABORT, 'commission_entries: a recorded amount is never changed; write a new entry'); END",
+)
+for _table in (CommissionRateSchedule.__table__, CommissionRate.__table__):
+    event.listen(_table, "after_create", DDL(COMMISSION_SCHEDULES_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(CommissionRateSchedule.__table__, "after_create",
+             DDL(COMMISSION_SCHEDULES_PG_TRIGGERS[0]).execute_if(dialect="postgresql"))
+event.listen(CommissionRate.__table__, "after_create",
+             DDL(COMMISSION_SCHEDULES_PG_TRIGGERS[1]).execute_if(dialect="postgresql"))
+for _sql in COMMISSION_SCHEDULES_SQLITE_TRIGGERS:
+    _target = CommissionRate.__table__ if " ON commission_rates " in _sql else CommissionRateSchedule.__table__
+    event.listen(_target, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+event.listen(CommissionEntry.__table__, "after_create",
+             DDL(COMMISSION_ENTRIES_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(CommissionEntry.__table__, "after_create",
+             DDL(COMMISSION_ENTRIES_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in COMMISSION_ENTRIES_SQLITE_TRIGGERS:
+    event.listen(CommissionEntry.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+
+
+# ── Handover, warranty and service requests (BE-5, Phase 6A) — app/handover/ ─────
+
+class ServiceRequestCategory(str, enum.Enum):
+    no_generation = "no_generation"
+    inverter_error = "inverter_error"
+    physical_damage = "physical_damage"
+    cleaning_om = "cleaning_om"
+    other = "other"
+
+
+class ServiceRequestStatus(str, enum.Enum):
+    open = "open"
+    in_progress = "in_progress"
+    resolved = "resolved"
+    rejected = "rejected"
+
+
+class HandoverPack(Base):
+    """One per project (created the first time anyone looks at the handover). The pack's
+    checklist is COMPUTED from real records wherever there is one; only the three manual
+    items live here (orientation, acknowledgement, O&M contact), each with who and when —
+    changes are audited. Also holds the customer's link (hashed token, revocable) and the
+    rendered handover PDF (app/handover/pdf.py)."""
+    __tablename__ = "handover_packs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), unique=True, nullable=False)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    orientation_done_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    orientation_done_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    orientation_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ack_method: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # signature | in_person
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    acknowledged_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ack_customer_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    ack_signature_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ack_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    om_contact_given_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    om_contact_given_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    om_contact_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The customer's link: only a SHA-256 of the random token is kept.
+    link_token_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    link_issued_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_issued_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    link_expires_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_revoked_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    link_revoked_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pdf_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pdf_generated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    render_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    held_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    email_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # sent | skipped | failed | held
+    email_skipped_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    emailed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ProjectWarranty(Base):
+    """The warranty register entry for a project, written once when `handover_complete`
+    is recorded (or, for a project handed over before this existed, the first time it is
+    needed). The years are what was configured at that moment."""
+    __tablename__ = "project_warranties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), unique=True, nullable=False)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), unique=True, nullable=False)
+    handover_date: Mapped[date] = mapped_column(Date, nullable=False)
+    system_warranty_years: Mapped[int] = mapped_column(Integer, nullable=False)
+    system_warranty_end: Mapped[date] = mapped_column(Date, nullable=False)
+    panel_performance_life_years: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    om_free_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    om_free_until: Mapped[date] = mapped_column(Date, nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class WarrantyItem(Base):
+    """One installed unit's product warranty in the register. `source`: `register` (the
+    dates on the serial register), `default` (configured years for its category) or
+    `none` (neither — no end date is claimed)."""
+    __tablename__ = "warranty_items"
+    __table_args__ = (UniqueConstraint("warranty_id", "unit_id", name="uq_warranty_items_unit"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    warranty_id: Mapped[int] = mapped_column(ForeignKey("project_warranties.id"), nullable=False, index=True)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("installed_units.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    warranty_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class ServiceRequest(Base):
+    """A warranty / O&M request after handover — raised by staff on a customer's behalf,
+    by the owning associate, or by the customer through their link. History is the
+    append-only service_request_events."""
+    __tablename__ = "service_requests"
+    __table_args__ = (Index("ix_service_requests_status", "status"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    onboarding_id: Mapped[int] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=False, index=True)
+    category: Mapped[ServiceRequestCategory] = mapped_column(SAEnum(ServiceRequestCategory), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ServiceRequestStatus] = mapped_column(SAEnum(ServiceRequestStatus), nullable=False,
+                                                         default=ServiceRequestStatus.open)
+    raised_via: Mapped[str] = mapped_column(String(16), nullable=False)   # staff | associate | customer
+    raised_by: Mapped[str] = mapped_column(String, nullable=False)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Computed from the warranty register when raised; NULL when the project has none.
+    within_warranty: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    warranty_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    assignee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True, index=True)
+    photos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    sla_due_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    overdue_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ServiceRequestEvent(Base):
+    """Append-only history of a service request (a database trigger refuses UPDATE and
+    DELETE)."""
+    __tablename__ = "service_request_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("service_requests.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)   # raised | status | assigned | note
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    from_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+SERVICE_EVENTS_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION service_request_events_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION USING MESSAGE = 'service_request_events is append-only';
+END;
+$$ LANGUAGE plpgsql
+"""
+SERVICE_EVENTS_PG_TRIGGER = (
+    "CREATE TRIGGER service_request_events_append_only BEFORE UPDATE OR DELETE ON service_request_events "
+    "FOR EACH ROW EXECUTE FUNCTION service_request_events_append_only()"
+)
+SERVICE_EVENTS_SQLITE_TRIGGERS = tuple(
+    f"CREATE TRIGGER service_request_events_no_{op.lower()} BEFORE {op} ON service_request_events "
+    f"BEGIN SELECT RAISE(ABORT, 'service_request_events is append-only'); END" for op in ("UPDATE", "DELETE")
+)
+event.listen(ServiceRequestEvent.__table__, "after_create",
+             DDL(SERVICE_EVENTS_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(ServiceRequestEvent.__table__, "after_create",
+             DDL(SERVICE_EVENTS_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in SERVICE_EVENTS_SQLITE_TRIGGERS:
+    event.listen(ServiceRequestEvent.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
+
+
+# ── Project Archive (BE-8) — app/archive/, app/projects/view.py ───────────────────
+# Grid Nova's completed projects that never went through this system, imported from a
+# CSV (Admin only). Nothing is hard-deleted: voiding a batch stamps voided_at on its
+# rows, and every read path hides them.
+
+class ArchiveScheme(str, enum.Enum):
+    pm_surya_ghar_residential = "pm_surya_ghar_residential"
+    housing_society = "housing_society"
+    commercial = "commercial"
+    industrial = "industrial"
+    institutional_govt = "institutional_govt"
+    wbreda_school = "wbreda_school"
+    pm_kusum_pump = "pm_kusum_pump"
+    street_lighting = "street_lighting"
+    ground_mounted = "ground_mounted"
+    other = "other"
+
+
+class ArchiveSystemType(str, enum.Enum):
+    on_grid = "on_grid"
+    off_grid = "off_grid"
+    hybrid = "hybrid"
+    pump = "pump"
+    street_light = "street_light"
+    other = "other"
+
+
+class ArchiveBatchStatus(str, enum.Enum):
+    validated = "validated"
+    imported = "imported"
+    voided = "voided"
+
+
+class ArchiveImportBatch(Base):
+    __tablename__ = "archive_import_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uploaded_by: Mapped[str] = mapped_column(String, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ArchiveBatchStatus] = mapped_column(SAEnum(ArchiveBatchStatus), nullable=False,
+                                                       default=ArchiveBatchStatus.imported)
+    # The validation report as it stood at import (errors, warnings, counts).
+    report: Mapped[dict] = mapped_column(JSON, nullable=False)
+    voided_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    voided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    void_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ArchivedProject(Base):
+    """One completed (or historical) project from an import. Personal columns
+    (customer_phone/email, consumer_number) and money are role-restricted on every read
+    path (config/archive.yaml, app/projects/view.py)."""
+    __tablename__ = "archived_projects"
+    __table_args__ = (
+        Index("uq_archived_projects_ref", "grid_nova_ref", unique=True,
+              sqlite_where=text("grid_nova_ref IS NOT NULL AND voided_at IS NULL"),
+              postgresql_where=text("grid_nova_ref IS NOT NULL AND voided_at IS NULL")),
+        Index("uq_archived_projects_project", "project_id", unique=True,
+              sqlite_where=text("project_id IS NOT NULL AND voided_at IS NULL"),
+              postgresql_where=text("project_id IS NOT NULL AND voided_at IS NULL")),
+        Index("ix_archived_projects_state", "state"),
+        Index("ix_archived_projects_district", "district"),
+        Index("ix_archived_projects_scheme", "scheme_or_segment"),
+        Index("ix_archived_projects_commissioning", "commissioning_date"),
+        Index("ix_archived_projects_capacity", "capacity_kw"),
+        Index("ix_archived_projects_batch", "import_batch_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    grid_nova_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    import_batch_id: Mapped[int] = mapped_column(ForeignKey("archive_import_batches.id"), nullable=False)
+    source_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    voided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+    scheme_or_segment: Mapped[ArchiveScheme] = mapped_column(SAEnum(ArchiveScheme), nullable=False)
+    system_type: Mapped[Optional[ArchiveSystemType]] = mapped_column(SAEnum(ArchiveSystemType), nullable=True)
+    capacity_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+    pump_hp: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    street_lamp_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Where: the text as sent is kept; the ids are set when it matched the territory master.
+    state: Mapped[str] = mapped_column(String(120), nullable=False)
+    district: Mapped[str] = mapped_column(String(120), nullable=False)
+    block: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    state_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_states.id"), nullable=True)
+    district_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_districts.id"), nullable=True)
+    block_id: Mapped[Optional[int]] = mapped_column(ForeignKey("territory_blocks.id"), nullable=True)
+    address_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pincode: Mapped[Optional[str]] = mapped_column(String(6), nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Restricted: customer.
+    customer_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    customer_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    customer_email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    discom: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    consumer_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+    # Restricted: money (exact decimals, never floats).
+    contract_value_inr: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    subsidy_amount_inr: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
+    module_make: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    module_model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    module_wattage_wp: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    module_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    module_dcr: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)   # yes | no | unknown
+    inverter_make: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    inverter_model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    inverter_capacity_kw: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 3), nullable=True)
+    inverter_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    structure_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    battery_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    other_equipment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    order_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    installation_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    commissioning_date: Mapped[date] = mapped_column(Date, nullable=False)
+    net_meter_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end_modules: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    warranty_end_inverter: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+
+    om_status: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # [{"label", "url"}] — URLs are stored as given and never fetched.
+    documents: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Set by the importer: [{"code", "column"?, "message"}].
+    data_quality_flags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+# ── Nova Records (BE-9) ───────────────────────────────────────────────────────────
+# The staff assistant's conversations. Ids are random hex, never sequential, so one
+# employee cannot walk another's conversation ids. Kept for config/nova_records.yaml
+# retention.days (registry NR-3), then deleted by the retention job.
+
+class NovaConversation(Base):
+    __tablename__ = "nova_conversations"
+    __table_args__ = (Index("ix_nova_conversations_employee_updated", "employee_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    # The role the employee held when the conversation started (answers are scoped per turn).
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class NovaTurn(Base):
+    """One question and its answer. `response` is the body the API returned (answer,
+    citations, tables, searched, suggestions), so a conversation reads back exactly as it
+    was shown; `tool_calls`, `refs` and `verifier` are how it was produced."""
+    __tablename__ = "nova_turns"
+    __table_args__ = (
+        Index("ix_nova_turns_conversation_created", "conversation_id", "created_at"),
+        Index("ix_nova_turns_employee_created", "employee_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("nova_conversations.id"), nullable=False)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[dict] = mapped_column(JSON, nullable=False)
+    intent: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    planner: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # model | keyword
+    composer: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # model | template
+    tool_calls: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    verifier: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    run_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    feedback_helpful: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    feedback_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feedback_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)

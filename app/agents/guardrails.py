@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.agents import nemo_guard
+from app.agents import indic, nemo_guard
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +59,14 @@ MODEL_NUMBER = "equipment_model_number"
 DCR_CLAIM = "unverified_dcr_claim"
 SUBSIDY_CLAIM = "subsidy_eligibility_claim"
 PERSONAL_DATA = "unverified_personal_data"
+UNREADABLE_LANGUAGE = "unverifiable_language_reply"
 
 # Blocking codes replace the reply. The rest are recorded and let through: a reply
 # that stacks two questions is a quality problem, not a commercial risk, and
 # silently swapping it for a fallback would make the conversation worse.
 _BLOCKING = {NEW_MONEY, UNOFFERED_TIME, FALSE_CLAIM, INTERNAL_LEAK, EMPTY_REPLY,
              UNAPPROVED_EQUIPMENT, WARRANTY_TERM, SUBSIDY_CLAIM, MODEL_NUMBER, DCR_CLAIM,
-             PERSONAL_DATA, nemo_guard.INTERNAL_DISCLOSURE}
+             PERSONAL_DATA, UNREADABLE_LANGUAGE, nemo_guard.INTERNAL_DISCLOSURE}
 
 
 @dataclass
@@ -146,9 +147,11 @@ def _numbers_in(text: str) -> set:
     """Every money-shaped amount in the text, as a normalised value.
 
     "45,000", "45000" and "forty five thousand" all land on the same number, so a
-    reply is judged on what it actually claims rather than how it spelled it.
+    reply is judged on what it actually claims rather than how it spelled it. Hindi
+    and Bengali digits, scale and currency words ("३ लाख", "৮ লাখ টাকা") are read as
+    their English forms first (app/agents/indic.py).
     """
-    text = text or ""
+    text = indic.normalise(text or "")
     found = set()
 
     for match in _RE_CURRENCY.finditer(text):
@@ -190,8 +193,9 @@ _TIME_PATTERNS = [
 
 def _times_in(text: str) -> set:
     found = set()
+    text = indic.normalise(text or "")
     for pattern in _TIME_PATTERNS:
-        for match in pattern.finditer(text or ""):
+        for match in pattern.finditer(text):
             found.add(match.group(1).lower().replace(" ", ""))
     return found
 
@@ -562,6 +566,24 @@ def check_personal_data(reply: str, customer_text: str = "", facts_text: str = "
     return None
 
 
+# ── Language ───────────────────────────────────────────────────────────────────
+#
+# Every check in this module reads English. A reply written in Hindi or Bengali (a
+# model mirroring the customer's language) would pass them unread, so it is not sent:
+# Hindi and Bengali replies are generated in English, checked here, and translated
+# afterwards under their own checks (app/agents/translation_check.py).
+
+MAX_INDIC_LETTER_RATIO = 0.2
+
+
+def check_language(reply: str) -> Optional[dict]:
+    ratio = indic.indic_ratio(reply)
+    if ratio > MAX_INDIC_LETTER_RATIO:
+        return {"code": UNREADABLE_LANGUAGE,
+                "detail": f"reply was {ratio:.0%} Hindi/Bengali script, which these checks cannot verify"}
+    return None
+
+
 # ── Shape ──────────────────────────────────────────────────────────────────────
 
 def check_shape(reply: str) -> list:
@@ -656,6 +678,7 @@ def enforce(
         lambda: check_dcr_claims(reply),
         lambda: check_subsidy(reply),
         lambda: check_personal_data(reply, customer_text or user_message, COMPANY_FACTS),
+        lambda: check_language(reply),
     ):
         found = check()
         if found:

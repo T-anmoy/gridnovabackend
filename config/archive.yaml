@@ -1,0 +1,86 @@
+# Grid Nova Energy — Project Archive (BE-8)
+#
+# Read by app/archive/config.py and validated at startup (a malformed file stops the app
+# from booting rather than failing mid-request).
+#
+# Who sees which fields of an archived or live project. Every field either API returns is
+# in exactly one group; each role lists the groups it may see. A field of a group the
+# role does not hold is ABSENT from the response (never null). The map is applied inside
+# app/projects/view.py, not by callers. Documented in docs/api/project_archive.md.
+
+visibility:
+  # [UNCONFIRMED] Engineering's reading of the roles in Tanmoy's 15 Oct decision; Grid Nova
+  # has not confirmed who may see what (registry entry ARC-2).
+  groups:
+    technical:        # what was built
+      - scheme_or_segment
+      - system_type
+      - capacity_kw
+      - pump_hp
+      - street_lamp_count
+      - module_make
+      - module_model
+      - module_wattage_wp
+      - module_count
+      - module_dcr
+      - inverter_make
+      - inverter_model
+      - inverter_capacity_kw
+      - inverter_count
+      - structure_type
+      - battery_details
+      - other_equipment
+      - current_stage
+    location_district:   # state and district only
+      - state
+      - district
+    location_detail:     # block, street address, coordinates
+      - block
+      - address_text
+      - pincode
+      - latitude
+      - longitude
+    dates:
+      - order_date
+      - installation_date
+      - commissioning_date
+      - net_meter_date
+      - warranty_end_modules
+      - warranty_end_inverter
+    customer_identity:   # who, without a way to contact them
+      - customer_name
+      - discom
+    customer_contact:    # personal data
+      - customer_phone
+      - customer_email
+      - consumer_number
+    money:
+      - contract_value_inr
+      - subsidy_amount_inr
+      - amount_received_inr
+      - amount_outstanding_inr
+    service:             # O&M, notes, documents and import quality flags
+      - om_status
+      - notes
+      - documents
+      - data_quality_flags
+      - open_service_requests
+    associate:           # the associate who brought a live project
+      - associate_id
+      - associate_name
+    import_meta:         # which import and file row a record came from
+      - import_batch_id
+      - source_row
+  roles:
+    admin: [technical, location_district, location_detail, dates, customer_identity, customer_contact, money, service, associate, import_meta]
+    management: [technical, location_district, location_detail, dates, customer_identity, customer_contact, money, service, associate, import_meta]
+    accounts: [technical, location_district, location_detail, dates, customer_identity, money, service, associate]
+    operations: [technical, location_district, location_detail, dates, customer_identity, service, associate]
+    engineer: [technical, location_district, location_detail, dates, customer_identity, service, associate]
+    sales: [technical, location_district, dates]
+
+import:
+  max_file_mb: 10
+  max_rows: 20000
+  # Rows shown in a report per kind (errors, warnings); counts always cover every row.
+  max_report_issues: 500

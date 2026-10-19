@@ -18,10 +18,14 @@ company:
   name: "Grid Nova Energy"
   tagline: "Eco-Energy Initiative"
   address: "Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal, India"
+  # Printed under the head-office address on every PDF letterhead, and stated by the chat
+  # (app/llm/company_facts.py). Supplied by Grid Nova via Tanmoy Halder, 14 Oct 2026.
+  branch_offices:
+    - "Patna Branch: C/O Parbati Bhawan, West Ram Krishna Nagar, New Bypass Road, Opposite Metro Pillar No. 81, P.O.- New Jaganpura, Patna – 800027, Bihar"
   phone: "+91 98747 74440"
   email: "info@gridnova.in"
   website: "https://www.gridnova.in"
-  gstin: "[PLACEHOLDER]"
+  gstin: "19ABEFG7809A1ZI"
 
 letterhead:
   logo_text: "Grid Nova Energy"

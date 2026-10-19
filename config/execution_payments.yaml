@@ -150,20 +150,27 @@ payments:
   receipt:
     # P4 — receipt numbering. {YYYY} is the year of verification, {SEQ:06} a per-year
     # sequence padded to six digits.
-    numbering: "GNR-{YYYY}-{SEQ:06}"    # [UNCONFIRMED]
+    numbering: "GNR-{YYYY}-{SEQ:06}"
     # A receipt still waiting to be emailed this long after it was numbered is flagged
     # for Accounts (attention reason receipt_pending_stale).
     pending_alert_minutes: 60           # [UNCONFIRMED]
     # P5 — company block printed on every receipt and on the "pay only here" reminder.
     company:
-      legal_name: "Grid Nova Energy"    # [UNCONFIRMED] — legal form pending
+      # Legal form: Partnership firm (GST certificate, Form GST REG-06: "Constitution of Business:
+      # Partnership"; legal and trade name GRID NOVA ENERGY). The name text stays as below (Tanmoy Halder).
+      legal_name: "Grid Nova Energy"
+      legal_form: "Partnership firm"
       address: "Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107, West Bengal, India"
       phone: "+91 98747 74440"
       email: "info@gridnova.in"
-      gstin: "DUMMY — GSTIN to be supplied by Grid Nova"
-      bank_name: "DUMMY — bank name to be supplied by Grid Nova"
-      account_number: "DUMMY — account number to be supplied by Grid Nova"
-      ifsc: "DUMMY — IFSC to be supplied by Grid Nova"
+      gstin: "19ABEFG7809A1ZI"
+      # Bank account for customer payments (Grid Nova, matches the cancelled-cheque leaf).
+      account_name: "GRID NOVA ENERGY"
+      bank_name: "HDFC Bank Ltd"
+      branch: "Ruby More Branch, Kolkata – 700107"
+      account_number: "50200122914495"
+      account_type: "Current"
+      ifsc: "HDFC0005385"
     # P6 — receipt wording.
     wording:
       heading: "DUMMY — receipt heading to be supplied by Grid Nova"

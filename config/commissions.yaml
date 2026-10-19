@@ -1,0 +1,72 @@
+# Commission, TDS and payout rules — Commission & Payout Policy §4 (website
+# /commission-policy; source grid-nova-energy-wip/content/policies/GridNova_Policies_Draft_v1.md).
+#
+# Loaded and validated by app/commissions/config.py. Every value below that Grid Nova
+# (or its Chartered Accountant) has not confirmed carries a marker and an entry in
+# config/placeholder_registry.yaml (area: policies, ids C5-*). Commission RATES are not
+# here: they are versioned rate schedules in the database, published by an Admin
+# (POST /api/v1/dashboard/commission-rate-schedules). Until a real schedule is published,
+# entries are recorded with their basis but no rate or amount, and no payout includes them.
+
+commissions:
+  # Policy 4.1 / Network Terms A14: "[15] days' notice" before a rate change takes effect.
+  # A non-placeholder schedule must have effective_from >= today (IST) + this many days.
+  # Confirmed by Grid Nova, 15 Oct 2026.
+  rate_change_notice_days: 15
+  # What a commission percentage is applied to. basic_pro_rata = the verified amount ×
+  # the accepted proposal's basic price ÷ its final price (i.e. the verified amount
+  # without GST); gross = the verified amount as received.
+  # Confirmed by Grid Nova, 15 Oct 2026: commission on the base price, excluding GST.
+  basis: basic_pro_rata
+  # Which seat holder earns a territory commission: the one holding the seat on the date
+  # the customer's agreement was signed, or on the date the payment was verified.
+  # [UNCONFIRMED] engineering default (C5-3)
+  territory_seat_holder_at: agreement_signed
+  # "The date the customer's agreement is signed" (4.1): the date the signed agreement
+  # was recorded in the system (stage_recorded), or the stamp paper's date.
+  # [UNCONFIRMED] engineering default (C5-4)
+  agreement_date_source: stage_recorded
+  # Two State Heads may hold one state, and a block has no seat limit. split_equally =
+  # the territory rate is shared between the holders; each_full_rate = every holder
+  # earns the full rate.
+  # [UNCONFIRMED] engineering default (C5-5)
+  multiple_territory_holders: split_equally
+  # A Preferred Associate who onboards a customer in their own territory also earns the
+  # territory commission on it (4.3 read literally: "verified payments from customers
+  # in their territory").
+  # [UNCONFIRMED] engineering default (C5-6)
+  territory_on_own_customers: true
+  # Network Terms A11: commission already earned before termination stays payable. A
+  # payment verified after an associate is deactivated earns that associate nothing.
+  # [UNCONFIRMED] engineering reading of A11 (C5-7)
+  deactivated_associates_earn: false
+
+queries:
+  # Policy 4.8: raise a query "within [30] days of it appearing"; Grid Nova responds
+  # "within [15] working days".
+  # window_days (30) confirmed by Grid Nova, 15 Oct 2026. response_working_days (15) is
+  # still the draft value: the response time was not asked.
+  # [UNCONFIRMED] response_working_days — draft value from the policy (C5-8)
+  window_days: 30
+  response_working_days: 15
+  # Working days for the response deadline (0 = Monday … 6 = Sunday). Public holidays
+  # are not modelled.
+  # [UNCONFIRMED] engineering default (C5-9)
+  working_weekdays: [0, 1, 2, 3, 4]
+
+payout:
+  # Policy 4.5: approved commission paid "[monthly, by the 10th of the following month]".
+  # Batches are monthly; this is the day shown to associates as the expected payout date.
+  # Confirmed by Grid Nova, 15 Oct 2026: monthly, by the 10th of the following month.
+  pay_by_day_of_following_month: 10
+  # How many days a paid payout stays on the associate's home feed.
+  recent_days: 7
+
+tds:
+  # Grid Nova decision 15–16 Oct 2026 (Raju Paul): no TDS deducted; to be revisited with
+  # Grid Nova's Chartered Accountant (C5-11). Policy 4.6 draft was 2% above ₹20,000 a
+  # financial year (April–March, IST) and 20% without a valid PAN.
+  rate_percent: "0"
+  fy_threshold_inr: "20000"
+  no_pan_rate_percent: "0"
+  rounding: "0.01"

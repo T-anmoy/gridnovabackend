@@ -209,7 +209,7 @@ UNCOVERED = {
     ("GET", "/api/v1/health"), ("GET", "/api/v1/health/ready"),
 }
 UNCOVERED_ROUTERS = ("chat", "health", "public_intake", "public_booking", "public_proposals",
-                     "public_receipts", "public_associates")
+                     "public_receipts", "public_associates", "public_handover")
 
 
 def _all_operations() -> dict[str, set]:
@@ -255,4 +255,8 @@ EXPECTED_PUBLIC_UNCOVERED = {
     ("GET", "/api/v1/public/verify/{associate_id}"),
     ("POST", "/api/v1/public/associates/apply"), ("POST", "/api/v1/public/preferred/apply"),
     ("POST", "/api/v1/public/contact"), ("POST", "/api/v1/public/estimate-request"),
+    # BE-5: the customer's handover link (token-gated; tests/test_handover_link_pdf.py, test_service_requests.py).
+    ("GET", "/api/v1/public/handover/{token}"), ("GET", "/api/v1/public/handover/{token}/pdf"),
+    ("GET", "/api/v1/public/handover/{token}/service-requests"),
+    ("POST", "/api/v1/public/handover/{token}/service-requests"),
 }

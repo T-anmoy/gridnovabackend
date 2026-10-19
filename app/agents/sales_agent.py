@@ -9,10 +9,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from app.agents import guardrails, need
+from app.agents import guardrails, need, translation_check
 from app.governance import policy, registry
 from app.llm.client import llm_client
 from app.llm.company_facts import COMPANY_FACTS, RESPONSE_TIME_COMMITMENT
+from app.llm.locale import reply_locale
 from app.memory.models import (
     Channel, LeadScore, LeadSource, MemoryKind, MessageRole, PipelineStage, TimelineEventType,
 )
@@ -266,6 +267,9 @@ class SalesAgent:
             reply = scheduling["reply_text"]
         else:
             available_human = scheduling.get("offered_slots_human") or None
+            # Hindi and Bengali replies are generated in ENGLISH, guarded in English, and
+            # only then translated (BE-7): every guardrail reads English. The locale only
+            # adds a line saying so to the prompt.
             generated = llm_client.generate_reply(
                 user_message=message,
                 stage=conv_stage,
@@ -296,10 +300,15 @@ class SalesAgent:
                 ),
             )
             reply = checked.reply
-            if checked.violations:
+            violations = list(checked.violations)
+            if reply_locale(locale) in translation_check.TRANSLATED_LOCALES:
+                reply, rejection = self._translate(reply, reply_locale(locale), lead_id)
+                if rejection:
+                    violations.append(rejection)
+            if violations:
                 memory.record_guardrail_block(
                     lead_id=lead_id,
-                    violations=checked.violations,
+                    violations=violations,
                     original_reply=generated,
                     sent_reply=reply,
                     blocked=checked.blocked,
@@ -348,6 +357,25 @@ class SalesAgent:
             "offered_slots": scheduling.get("offered_slots", []),
             "meeting_booked": scheduling.get("meeting_booked"),
         }
+
+    @staticmethod
+    def _translate(english: str, locale: str, lead_id: int) -> tuple[str, Optional[dict]]:
+        """The guarded English reply in the customer's language, or the English itself.
+
+        The translation goes out only if app/agents/translation_check.py finds it says
+        exactly what the guarded English said. A failed call or a failed check sends
+        the English and returns a non-blocking `translation_rejected` violation.
+        """
+        translated = llm_client.translate_reply(english, locale, lead_id=lead_id)
+        if translated is None:
+            return english, {"code": translation_check.TRANSLATION_REJECTED,
+                             "detail": "translation call returned nothing; sent the English reply"}
+        verdict = translation_check.verify_translation(english, translated, locale, mock=llm_client.mock_mode)
+        if not verdict.ok:
+            logger.warning("Translation rejected — sending the guarded English reply",
+                           extra={"lead_id": lead_id, "locale": locale, "reasons": verdict.reasons})
+            return english, verdict.violation(translated)
+        return translated, None
 
     @staticmethod
     def stand_down(

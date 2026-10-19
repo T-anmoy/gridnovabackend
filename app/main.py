@@ -9,6 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.agent_governance import router as agent_governance_router
+from app.api.routes.associate_handover import router as associate_handover_router
+from app.api.routes.handover_admin import router as handover_admin_router
+from app.api.routes.archive_admin import router as archive_admin_router
+from app.api.routes.nova_records import router as nova_records_router
+from app.api.routes.public_handover import router as public_handover_router
 from app.api.routes.associate_onboarding import router as associate_onboarding_router
 from app.api.routes.associate_execution import router as associate_execution_router
 from app.api.routes.associate_equipment import router as associate_equipment_router
@@ -24,6 +29,9 @@ from app.api.routes.execution_register_admin import router as execution_register
 from app.api.routes.health import router as health_router
 from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.payments_admin import router as payments_admin_router
+from app.api.routes.commissions_admin import router as commissions_admin_router
+from app.api.routes.associate_commissions import router as associate_commissions_router
+from app.api.routes.network_admin import router as network_admin_router
 from app.api.routes.placeholders_admin import router as placeholders_admin_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.survey_admin import router as survey_admin_router
@@ -61,9 +69,21 @@ async def lifespan(app: FastAPI):
     # And execution/payments (config/execution_payments.yaml).
     from app.execution.config import load as load_execution_config
     load_execution_config()
+    # And handover, warranty and service requests (config/handover_warranty.yaml).
+    from app.handover.config import load as load_handover_config
+    load_handover_config()
+    # And the project archive (config/archive.yaml).
+    from app.archive.config import load as load_archive_config
+    load_archive_config()
+    # And Nova Records, the staff assistant (config/nova_records.yaml).
+    from app.records.config import load as load_records_config
+    load_records_config()
     # And the on-site survey (config/site_survey.yaml).
     from app.survey.config import load as load_survey_config
     load_survey_config()
+    # And commissions, TDS and payouts (config/commissions.yaml).
+    from app.commissions.config import load as load_commission_config
+    load_commission_config()
     # And Grid Nova's price list + pricing policy (config/price_list.yaml,
     # config/pricing_policy.yaml) — a tampered table must stop the boot.
     from app.pricing.price_list import load as load_price_list
@@ -122,6 +142,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The dashboard reads Retry-After on a 429 to show when Nova can be asked again.
+    expose_headers=["Retry-After"],
 )
 
 # Routes
@@ -151,7 +173,15 @@ app.include_router(execution_register_admin_router)
 app.include_router(execution_admin_router)
 app.include_router(associate_payments_router)
 app.include_router(payments_admin_router)
+app.include_router(commissions_admin_router)
+app.include_router(associate_commissions_router)
+app.include_router(network_admin_router)
 app.include_router(public_receipts_router)
+app.include_router(handover_admin_router)
+app.include_router(archive_admin_router)
+app.include_router(nova_records_router)
+app.include_router(associate_handover_router)
+app.include_router(public_handover_router)
 
 
 def _json_safe(value):

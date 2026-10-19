@@ -130,3 +130,22 @@ def test_no_domain_module_imports_a_route_for_the_validity_period():
         if "/api/routes/" in str(path):
             continue
         assert "PROPOSAL_VALIDITY_DAYS" not in path.read_text(encoding="utf-8"), path
+
+
+class TestBranchOfficeLetterhead:
+    """BE-7 N2: the proposal letterhead prints every company.branch_offices line under
+    the head office, escaped, from the same config as the other PDFs."""
+
+    def test_shipped_config_prints_the_patna_branch(self):
+        from app.proposals.content_engine import load_content_config
+
+        html = generator._build_html(_proposal(), load_content_config())
+        assert html.index("Patna Branch: C/O Parbati Bhawan") > html.index("Kolkata – 700107")
+        assert "Opposite Metro Pillar No. 81, P.O.- New Jaganpura, Patna – 800027, Bihar" in html
+
+    def test_branch_lines_are_escaped(self):
+        html = generator._build_html(_proposal(), {"company": {"branch_offices": ["<b>Patna</b>"]}})
+        assert "&lt;b&gt;Patna&lt;/b&gt;" in html and "<b>Patna</b>" not in html
+
+    def test_no_branch_lines_prints_nothing_extra(self):
+        assert "Branch" not in generator._build_html(_proposal(), {"company": {}})

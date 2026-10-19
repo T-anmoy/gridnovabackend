@@ -113,12 +113,14 @@ def _company() -> list[str]:
     from app.placeholders.registry import MARKERS
     from app.proposals.content_engine import load_content_config
 
-    company = load_content_config().get("company", {})
+    from app.proposals.content_engine import branch_offices
+
+    cfg = load_content_config()
+    company = cfg.get("company", {})
     out = []
-    for key in ("name", "address", "email", "website"):
-        value = company.get(key)
-        if value and not MARKERS.search(str(value)):
-            out.append(str(value))
+    for key in ("name", "address", "branch_offices", "email", "website"):
+        values = branch_offices(cfg) if key == "branch_offices" else [company.get(key)]
+        out += [str(v) for v in values if v and not MARKERS.search(str(v))]
     return out
 
 

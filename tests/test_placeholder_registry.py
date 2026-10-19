@@ -137,13 +137,13 @@ class TestAnchors:
 class TestProbes:
     def test_yaml_marker_probe_flips_when_the_value_is_supplied(self, tmp_path, monkeypatch):
         entry = registry.load().by_id["CMP-1"]
-        assert registry.evaluate(entry)["resolved"] is False
+        assert registry.evaluate(entry)["resolved"] is True       # GSTIN supplied 15 Oct 2026
         shutil.copytree(registry.REPO_ROOT / "config", tmp_path / "config")
         path = tmp_path / "config" / "proposal_content.yaml"
-        path.write_text(path.read_text(encoding="utf-8").replace('gstin: "[PLACEHOLDER]"', 'gstin: "19ABCDE1234F1Z5"'),
+        path.write_text(path.read_text(encoding="utf-8").replace('gstin: "19ABEFG7809A1ZI"', 'gstin: "[PLACEHOLDER]"'),
                         encoding="utf-8")
         monkeypatch.setattr(registry, "REPO_ROOT", tmp_path)
-        assert registry.evaluate(entry)["resolved"] is True
+        assert registry.evaluate(entry)["resolved"] is False      # a marker back on the value reopens it
 
     def test_comment_marker_on_a_number_counts(self, tmp_path, monkeypatch):
         entry = registry.load().by_id["E2"]
@@ -171,11 +171,11 @@ class TestProbes:
 
     def test_constant_probe(self, monkeypatch):
         entry = registry.load().by_id["PRC-9"]
-        assert registry.evaluate(entry)["resolved"] is False
+        assert registry.evaluate(entry)["resolved"] is True       # Grid Nova's 9 / 1460 are in
         import app.pricing.engine as engine
+        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT", 8.0)
+        assert registry.evaluate(entry)["resolved"] is False      # every symbol must differ from the dummy
         monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT", 7.5)
-        assert registry.evaluate(entry)["resolved"] is False      # every symbol must change
-        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW", 1350.0)
         assert registry.evaluate(entry)["resolved"] is True
 
     def test_resolved_and_superseded_statuses(self):
@@ -222,6 +222,13 @@ class TestProbes:
         db_session.commit()
         assert registry.evaluate(entry, db_session)["resolved"] is True
 
+    def test_prc10_resolved_and_reopens_on_the_sentinel(self, monkeypatch):
+        entry = registry.load().by_id["PRC-10"]
+        assert registry.evaluate(entry)["resolved"] is True       # Grid Nova's 4.0 kWh/kW/day are in
+        import app.pricing.sizing as sizing
+        monkeypatch.setattr(sizing, "PLACEHOLDER_DEFAULT_GENERATION_FACTOR", -1.0)
+        assert registry.evaluate(entry)["resolved"] is False      # reverting to the placeholder reopens it
+
     def test_database_probes_are_unknown_without_a_session(self):
         assert registry.evaluate(registry.load().by_id["A1"])["resolved"] is None
 
@@ -241,8 +248,10 @@ class TestEndpoints:
         assert set(body["summary"]["by_blocking"]) == {"blocks_launch", "blocks_feature", "tunable"}
         assert body["summary"]["by_blocking"]["blocks_launch"]["unresolved"] >= 1
         item = next(i for a in body["areas"] for i in a["items"] if i["id"] == "P5")
-        assert item["resolved"] is False and item["blocking"] == "blocks_launch"
+        assert item["resolved"] is True and item["blocking"] == "blocks_launch"      # company block supplied 15 Oct 2026
         assert item["location"] == "config/execution_payments.yaml → payments.receipt.company"
+        p6 = next(i for a in body["areas"] for i in a["items"] if i["id"] == "P6")
+        assert p6["resolved"] is False                                                # receipt wording still pending
         assert item["needed_from_grid_nova"].endswith("?")
 
     @pytest.mark.parametrize("role", ["sales", "engineer", "operations", "accounts"])

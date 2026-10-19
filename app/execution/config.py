@@ -105,7 +105,8 @@ def _validate(data: dict) -> dict:
     receipt = pay.get("receipt") or {}
     need("{SEQ" in str(receipt.get("numbering")), "payments.receipt.numbering must include {SEQ…}")
     company = receipt.get("company") or {}
-    for key in ("legal_name", "address", "phone", "email", "gstin", "bank_name", "account_number", "ifsc"):
+    for key in ("legal_name", "legal_form", "address", "phone", "email", "gstin", "account_name", "bank_name", "branch",
+                "account_number", "account_type", "ifsc"):
         need(company.get(key), f"payments.receipt.company.{key} is required")
     wording = receipt.get("wording") or {}
     need(wording.get("heading") and wording.get("footer"), "payments.receipt.wording needs heading and footer")

@@ -25,7 +25,10 @@ class TestAssociateApply:
         body = r.json()
         assert body["application_type"] == "associate" and body["status"] == "submitted"
         row = db_session.get(AssociateApplication, body["application_id"])
-        assert row.capability.value == "sales" and row.pan == "ABCPE1001F"
+        assert row.capability.value == "sales" and row.pan_last4 == "001F"
+        # BE-4: the PAN is encrypted at rest — never stored in clear.
+        from app.security.encryption import decrypt
+        assert "ABCPE1001F" not in row.pan_encrypted and decrypt(row.pan_encrypted) == "ABCPE1001F"
         assert set(row.documents) == {"masked_aadhaar", "pan_card", "photo", "cancelled_cheque"}
         assert row.documents["photo"]["content_type"] == "image/jpeg"
         assert db_session.execute(select(PreferredAssociateApplication)).first() is None

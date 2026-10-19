@@ -1,0 +1,29 @@
+# Grid Nova Energy — Nova Records, the internal staff assistant (BE-9)
+#
+# Read by app/records/config.py and validated at startup (a malformed file stops the app
+# from booting rather than failing mid-request). Documented in docs/api/nova_records.md.
+#
+# Nova Records answers signed-in staff from read-only tools only; nothing here changes
+# what a role may see (that is config/archive.yaml and app/auth/scoping.py).
+
+limits:
+  requests_per_minute: 10     # [UNCONFIRMED] per employee, per app instance (registry NR-1)
+  daily_questions: 200        # [UNCONFIRMED] per employee per IST day, counted in the database (registry NR-2)
+  max_tool_calls: 3           # tool calls one plan may make
+  max_rows: 50                # rows any one tool returns
+  near_candidate_cap: 2000    # projects with coordinates a radius search will measure
+  near_default_km: 5          # radius when the question names a place but no distance
+  tool_timeout_seconds: 10    # a tool that runs longer is reported as failed, not waited on
+  history_turns: 4            # earlier turns of the conversation the planner sees
+
+retention:
+  days: 365                   # [UNCONFIRMED] conversations older than this are purged (registry NR-3)
+
+# The staff dashboard pages `citations[].path` links to (the only ones that exist). `{…}` is
+# filled from the record. A record no page opens — or one the caller's role cannot open on
+# that page — gets path null. There is no customer page: customer citations never link.
+paths:
+  live_project: /dashboard/operations/{onboarding_id}
+  lead: /dashboard/leads/{lead_id}
+  service_request: /dashboard/service-requests/{id}
+  archive: /dashboard/archive/{id}

@@ -9,7 +9,8 @@
 # "custom_quote") with reason codes; sizing, generation and subsidy still return.
 applicability:
   # The source prices are "for destination within West Bengal".
-  states: [West Bengal]                     # [UNCONFIRMED] — pricing outside West Bengal (Bihar) not supplied
+  # Confirmed by Grid Nova 15 Oct 2026: Bihar uses West Bengal prices initially; Grid Nova will advise any change.
+  states: [West Bengal, Bihar]
   # Residential rooftop, including a housing society's rooftop.
   segments: [residential]                   # [UNCONFIRMED]
   housing_society_allowed: true             # [UNCONFIRMED]

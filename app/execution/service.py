@@ -296,6 +296,9 @@ def _record(db: Session, onboarding: CustomerOnboarding, stage: ProjectStage, re
             note: Optional[str]) -> ProjectStageEvent:
     from app.onboarding import progress
 
+    if stage == ProjectStage.handover_complete:
+        from app.handover import pack as handover_pack
+        handover_pack.gate(db, onboarding)
     _raise_blockers(stage_blockers(db, onboarding, stage))
     return progress.record(db, onboarding, stage, recorded_by, evidence=evidence, note=note)
 

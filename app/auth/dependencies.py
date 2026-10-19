@@ -298,6 +298,29 @@ class AuthenticatedEmployee:
         exports. Management reads but does not act."""
         return self.role in (EmployeeRole.admin, EmployeeRole.accounts)
 
+    # ── Commissions, TDS and payouts (BE-4) — app/api/routes/commissions_admin.py ──
+
+    def can_view_commissions(self) -> bool:
+        """Commission entries, rate schedules, payout batches and queries. Management
+        reads; Sales, Engineer and Operations: never."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.accounts)
+
+    def can_process_commissions(self) -> bool:
+        """Approve entries; prepare, approve and mark paid payout batches; answer
+        queries; the commission and TDS exports."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.accounts)
+
+    def can_manage_commission_rates(self) -> bool:
+        """Publish a rate schedule, re-rate pending entries, reverse an entry (4.7)."""
+        return self.role == EmployeeRole.admin
+
+    def can_export_payout_bank_file(self) -> bool:
+        """The payout bank file carries full account numbers: Accounts only."""
+        return self.role == EmployeeRole.accounts
+
+    def can_view_network_summary(self) -> bool:
+        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+
     # ── Execution (Phase 4A) — see app/auth/scoping.py require_execution_access ──
 
     def can_view_execution(self) -> bool:
@@ -312,8 +335,15 @@ class AuthenticatedEmployee:
         return self.role in (EmployeeRole.admin, EmployeeRole.operations)
 
     def can_record_execution(self) -> bool:
-        """Record a stage directly (grid_nova mode) and upload execution evidence."""
+        """Record a stage directly (grid_nova mode) and upload execution evidence. Also
+        acts on the handover pack (ticks, customer link) — BE-5."""
         return self.role in (EmployeeRole.admin, EmployeeRole.operations)
+
+    def can_handle_service_requests(self) -> bool:
+        """Raise on a customer's behalf, assign, add notes and change the status of a
+        warranty / O&M service request (BE-5). Management and Sales read (scoped as
+        execution is); Accounts: none."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.operations, EmployeeRole.engineer)
 
 
 def get_current_employee(

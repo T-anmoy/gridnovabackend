@@ -1,8 +1,8 @@
 """
 Solar system sizing — independent of app/pricing/engine.py's cost calculation,
-but feeds it a size_kw exactly the way estimate_size_kw_from_monthly_bill()
-already does for the single-method flow the live /api/v1/pricing/estimate
-endpoint uses today (untouched by this module).
+but feeds it a size_kw. The ONE bill-to-size rule: the Solar Calculator, onboarding
+estimate, survey results and (BE-7 N6) /api/v1/pricing/estimate and /breakdown all
+size a monthly bill through estimate_size_from_bill() here.
 
 Three sizing methods, matching the frontend's expanded /solar-calculator flow:
   - by_units:      customer knows their monthly consumption directly (kWh).
@@ -27,13 +27,13 @@ from app.pricing.engine import PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT
 # kWh generated per kW of installed capacity, per day. Varies by region (solar
 # irradiance differs across states) — this is a DIFFERENT, more granular figure
 # than engine.py's PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW (a single flat annual
-# national assumption feeding the older, single-method bill->kW helper). Kept as
+# national assumption that fed the older bill->kW helper, removed in BE-7). Kept as
 # its own constant rather than silently repurposing that one for a subtly
-# different (daily, state-varying) meaning. [PLACEHOLDER — real regional
-# generation data pending Raju Paul]
+# different (daily, state-varying) meaning. Grid Nova (Raju Paul, 15 Oct 2026):
+# 4 units per kW per day on average, for West Bengal, Bihar and the default.
 PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: dict[str, float] = {
     "west bengal": 4.0,
-    "bihar": 4.2,
+    "bihar": 4.0,
 }
 PLACEHOLDER_DEFAULT_GENERATION_FACTOR = 4.0  # any state outside the primary two
 

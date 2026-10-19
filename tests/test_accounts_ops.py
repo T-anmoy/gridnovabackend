@@ -68,14 +68,17 @@ class TestWorkQueues:
         days_ago(db_session, oid, ProjectStage.accepted, 30)
         url = f"{DASH}/work-queues"
         ops = client.get(url, headers=OPS).json()
-        assert ops == {"execution": {"pending_stage_verifications": 1, "stuck_projects": 0, "dcr_mismatch": 0}}
+        assert ops == {"execution": {"pending_stage_verifications": 1, "stuck_projects": 0, "dcr_mismatch": 0},
+                       "handover": {"awaiting_handover": 0, "packs_incomplete": 0},
+                       "service_requests": {"open": 0, "overdue": 0}}
         acc = client.get(url, headers=ACCOUNTS).json()
         assert set(acc) == {"payments"}
         assert acc["payments"]["dishonoured"] == 1 and acc["payments"]["overdue_milestones"] == 1
         # Survey reviews and corrections (S1 Step 8) for the roles that act on them.
         assert set(client.get(url, headers=ADMIN).json()) == {"execution", "payments", "survey_reviews",
-                                                               "survey_corrections"}
-        assert set(client.get(url, headers=ENG).json()) == {"execution", "survey_reviews", "survey_corrections"}
+                                                               "survey_corrections", "handover", "service_requests"}
+        assert set(client.get(url, headers=ENG).json()) == {"execution", "survey_reviews", "survey_corrections",
+                                                              "handover", "service_requests"}
 
 
 class TestStaffEmails:

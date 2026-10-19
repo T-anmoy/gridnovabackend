@@ -95,6 +95,26 @@ class TestRegistry:
         assert registry.MEMORY_AGENT.audience == "employees"
         assert registry.REPLY_TO_CUSTOMER in registry.MEMORY_AGENT.prohibitions
 
+    def test_nova_records_reads_and_never_acts(self):
+        """BE-9: the staff records assistant may only answer from records. Every action
+        that changes, sends, approves, prices, books or assigns anything is prohibited."""
+        spec = registry.NOVA_RECORDS
+        assert spec.audience == "employees" and spec.autonomy == registry.Autonomy.READ_ONLY
+        assert set(spec.capabilities) == {registry.ANSWER_STAFF_RECORDS_QUESTION, registry.READ_RECORDS}
+        writes = {registry.REPLY_TO_CUSTOMER, registry.WRITE_CUSTOMER_MEMORY, registry.EXTRACT_FIELDS,
+                  registry.OFFER_MEETING_SLOTS, registry.BOOK_MEETING, registry.DRAFT_PROPOSAL,
+                  registry.SET_PROPOSAL_PRICE, registry.APPROVE_PROPOSAL, registry.SEND_PROPOSAL,
+                  registry.CHANGE_RECORDS, registry.SEND_MESSAGE, registry.ASSIGN_WORK, registry.RECORD_PAYMENT}
+        assert writes <= set(spec.prohibitions)
+        for action in writes:
+            decision = policy.authorize("nova_records", action, record=False)
+            assert decision.code == policy.PROHIBITED
+
+    def test_nova_records_has_no_write_tool(self):
+        from app.records import tools
+        assert all(name.split("_")[0] not in {"set", "update", "create", "delete", "send", "assign", "record",
+                                              "approve", "mark"} for name in tools.TOOLS)
+
     def test_may_reflects_both_lists(self):
         assert registry.SALES_AGENT.may(registry.REPLY_TO_CUSTOMER)
         assert not registry.SALES_AGENT.may(registry.SEND_PROPOSAL)
@@ -324,9 +344,10 @@ class TestArchitecturalInvariants:
 
     def test_agents_never_import_each_other(self):
         forbidden_for = {
-            "agents/sales_agent.py": {"proposal_agent", "memory_agent"},
-            "agents/proposal_agent.py": {"sales_agent", "memory_agent"},
-            "agents/memory_agent.py": {"sales_agent", "proposal_agent"},
+            "agents/sales_agent.py": {"proposal_agent", "memory_agent", "records_agent"},
+            "agents/proposal_agent.py": {"sales_agent", "memory_agent", "records_agent"},
+            "agents/memory_agent.py": {"sales_agent", "proposal_agent", "records_agent"},
+            "agents/records_agent.py": {"sales_agent", "proposal_agent", "memory_agent"},
         }
         for module, forbidden in forbidden_for.items():
             imported = _imported_modules(module)
@@ -339,7 +360,7 @@ class TestArchitecturalInvariants:
     def test_no_agent_reaches_another_through_a_dynamic_import(self):
         """The invariant is about coupling, not about the `import` keyword."""
         for module in ("agents/sales_agent.py", "agents/proposal_agent.py",
-                       "agents/memory_agent.py"):
+                       "agents/memory_agent.py", "agents/records_agent.py"):
             assert "importlib" not in _identifiers(module), (
                 f"{module} uses importlib, which would route around the import check"
             )
@@ -354,7 +375,7 @@ class TestArchitecturalInvariants:
             )
 
     def test_only_the_sales_agent_writes_customer_facing_messages(self):
-        for module in ("agents/proposal_agent.py", "agents/memory_agent.py"):
+        for module in ("agents/proposal_agent.py", "agents/memory_agent.py", "agents/records_agent.py"):
             assert not _uses_attribute(module, "MessageRole", "agent"), (
                 f"{module} writes a customer-facing message; only the Sales Agent may"
             )
@@ -376,8 +397,8 @@ class TestArchitecturalInvariants:
         moved with it: an agent cannot skip authorisation by forgetting to call it,
         because it never calls it — the harness does, on the way in."""
         orchestrator_src = _source("orchestrator/orchestrator.py")
-        assert orchestrator_src.count("harness.run(") == 3, (
-            "each of the three agents must be invoked through the harness"
+        assert orchestrator_src.count("harness.run(") == 4, (
+            "each of the four agents must be invoked through the harness"
         )
         for spec in registry.all_specs():
             assert spec.id in orchestrator_src, f"{spec.id} is never run by the orchestrator"
@@ -393,6 +414,7 @@ class TestArchitecturalInvariants:
             ("agents/sales_agent.py", registry.REPLY_TO_CUSTOMER),
             ("agents/proposal_agent.py", registry.DRAFT_PROPOSAL),
             ("agents/memory_agent.py", registry.ANSWER_EMPLOYEE_QUESTION),
+            ("agents/records_agent.py", registry.ANSWER_STAFF_RECORDS_QUESTION),
         ):
             src = _source(module)
             assert f"registry.{primary.upper()}" not in src, (
@@ -409,7 +431,7 @@ class TestGovernanceEndpoints:
         body = response.json()
 
         agents = {a["id"]: a for a in body["agents"]}
-        assert set(agents) == {"sales_agent", "proposal_agent", "memory_agent"}
+        assert set(agents) == {"sales_agent", "proposal_agent", "memory_agent", "nova_records"}
         assert "send_proposal" in agents["proposal_agent"]["prohibitions"]
         assert agents["proposal_agent"]["uses_llm"] is False
         assert agents["sales_agent"]["enabled"] is True

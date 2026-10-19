@@ -75,6 +75,42 @@
         "title": "ApplicationStatusRequest",
         "type": "object"
       },
+      "ApproveBatchIn": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "ApproveBatchIn",
+        "type": "object"
+      },
+      "ApproveEntriesIn": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Entry Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entry_ids"
+        ],
+        "title": "ApproveEntriesIn",
+        "type": "object"
+      },
       "ApproveRequest": {
         "properties": {
           "verification_call_completed": {
@@ -92,6 +128,221 @@
           "verification_call_note"
         ],
         "title": "ApproveRequest",
+        "type": "object"
+      },
+      "ArchiveStats": {
+        "properties": {
+          "by_district": {
+            "items": {
+              "$ref": "#/components/schemas/DistrictStat"
+            },
+            "title": "By District",
+            "type": "array"
+          },
+          "by_scheme": {
+            "items": {
+              "$ref": "#/components/schemas/SchemeStat"
+            },
+            "title": "By Scheme",
+            "type": "array"
+          },
+          "by_state": {
+            "items": {
+              "$ref": "#/components/schemas/StateStat"
+            },
+            "title": "By State",
+            "type": "array"
+          },
+          "by_year": {
+            "items": {
+              "$ref": "#/components/schemas/YearStat"
+            },
+            "title": "By Year",
+            "type": "array"
+          },
+          "total": {
+            "$ref": "#/components/schemas/StatsTotal"
+          }
+        },
+        "required": [
+          "total",
+          "by_scheme",
+          "by_state",
+          "by_district",
+          "by_year"
+        ],
+        "title": "ArchiveStats",
+        "type": "object"
+      },
+      "AskContext": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "lead_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Id"
+          },
+          "project_ref": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Ref"
+          }
+        },
+        "title": "AskContext",
+        "type": "object"
+      },
+      "AskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "question": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskRequest",
+        "type": "object"
+      },
+      "AskResponse": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "searched": {
+            "items": {
+              "$ref": "#/components/schemas/Searched"
+            },
+            "title": "Searched",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "answered",
+              "not_on_record",
+              "needs_clarification",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "answer",
+          "citations",
+          "tables",
+          "searched",
+          "suggestions",
+          "generated_at",
+          "conversation_id",
+          "turn_id"
+        ],
+        "title": "AskResponse",
+        "type": "object"
+      },
+      "AssignRequest": {
+        "properties": {
+          "assignee_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Id"
+          }
+        },
+        "title": "AssignRequest",
         "type": "object"
       },
       "AssociateStatus": {
@@ -181,6 +432,407 @@
           "slots"
         ],
         "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "BatchDetail": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "report": {
+            "$ref": "#/components/schemas/ImportReport"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "title": "Uploaded At",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "title": "Uploaded By",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
+          },
+          "voided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided By"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "sha256",
+          "uploaded_by",
+          "uploaded_at",
+          "row_count",
+          "accepted_count",
+          "rejected_count",
+          "status",
+          "report"
+        ],
+        "title": "BatchDetail",
+        "type": "object"
+      },
+      "BatchIn": {
+        "properties": {
+          "period": {
+            "maxLength": 7,
+            "minLength": 7,
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period"
+        ],
+        "title": "BatchIn",
+        "type": "object"
+      },
+      "BatchList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BatchList",
+        "type": "object"
+      },
+      "BatchSummary": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "title": "Uploaded At",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "title": "Uploaded By",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
+          },
+          "voided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided By"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "sha256",
+          "uploaded_by",
+          "uploaded_at",
+          "row_count",
+          "accepted_count",
+          "rejected_count",
+          "status"
+        ],
+        "title": "BatchSummary",
+        "type": "object"
+      },
+      "Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post": {
+        "properties": {
+          "customer_name": {
+            "maxLength": 200,
+            "title": "Customer Name",
+            "type": "string"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "method": {
+            "enum": [
+              "signature",
+              "in_person"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "method",
+          "customer_name"
+        ],
+        "title": "Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post",
+        "type": "object"
+      },
+      "Body_import_projects_api_v1_dashboard_archive_imports_post": {
+        "properties": {
+          "batch_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Token"
+          },
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_projects_api_v1_dashboard_archive_imports_post",
+        "type": "object"
+      },
+      "Body_raise_request_api_v1_public_handover__token__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_request_api_v1_public_handover__token__service_requests_post",
+        "type": "object"
+      },
+      "Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post",
+        "type": "object"
+      },
+      "Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ServiceRequestCategory"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post",
         "type": "object"
       },
       "Body_sign_survey_api_v1_associate_onboardings__onboarding_id__survey_signatures__party__post": {
@@ -1173,6 +1825,40 @@
         "title": "ChatResponse",
         "type": "object"
       },
+      "Citation": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "kind",
+          "label"
+        ],
+        "title": "Citation",
+        "type": "object"
+      },
       "ClearReverification": {
         "properties": {
           "note": {
@@ -1186,6 +1872,45 @@
         ],
         "title": "ClearReverification",
         "type": "object"
+      },
+      "CommissionEntryKind": {
+        "enum": [
+          "earn",
+          "reversal",
+          "recovery",
+          "adjustment"
+        ],
+        "title": "CommissionEntryKind",
+        "type": "string"
+      },
+      "CommissionEntryStatus": {
+        "enum": [
+          "earned",
+          "approved",
+          "paid",
+          "reversed"
+        ],
+        "title": "CommissionEntryStatus",
+        "type": "string"
+      },
+      "CommissionQueryStatus": {
+        "enum": [
+          "open",
+          "answered"
+        ],
+        "title": "CommissionQueryStatus",
+        "type": "string"
+      },
+      "CommissionRole": {
+        "description": "Why an associate earns an entry (4.1, 4.3).",
+        "enum": [
+          "personal_sale",
+          "territory_state",
+          "territory_district",
+          "territory_block"
+        ],
+        "title": "CommissionRole",
+        "type": "string"
       },
       "ConnectionPhase": {
         "enum": [
@@ -1263,6 +1988,106 @@
           "message"
         ],
         "title": "ContactRequest",
+        "type": "object"
+      },
+      "ConversationDetail": {
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "employee_id": {
+            "title": "Employee Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "turn_count": {
+            "title": "Turn Count",
+            "type": "integer"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnOut"
+            },
+            "title": "Turns",
+            "type": "array"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "title",
+          "turn_count",
+          "created_at",
+          "updated_at",
+          "employee_id",
+          "role",
+          "turns"
+        ],
+        "title": "ConversationDetail",
+        "type": "object"
+      },
+      "ConversationList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConversationList",
+        "type": "object"
+      },
+      "ConversationSummary": {
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "turn_count": {
+            "title": "Turn Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "title",
+          "turn_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationSummary",
         "type": "object"
       },
       "CorrectionDecision": {
@@ -1520,6 +2345,46 @@
         ],
         "title": "DistanceMethod",
         "type": "string"
+      },
+      "DistrictStat": {
+        "properties": {
+          "capacity_kw": {
+            "title": "Capacity Kw",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "district": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "District"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "count",
+          "capacity_kw"
+        ],
+        "title": "DistrictStat",
+        "type": "object"
       },
       "DocumentRef": {
         "properties": {
@@ -1795,6 +2660,105 @@
         "title": "FeasibilityOutcome",
         "type": "string"
       },
+      "Feedback": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "helpful": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Helpful"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "Feedback",
+        "type": "object"
+      },
+      "FeedbackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "helpful": {
+            "title": "Helpful",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "helpful"
+        ],
+        "title": "FeedbackRequest",
+        "type": "object"
+      },
+      "FeedbackResponse": {
+        "properties": {
+          "feedback_at": {
+            "title": "Feedback At",
+            "type": "string"
+          },
+          "helpful": {
+            "title": "Helpful",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "helpful",
+          "feedback_at"
+        ],
+        "title": "FeedbackResponse",
+        "type": "object"
+      },
       "FormalProposalRequest": {
         "properties": {
           "customer_email": {
@@ -1836,6 +2800,188 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "code",
+          "message"
+        ],
+        "title": "ImportIssue",
+        "type": "object"
+      },
+      "ImportNotice": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "columns",
+          "rows",
+          "message"
+        ],
+        "title": "ImportNotice",
+        "type": "object"
+      },
+      "ImportReport": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "already_imported_batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Already Imported Batch Id"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "batch_token": {
+            "title": "Batch Token",
+            "type": "string"
+          },
+          "counts_by_code": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts By Code",
+            "type": "object"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "errors_truncated": {
+            "title": "Errors Truncated",
+            "type": "boolean"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ImportNotice"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "warning_count": {
+            "title": "Warning Count",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "warnings_truncated": {
+            "title": "Warnings Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dry_run",
+          "filename",
+          "batch_token",
+          "sha256",
+          "row_count",
+          "accepted_count",
+          "rejected_count",
+          "error_count",
+          "warning_count",
+          "counts_by_code",
+          "errors",
+          "errors_truncated",
+          "warnings",
+          "warnings_truncated",
+          "notices"
+        ],
+        "title": "ImportReport",
         "type": "object"
       },
       "InPersonAcceptanceRequest": {
@@ -2683,6 +3829,17 @@
         "title": "LeadTimelineEntry",
         "type": "object"
       },
+      "LinkRequest": {
+        "properties": {
+          "send_email": {
+            "default": true,
+            "title": "Send Email",
+            "type": "boolean"
+          }
+        },
+        "title": "LinkRequest",
+        "type": "object"
+      },
       "ManualLeadCreate": {
         "properties": {
           "capacity_kw": {
@@ -2788,6 +3945,23 @@
           "source"
         ],
         "title": "ManualLeadCreate",
+        "type": "object"
+      },
+      "MarkPaidIn": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PaidLineIn"
+            },
+            "maxItems": 5000,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "MarkPaidIn",
         "type": "object"
       },
       "MatchIn": {
@@ -3081,6 +4255,21 @@
           "name"
         ],
         "title": "NewDistrictRequest",
+        "type": "object"
+      },
+      "NoteRequest": {
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "NoteRequest",
         "type": "object"
       },
       "OnboardingCreate": {
@@ -4609,6 +5798,27 @@
         "title": "OverrideIn",
         "type": "object"
       },
+      "PaidLineIn": {
+        "properties": {
+          "associate_id": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "bank_reference": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Bank Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "associate_id"
+        ],
+        "title": "PaidLineIn",
+        "type": "object"
+      },
       "PaymentIn": {
         "properties": {
           "amount": {
@@ -4715,6 +5925,16 @@
         "title": "PaymentStatus",
         "type": "string"
       },
+      "PayoutBatchStatus": {
+        "enum": [
+          "draft",
+          "approved",
+          "paid",
+          "cancelled"
+        ],
+        "title": "PayoutBatchStatus",
+        "type": "string"
+      },
       "PipelineStage": {
         "enum": [
           "new",
@@ -4729,6 +5949,79 @@
         "title": "PipelineStage",
         "type": "string"
       },
+      "ProjectCard": {
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Provenanced"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "ref",
+          "id",
+          "fields"
+        ],
+        "title": "ProjectCard",
+        "type": "object"
+      },
+      "ProjectDossier": {
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Provenanced"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "sections": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Provenanced"
+              },
+              "type": "array"
+            },
+            "title": "Sections",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "ref",
+          "id",
+          "fields",
+          "sections"
+        ],
+        "title": "ProjectDossier",
+        "type": "object"
+      },
       "ProjectFamily": {
         "enum": [
           "rooftop_solar",
@@ -4741,6 +6034,37 @@
         ],
         "title": "ProjectFamily",
         "type": "string"
+      },
+      "ProjectPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectCard"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "ProjectPage",
+        "type": "object"
       },
       "ProposalInputsCreate": {
         "properties": {
@@ -5209,6 +6533,25 @@
         "title": "ProposalStatus",
         "type": "string"
       },
+      "Provenanced": {
+        "properties": {
+          "record_id": {
+            "title": "Record Id"
+          },
+          "source_table": {
+            "title": "Source Table",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "source_table"
+        ],
+        "title": "Provenanced",
+        "type": "object"
+      },
       "PublicEstimateRequest": {
         "properties": {
           "battery_storage": {
@@ -5327,18 +6670,19 @@
         "title": "PublicEstimateRequest",
         "type": "object"
       },
-      "ReasonIn": {
+      "QueryIn": {
         "properties": {
-          "reason": {
+          "message": {
             "maxLength": 2000,
-            "title": "Reason",
+            "minLength": 1,
+            "title": "Message",
             "type": "string"
           }
         },
         "required": [
-          "reason"
+          "message"
         ],
-        "title": "ReasonIn",
+        "title": "QueryIn",
         "type": "object"
       },
       "RecordExecutionStageRequest": {
@@ -5470,6 +6814,89 @@
           "note"
         ],
         "title": "ResolveRequest",
+        "type": "object"
+      },
+      "RespondIn": {
+        "properties": {
+          "response": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response"
+        ],
+        "title": "RespondIn",
+        "type": "object"
+      },
+      "RetentionRun": {
+        "properties": {
+          "conversations_deleted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversations Deleted"
+          },
+          "cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoff"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "turns_deleted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turns Deleted"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RetentionRun",
         "type": "object"
       },
       "ReviewRequest": {
@@ -5629,22 +7056,6 @@
         "title": "RoofSection",
         "type": "object"
       },
-      "ScheduleIn": {
-        "properties": {
-          "milestones": {
-            "items": {
-              "$ref": "#/components/schemas/MilestoneIn"
-            },
-            "title": "Milestones",
-            "type": "array"
-          }
-        },
-        "required": [
-          "milestones"
-        ],
-        "title": "ScheduleIn",
-        "type": "object"
-      },
       "ScheduleMeetingRequest": {
         "properties": {
           "duration_minutes": {
@@ -5718,6 +7129,52 @@
         "title": "ScheduleMeetingResponse",
         "type": "object"
       },
+      "SchemeStat": {
+        "properties": {
+          "capacity_kw": {
+            "title": "Capacity Kw",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "count",
+          "capacity_kw"
+        ],
+        "title": "SchemeStat",
+        "type": "object"
+      },
+      "Searched": {
+        "properties": {
+          "filters": {
+            "title": "Filters",
+            "type": "object"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "filters",
+          "summary"
+        ],
+        "title": "Searched",
+        "type": "object"
+      },
       "SeatReleaseRequest": {
         "properties": {
           "reason": {
@@ -5732,6 +7189,27 @@
         ],
         "title": "SeatReleaseRequest",
         "type": "object"
+      },
+      "ServiceRequestCategory": {
+        "enum": [
+          "no_generation",
+          "inverter_error",
+          "physical_damage",
+          "cleaning_om",
+          "other"
+        ],
+        "title": "ServiceRequestCategory",
+        "type": "string"
+      },
+      "ServiceRequestStatus": {
+        "enum": [
+          "open",
+          "in_progress",
+          "resolved",
+          "rejected"
+        ],
+        "title": "ServiceRequestStatus",
+        "type": "string"
       },
       "ShadingCondition": {
         "enum": [
@@ -5875,6 +7353,83 @@
         "title": "StaffSiteLocationRequest",
         "type": "object"
       },
+      "StateStat": {
+        "properties": {
+          "capacity_kw": {
+            "title": "Capacity Kw",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "count",
+          "capacity_kw"
+        ],
+        "title": "StateStat",
+        "type": "object"
+      },
+      "StatsTotal": {
+        "properties": {
+          "capacity_kw": {
+            "title": "Capacity Kw",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "capacity_kw"
+        ],
+        "title": "StatsTotal",
+        "type": "object"
+      },
+      "StatusRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "status": {
+            "enum": [
+              "in_progress",
+              "resolved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusRequest",
+        "type": "object"
+      },
       "SubmitStageRequest": {
         "properties": {
           "note": {
@@ -5906,6 +7461,41 @@
           "stage"
         ],
         "title": "SubmitStageRequest",
+        "type": "object"
+      },
+      "Suggestion": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "Suggestion",
         "type": "object"
       },
       "SurveyCorrectionStatus": {
@@ -6000,6 +7590,67 @@
         "title": "SwitchModeRequest",
         "type": "object"
       },
+      "Table": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/TableColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "columns",
+          "rows"
+        ],
+        "title": "Table",
+        "type": "object"
+      },
+      "TableColumn": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "text",
+              "ref",
+              "money",
+              "kw",
+              "date",
+              "number",
+              "boolean"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type"
+        ],
+        "title": "TableColumn",
+        "type": "object"
+      },
       "TerritoryLevel": {
         "enum": [
           "state_head",
@@ -6037,6 +7688,29 @@
           }
         },
         "title": "TerritoryUpdateRequest",
+        "type": "object"
+      },
+      "TickRequest": {
+        "properties": {
+          "done": {
+            "default": true,
+            "title": "Done",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "TickRequest",
         "type": "object"
       },
       "TimelineEventType": {
@@ -6078,6 +7752,92 @@
         ],
         "title": "TimelineEventType",
         "type": "string"
+      },
+      "TurnOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "feedback": {
+            "$ref": "#/components/schemas/Feedback"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "searched": {
+            "items": {
+              "$ref": "#/components/schemas/Searched"
+            },
+            "title": "Searched",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "answered",
+              "not_on_record",
+              "needs_clarification",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "answer",
+          "citations",
+          "tables",
+          "searched",
+          "suggestions",
+          "generated_at",
+          "turn_id",
+          "question",
+          "feedback"
+        ],
+        "title": "TurnOut",
+        "type": "object"
       },
       "UnitIn": {
         "properties": {
@@ -6428,6 +8188,44 @@
         "title": "VoidIn",
         "type": "object"
       },
+      "VoidRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "VoidRequest",
+        "type": "object"
+      },
+      "YearStat": {
+        "properties": {
+          "capacity_kw": {
+            "title": "Capacity Kw",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "count",
+          "capacity_kw"
+        ],
+        "title": "YearStat",
+        "type": "object"
+      },
       "_DeviceGps": {
         "properties": {
           "accuracy_m": {
@@ -6617,6 +8415,90 @@
           }
         },
         "title": "EstimateRequest",
+        "type": "object"
+      },
+      "app__api__routes__associate_payments__ReasonIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonIn",
+        "type": "object"
+      },
+      "app__api__routes__commissions_admin__ReasonIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonIn",
+        "type": "object"
+      },
+      "app__api__routes__commissions_admin__ScheduleIn": {
+        "properties": {
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "is_placeholder": {
+            "default": false,
+            "title": "Is Placeholder",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "rates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Rates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "effective_from",
+          "rates"
+        ],
+        "title": "ScheduleIn",
+        "type": "object"
+      },
+      "app__api__routes__payments_admin__ScheduleIn": {
+        "properties": {
+          "milestones": {
+            "items": {
+              "$ref": "#/components/schemas/MilestoneIn"
+            },
+            "title": "Milestones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "milestones"
+        ],
+        "title": "ScheduleIn",
         "type": "object"
       },
       "app__api__routes__proposal_inputs__ConsumptionMonth": {
@@ -6905,6 +8787,188 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/associate/commissions": {
+      "get": {
+        "description": "The caller's own commission entries, newest first, with a summary.",
+        "operationId": "my_commissions_api_v1_associate_commissions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Commissions"
+      }
+    },
+    "/api/v1/associate/commissions/{entry_id}/queries": {
+      "get": {
+        "operationId": "entry_queries_api_v1_associate_commissions__entry_id__queries_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Entry Queries"
+      },
+      "post": {
+        "description": "Query one of your own entries (within queries.window_days of it appearing).",
+        "operationId": "raise_query_api_v1_associate_commissions__entry_id__queries_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Query"
+      }
+    },
     "/api/v1/associate/equipment": {
       "get": {
         "description": "Active catalogue items. `category`: module | inverter | structure | bos_component.\n`q`: case-insensitive match on brand or model name.",
@@ -8198,6 +10262,92 @@
         "summary": "Get Formal Proposal"
       }
     },
+    "/api/v1/associate/onboardings/{onboarding_id}/handover": {
+      "get": {
+        "description": "The handover checklist, the warranty register (once handed over) and the PDF state.",
+        "operationId": "handover_pack_api_v1_associate_onboardings__onboarding_id__handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pack"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/handover/pdf": {
+      "get": {
+        "description": "A short-lived signed URL for the handover PDF — the owner (a territory viewer only\nwhen territory_viewers_see_documents is on).",
+        "operationId": "handover_pdf_api_v1_associate_onboardings__onboarding_id__handover_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pdf"
+      }
+    },
     "/api/v1/associate/onboardings/{onboarding_id}/payments": {
       "get": {
         "operationId": "list_payments_api_v1_associate_onboardings__onboarding_id__payments_get",
@@ -8318,7 +10468,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -8600,6 +10750,150 @@
           }
         ],
         "summary": "Request Formal Proposal"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/service-requests": {
+      "get": {
+        "operationId": "list_service_requests_api_v1_associate_onboardings__onboarding_id__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Service Requests"
+      },
+      "post": {
+        "description": "The owning associate raises a request for their customer (multipart; up to\nservice.max_photos images in `files`). 409 not_handed_over before the handover.",
+        "operationId": "raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_service_request_api_v1_associate_onboardings__onboarding_id__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Service Request"
+      }
+    },
+    "/api/v1/associate/onboardings/{onboarding_id}/service-requests/{request_id}": {
+      "get": {
+        "operationId": "service_request_api_v1_associate_onboardings__onboarding_id__service_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request"
       }
     },
     "/api/v1/associate/onboardings/{onboarding_id}/site-location": {
@@ -9052,6 +11346,28 @@
         "summary": "Payment Instructions"
       }
     },
+    "/api/v1/associate/payouts": {
+      "get": {
+        "description": "The caller's payouts in approved or paid batches, newest month first.",
+        "operationId": "my_payouts_api_v1_associate_payouts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Payouts"
+      }
+    },
     "/api/v1/associate/territory/members": {
       "get": {
         "description": "Every associate in the caller's territory below the caller's level, with how\nmany customers each has onboarded. Preferred Associates only (403 otherwise).\nCounts cover all of a member's customers; a customer an Admin closed after an\nattribution conflict is not counted.",
@@ -9365,6 +11681,653 @@
           }
         ],
         "summary": "Analytics Rep Performance"
+      }
+    },
+    "/api/v1/dashboard/archive/imports": {
+      "get": {
+        "operationId": "list_imports_api_v1_dashboard_archive_imports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Imports"
+      },
+      "post": {
+        "description": "Validate a template CSV (dry_run=true, the default — nothing is written) or write\nits accepted rows (dry_run=false with the `batch_token` the dry run returned, which is\nthe file's SHA-256). Rows with errors are skipped and listed; warnings are stored with\nthe row. The same file cannot be imported twice unless the first batch is voided.",
+        "operationId": "import_projects_api_v1_dashboard_archive_imports_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_projects_api_v1_dashboard_archive_imports_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Projects"
+      }
+    },
+    "/api/v1/dashboard/archive/imports/{batch_id}": {
+      "get": {
+        "operationId": "import_report_api_v1_dashboard_archive_imports__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Report"
+      }
+    },
+    "/api/v1/dashboard/archive/imports/{batch_id}/void": {
+      "post": {
+        "description": "Hide every project of the batch from every read path. Nothing is deleted.",
+        "operationId": "void_import_api_v1_dashboard_archive_imports__batch_id__void_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Void Import"
+      }
+    },
+    "/api/v1/dashboard/archive/projects": {
+      "get": {
+        "description": "Newest commissioning first: {items, page, page_size, total}. Filters narrow before\npaging, so `total` is the filtered count. `q` searches the Grid Nova ref and, where the\nrole may see them, customer name, address, block, district and state.",
+        "operationId": "list_projects_api_v1_dashboard_archive_projects_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "district",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "District"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "capacity_min",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Capacity Min"
+            }
+          },
+          {
+            "in": "query",
+            "name": "capacity_max",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Capacity Max"
+            }
+          },
+          {
+            "in": "query",
+            "name": "commissioned_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commissioned From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "commissioned_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commissioned To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_make",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Make"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inverter_make",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inverter Make"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Projects"
+      }
+    },
+    "/api/v1/dashboard/archive/projects/{project_id}": {
+      "get": {
+        "operationId": "get_project_api_v1_dashboard_archive_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDossier"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project"
+      }
+    },
+    "/api/v1/dashboard/archive/stats": {
+      "get": {
+        "description": "Counts and capacity sums by scheme, state, district and commissioning year, computed\nin SQL over the same filters as the list. Unmatched place names are grouped as typed.",
+        "operationId": "archive_stats_api_v1_dashboard_archive_stats_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "district",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "District"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "capacity_min",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Capacity Min"
+            }
+          },
+          {
+            "in": "query",
+            "name": "capacity_max",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Capacity Max"
+            }
+          },
+          {
+            "in": "query",
+            "name": "commissioned_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commissioned From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "commissioned_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commissioned To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_make",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Make"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inverter_make",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inverter Make"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveStats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Archive Stats"
+      }
+    },
+    "/api/v1/dashboard/archive/template.csv": {
+      "get": {
+        "description": "The header row and one commented example row (it starts with #, so the importer\nignores it). No real data.",
+        "operationId": "template_api_v1_dashboard_archive_template_csv_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Template"
       }
     },
     "/api/v1/dashboard/associate-applications": {
@@ -10235,6 +13198,577 @@
         "summary": "Get Audit Log"
       }
     },
+    "/api/v1/dashboard/commission-queries": {
+      "get": {
+        "description": "Associate queries, oldest due first. `overdue=true`: open and past due.",
+        "operationId": "list_commission_queries_api_v1_dashboard_commission_queries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionQueryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Commission Queries"
+      }
+    },
+    "/api/v1/dashboard/commission-queries/{query_id}/respond": {
+      "post": {
+        "description": "Accounts/Admin answer a query (once). The associate sees it on their home feed.",
+        "operationId": "respond_to_commission_query_api_v1_dashboard_commission_queries__query_id__respond_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_id",
+            "required": true,
+            "schema": {
+              "title": "Query Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Respond To Commission Query"
+      }
+    },
+    "/api/v1/dashboard/commission-rate-schedules": {
+      "get": {
+        "description": "Every published version, newest first, and which is in force today.",
+        "operationId": "list_rate_schedules_api_v1_dashboard_commission_rate_schedules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Rate Schedules"
+      },
+      "post": {
+        "description": "Admin: publish a new version (never an edit). Every rate key is required.",
+        "operationId": "publish_rate_schedule_api_v1_dashboard_commission_rate_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ScheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Rate Schedule"
+      }
+    },
+    "/api/v1/dashboard/commission-rate-schedules/{schedule_id}/re-rate": {
+      "post": {
+        "description": "Admin, audited: compute every entry still waiting for confirmed rates — at the\nschedule in force on its agreement date where that is a real schedule, otherwise\nat this (real) schedule.",
+        "operationId": "re_rate_api_v1_dashboard_commission_rate_schedules__schedule_id__re_rate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Re Rate"
+      }
+    },
+    "/api/v1/dashboard/commissions": {
+      "get": {
+        "description": "The commission ledger, newest first. Dates are IST days on created_at.",
+        "operationId": "list_commissions_api_v1_dashboard_commissions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "associate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Associate Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionEntryKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "earning_role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CommissionRole"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Earning Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pending",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pending"
+            }
+          },
+          {
+            "in": "query",
+            "name": "onboarding_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Onboarding Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "payment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Payment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "batch_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Batch Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Commissions"
+      }
+    },
+    "/api/v1/dashboard/commissions/approve": {
+      "post": {
+        "description": "earned → approved, all or nothing (409 entries_not_approvable lists why each\nrefused entry cannot be approved).",
+        "operationId": "approve_commissions_api_v1_dashboard_commissions_approve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveEntriesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Commissions"
+      }
+    },
+    "/api/v1/dashboard/commissions/{entry_id}/reverse": {
+      "post": {
+        "description": "Admin (policy 4.7): reverse commission obtained through false information or a\nbreach of the Network Terms. Not yet paid out → a reversal; already in an\napproved or paid batch → a recovery from the next payouts.",
+        "operationId": "reverse_commission_api_v1_dashboard_commissions__entry_id__reverse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reverse Commission"
+      }
+    },
     "/api/v1/dashboard/customers/{customer_id}/memory": {
       "get": {
         "description": "Everything remembered about one customer — the profile, then the raw\nmemories. This is the audit view: what the agent believes and why.",
@@ -10837,6 +14371,73 @@
         "summary": "Verify Submission"
       }
     },
+    "/api/v1/dashboard/exports/commissions.csv": {
+      "get": {
+        "operationId": "export_commissions_api_v1_dashboard_exports_commissions_csv_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Commissions"
+      }
+    },
     "/api/v1/dashboard/exports/ledger.csv": {
       "get": {
         "operationId": "export_ledger_api_v1_dashboard_exports_ledger_csv_get",
@@ -10971,6 +14572,49 @@
         "summary": "Export Payments"
       }
     },
+    "/api/v1/dashboard/exports/payout-bank-{batch_id}.csv": {
+      "get": {
+        "description": "Accounts only: the bank upload file for an approved (or paid) batch — the only\nplace a full account number leaves the system. Every export is audited.",
+        "operationId": "export_payout_bank_api_v1_dashboard_exports_payout_bank__batch_id__csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Payout Bank"
+      }
+    },
     "/api/v1/dashboard/exports/receipts.csv": {
       "get": {
         "operationId": "export_receipts_api_v1_dashboard_exports_receipts_csv_get",
@@ -11036,6 +14680,56 @@
           }
         ],
         "summary": "Export Receipts"
+      }
+    },
+    "/api/v1/dashboard/exports/tds.csv": {
+      "get": {
+        "description": "One row per payout line of the financial year (default: the current one), with\nthe associate's PAN — decrypted through the audited helper.",
+        "operationId": "export_tds_api_v1_dashboard_exports_tds_csv_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "financial_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Financial Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Tds"
       }
     },
     "/api/v1/dashboard/governance/activity": {
@@ -11152,6 +14846,28 @@
         "summary": "Governance Runs"
       }
     },
+    "/api/v1/dashboard/internal/check-commission-queries": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Emails Accounts once about each open\nquery past its due time. Idempotent; an overlapping run answers\n{\"status\": \"skipped\", \"reason\": \"already_running\"}.",
+        "operationId": "run_check_commission_queries_api_v1_dashboard_internal_check_commission_queries_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Check Commission Queries"
+      }
+    },
     "/api/v1/dashboard/internal/check-execution-alerts": {
       "post": {
         "description": "Admin or INTERNAL_API_KEY. Emails Operations once about each project that has\nbecome stuck at a stage (it is not emailed again for the same stage). Idempotent; an\noverlapping run is skipped.",
@@ -11216,6 +14932,28 @@
           }
         ],
         "summary": "Run Payment Alerts"
+      }
+    },
+    "/api/v1/dashboard/internal/check-service-requests": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Emails Operations once about each open\nrequest past its SLA. Idempotent; an overlapping run answers\n{\"status\": \"skipped\", \"reason\": \"already_running\"}.",
+        "operationId": "run_check_service_requests_api_v1_dashboard_internal_check_service_requests_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Check Service Requests"
       }
     },
     "/api/v1/dashboard/internal/check-stale-leads": {
@@ -12043,6 +15781,266 @@
           }
         ],
         "summary": "Ask Customer Memory"
+      }
+    },
+    "/api/v1/dashboard/network/summary": {
+      "get": {
+        "description": "Counts and money for the whole network. The period (IST days, inclusive)\ndefaults to this month so far and applies to revenue and commission figures.",
+        "operationId": "network_summary_api_v1_dashboard_network_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Network Summary"
+      }
+    },
+    "/api/v1/dashboard/nova/ask": {
+      "post": {
+        "description": "Ask Nova Records a question. `status` is answered | not_on_record |\nneeds_clarification | refused; every number in `answer` comes from the records and\n`tables` are built from the rows (docs/api/nova_records.md).",
+        "operationId": "ask_api_v1_dashboard_nova_ask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ask"
+      }
+    },
+    "/api/v1/dashboard/nova/conversations": {
+      "get": {
+        "description": "The caller's own conversations, most recent first (at most 50, within retention).",
+        "operationId": "list_conversations_api_v1_dashboard_nova_conversations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Conversations"
+      }
+    },
+    "/api/v1/dashboard/nova/conversations/{conversation_id}": {
+      "get": {
+        "description": "One conversation with every turn as it was shown. Own only; Admin may read any for\naudit (that read is written to the audit log). Anything else is 404.",
+        "operationId": "get_conversation_api_v1_dashboard_nova_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Conversation"
+      }
+    },
+    "/api/v1/dashboard/nova/internal/check-nova-records-retention": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler). Deletes conversations last used more\nthan retention.days ago (NR-3). Idempotent; an overlapping run answers\n{\"status\": \"skipped\", \"reason\": \"already_running\"}.",
+        "operationId": "run_retention_api_v1_dashboard_nova_internal_check_nova_records_retention_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Retention"
+      }
+    },
+    "/api/v1/dashboard/nova/turns/{turn_id}/feedback": {
+      "post": {
+        "description": "Was this answer helpful? On the caller's own turns only; sending again replaces it.",
+        "operationId": "turn_feedback_api_v1_dashboard_nova_turns__turn_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Turn Feedback"
       }
     },
     "/api/v1/dashboard/onboardings": {
@@ -13277,6 +17275,397 @@
         "summary": "Prepare Formal Proposal"
       }
     },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover": {
+      "get": {
+        "description": "The checklist (computed items and manual ticks), whether it is complete, the\nwarranty register once handed over, the PDF state and — staff only — the customer\nlink state (never the token) and email state.",
+        "operationId": "handover_pack_api_v1_dashboard_onboardings__onboarding_id__handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pack"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/acknowledgement": {
+      "post": {
+        "description": "Operations / Admin: the customer's acknowledgement — a signature image (PNG, method\n`signature`) or an in-person tick (method `in_person`, no file).",
+        "operationId": "acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_acknowledge_api_v1_dashboard_onboardings__onboarding_id__handover_acknowledgement_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link": {
+      "post": {
+        "description": "Operations / Admin: issue a NEW customer link (any earlier one stops working),\nrender the PDF if needed and email the customer (unless send_email is false). The link\nis returned this once. 409 handover_not_recorded / handover_pdf_held.",
+        "operationId": "issue_link_api_v1_dashboard_onboardings__onboarding_id__handover_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue Link"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link/revoke": {
+      "post": {
+        "description": "Operations / Admin: the customer's link stops working at once.",
+        "operationId": "revoke_link_api_v1_dashboard_onboardings__onboarding_id__handover_link_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Link"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/om-contact": {
+      "post": {
+        "description": "Operations / Admin: the O&M contact details were (or were not) given to the customer.",
+        "operationId": "tick_om_contact_api_v1_dashboard_onboardings__onboarding_id__handover_om_contact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tick Om Contact"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/orientation": {
+      "post": {
+        "description": "Operations / Admin: the customer orientation was (or was not) given.",
+        "operationId": "tick_orientation_api_v1_dashboard_onboardings__onboarding_id__handover_orientation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tick Orientation"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf": {
+      "get": {
+        "description": "A short-lived signed URL for the rendered handover PDF (404 until it exists).",
+        "operationId": "handover_pdf_api_v1_dashboard_onboardings__onboarding_id__handover_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Handover Pdf"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf/regenerate": {
+      "post": {
+        "description": "Operations / Admin: render the handover PDF again (after the register changed or a\nfailed render). Runs in the background; poll GET .../handover `pdf.status`.",
+        "operationId": "regenerate_pdf_api_v1_dashboard_onboardings__onboarding_id__handover_pdf_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regenerate Pdf"
+      }
+    },
     "/api/v1/dashboard/onboardings/{onboarding_id}/payment-schedule": {
       "get": {
         "operationId": "get_schedule_api_v1_dashboard_onboardings__onboarding_id__payment_schedule_get",
@@ -13335,7 +17724,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleIn"
+                "$ref": "#/components/schemas/app__api__routes__payments_admin__ScheduleIn"
               }
             }
           },
@@ -13616,6 +18005,100 @@
           }
         ],
         "summary": "In Person Acceptance"
+      }
+    },
+    "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests": {
+      "get": {
+        "description": "Every service request for one customer, newest first.",
+        "operationId": "customer_service_requests_api_v1_dashboard_onboardings__onboarding_id__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer Service Requests"
+      },
+      "post": {
+        "description": "Operations / Admin / Engineer: raise a request on a customer's behalf (multipart;\nup to service.max_photos images in `files`). 409 not_handed_over before handover.",
+        "operationId": "raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "onboarding_id",
+            "required": true,
+            "schema": {
+              "title": "Onboarding Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_service_request_api_v1_dashboard_onboardings__onboarding_id__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Service Request"
       }
     },
     "/api/v1/dashboard/onboardings/{onboarding_id}/site-location": {
@@ -14294,7 +18777,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -14388,7 +18871,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/app__api__routes__associate_payments__ReasonIn"
               }
             }
           },
@@ -14615,6 +19098,303 @@
           }
         ],
         "summary": "Verify"
+      }
+    },
+    "/api/v1/dashboard/payout-batches": {
+      "get": {
+        "operationId": "list_payout_batches_api_v1_dashboard_payout_batches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PayoutBatchStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Payout Batches"
+      },
+      "post": {
+        "description": "Accounts/Admin: prepare the batch for a month that has ended.",
+        "operationId": "create_payout_batch_api_v1_dashboard_payout_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}": {
+      "get": {
+        "operationId": "get_payout_batch_api_v1_dashboard_payout_batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/approve": {
+      "post": {
+        "description": "Accounts/Admin, never the preparer (an Admin may, with a reason).",
+        "operationId": "approve_payout_batch_api_v1_dashboard_payout_batches__batch_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ApproveBatchIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/cancel": {
+      "post": {
+        "description": "Accounts/Admin: discard a draft (its entries can be batched again).",
+        "operationId": "cancel_payout_batch_api_v1_dashboard_payout_batches__batch_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__commissions_admin__ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Payout Batch"
+      }
+    },
+    "/api/v1/dashboard/payout-batches/{batch_id}/mark-paid": {
+      "post": {
+        "description": "Accounts/Admin: the bank reference of every transfer, in one call.",
+        "operationId": "mark_payout_batch_paid_api_v1_dashboard_payout_batches__batch_id__mark_paid_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkPaidIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Payout Batch Paid"
       }
     },
     "/api/v1/dashboard/placeholders": {
@@ -15396,6 +20176,430 @@
           }
         ],
         "summary": "Send Proposal"
+      }
+    },
+    "/api/v1/dashboard/service-requests": {
+      "get": {
+        "description": "Service requests the caller may see, newest first. `open=true`: open or in\nprogress. `overdue=true`: past the SLA (none while service.sla_hours is null).",
+        "operationId": "service_request_queue_api_v1_dashboard_service_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ServiceRequestStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Open"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "within_warranty",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Within Warranty"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ServiceRequestCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "description": "an employee id, `me` or `unassigned`",
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "an employee id, `me` or `unassigned`",
+              "title": "Assignee"
+            }
+          },
+          {
+            "in": "query",
+            "name": "onboarding_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Onboarding Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Queue"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}": {
+      "get": {
+        "operationId": "service_request_detail_api_v1_dashboard_service_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Detail"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/assign": {
+      "post": {
+        "description": "Assign to an active Admin / Operations / Engineer employee, or unassign (null).",
+        "operationId": "assign_service_request_api_v1_dashboard_service_requests__request_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign Service Request"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/notes": {
+      "post": {
+        "description": "An internal note (never shown to the customer).",
+        "operationId": "add_service_request_note_api_v1_dashboard_service_requests__request_id__notes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Service Request Note"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/photos/{file_ref}": {
+      "get": {
+        "operationId": "service_request_photo_api_v1_dashboard_service_requests__request_id__photos__file_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_ref",
+            "required": true,
+            "schema": {
+              "title": "File Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Request Photo"
+      }
+    },
+    "/api/v1/dashboard/service-requests/{request_id}/status": {
+      "post": {
+        "description": "open → in_progress → resolved | rejected (open may go straight to either end).\nresolved and rejected need a note and close the request.",
+        "operationId": "set_service_request_status_api_v1_dashboard_service_requests__request_id__status_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Service Request Status"
       }
     },
     "/api/v1/dashboard/survey-corrections": {
@@ -17051,6 +22255,165 @@
           }
         },
         "summary": "Submit Estimate Request"
+      }
+    },
+    "/api/v1/public/handover/{token}": {
+      "get": {
+        "description": "What the customer's page shows: their system, the warranty register, how to get\nservice, and whether the PDF can be downloaded.",
+        "operationId": "handover_page_api_v1_public_handover__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handover Page"
+      }
+    },
+    "/api/v1/public/handover/{token}/pdf": {
+      "get": {
+        "description": "302 to a short-lived signed URL for the handover PDF. 404 while there is none (not\nrendered yet, or held because the pack still contains placeholder text).",
+        "operationId": "handover_pdf_api_v1_public_handover__token__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handover Pdf"
+      }
+    },
+    "/api/v1/public/handover/{token}/service-requests": {
+      "get": {
+        "operationId": "list_requests_api_v1_public_handover__token__service_requests_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Requests"
+      },
+      "post": {
+        "description": "The customer raises a service request (multipart; up to service.max_photos images).",
+        "operationId": "raise_request_api_v1_public_handover__token__service_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_raise_request_api_v1_public_handover__token__service_requests_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Raise Request"
       }
     },
     "/api/v1/public/kyc-consent": {

@@ -24,19 +24,25 @@ ONBOARDING_READERS = {"admin", "management", "sales"}
 ONBOARDING_ACTORS = {"admin", "sales"}
 EXECUTION_READERS = {"admin", "management", "sales", "engineer", "operations"}
 EXECUTION_ACTORS = {"admin", "operations"}
+SERVICE_ACTORS = {"admin", "operations", "engineer"}
+SR_FORM = {"data": {"category": "no_generation", "description": "No power"}}
 MONEY_KEYS = {"amount", "amount_due", "total_value", "price", "percent", "balance", "commission",
               "procurement_price_inr", "rate_per_kw", "final_price", "subtotal", "gst"}
 
 COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding", "onboarding_admin",
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
-                   "survey_admin")
+                   "survey_admin", "commissions_admin", "associate_commissions", "network_admin", "handover_admin",
+                   "associate_handover", "archive_admin", "nova_records")
+ARCHIVE_READERS = set(ROLES)
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
 PNG_FILE = {"files": {"file": ("s.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}}
 PAY_READERS = {"admin", "management", "accounts", "sales"}
 PAY_RECORDERS = {"admin", "accounts", "sales"}
 PAY_PROCESSORS = {"admin", "accounts"}
+COMM_READERS = {"admin", "management", "accounts"}
+COMM_PROCESSORS = {"admin", "accounts"}
 NEFT = {"amount": "100.00", "mode": "neft", "reference": "UTR-MATRIX-{role}"}
 UNIT = {"category": "module", "equipment_id": "{equipment_id}", "serial_number": "MATRIX-NEW", "rating_wp": "540",
         "is_dcr": True}
@@ -114,6 +120,44 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/site-location"):
         (ONBOARDING_ACTORS, {"json": {"source": "pasted_coordinates", "text": "26.49, 89.52",
                                       "reason": "Confirmed on the call."}}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/handover"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/orientation"):
+        (EXECUTION_ACTORS, {"json": {"done": True}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/om-contact"):
+        (EXECUTION_ACTORS, {"json": {"done": True}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/acknowledgement"):
+        (EXECUTION_ACTORS, {"data": {"method": "in_person", "customer_name": "Asha"}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link"): (EXECUTION_ACTORS, {"json": {}}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/link/revoke"): (EXECUTION_ACTORS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf/regenerate"): (EXECUTION_ACTORS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/handover/pdf"): (EXECUTION_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/template.csv"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/archive/imports"):
+        (ADMIN_ONLY, {"files": {"file": ("a.csv", b"scheme_or_segment,state,district,commissioning_date,capacity_kw\n",
+                                          "text/csv")}}),
+    ("GET", "/api/v1/dashboard/archive/imports"): (ADMIN_ONLY, {}),
+    ("GET", "/api/v1/dashboard/archive/imports/{batch_id}"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/archive/imports/{batch_id}/void"): (ADMIN_ONLY, {"json": {"reason": "matrix test"}}),
+    ("GET", "/api/v1/dashboard/archive/projects"): (ARCHIVE_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/projects/{project_id}"): (ARCHIVE_READERS, {}),
+    ("GET", "/api/v1/dashboard/archive/stats"): (ARCHIVE_READERS, {}),
+    # BE-9 Nova Records: every staff role may ask (answers are scoped per role, tests/
+    # test_records_tools.py); conversations and feedback are the caller's own (404 otherwise).
+    ("POST", "/api/v1/dashboard/nova/ask"): (set(ROLES), {"json": {"question": "How many projects by district?"}}),
+    ("GET", "/api/v1/dashboard/nova/conversations"): (set(ROLES), {}),
+    ("GET", "/api/v1/dashboard/nova/conversations/{conversation_id}"): (set(ROLES), {}),
+    ("POST", "/api/v1/dashboard/nova/turns/{turn_id}/feedback"): (set(ROLES), {"json": {"helpful": True}}),
+    ("POST", "/api/v1/dashboard/nova/internal/check-nova-records-retention"): (ADMIN_ONLY, {}),
+    ("GET", "/api/v1/dashboard/service-requests"): (EXECUTION_READERS, {}),
+    ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/service-requests"): (SERVICE_ACTORS, SR_FORM),
+    ("GET", "/api/v1/dashboard/service-requests/{request_id}"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/assign"): (SERVICE_ACTORS, {"json": {"assignee_id": None}}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/status"):
+        (SERVICE_ACTORS, {"json": {"status": "in_progress"}}),
+    ("POST", "/api/v1/dashboard/service-requests/{request_id}/notes"): (SERVICE_ACTORS, {"json": {"note": "x"}}),
+    ("GET", "/api/v1/dashboard/service-requests/{request_id}/photos/{file_ref}"): (EXECUTION_READERS, {}),
+    ("POST", "/api/v1/dashboard/internal/check-service-requests"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/placeholders"): ({"admin", "management"}, {}),
     ("POST", "/api/v1/dashboard/placeholders/{entry_id}/resolve"): (ADMIN_ONLY, {"json": {"note": "x"}}),
     ("GET", "/api/v1/dashboard/execution"): (EXECUTION_READERS, {}),
@@ -171,6 +215,30 @@ STAFF = {
     ("POST", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/catalogue"):
         (EXECUTION_ACTORS, {"json": {"category": "structure", "brand": "Matrix Fab", "model_name": "GI-{role}",
                                      "is_dcr_compliant": False}}),
+    # BE-4 commissions: Management reads, Accounts/Admin act, Admin sets rates; the bank
+    # file (full account numbers) is Accounts only.
+    ("GET", "/api/v1/dashboard/commissions"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commissions/approve"): (COMM_PROCESSORS, {"json": {"entry_ids": [999999]}}),
+    ("POST", "/api/v1/dashboard/commissions/{entry_id}/reverse"): (ADMIN_ONLY, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/commission-rate-schedules"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commission-rate-schedules"):
+        (ADMIN_ONLY, {"json": {"effective_from": "2026-01-01", "rates": {}}}),
+    ("POST", "/api/v1/dashboard/commission-rate-schedules/{schedule_id}/re-rate"):
+        (ADMIN_ONLY, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/payout-batches"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/payout-batches"): (COMM_PROCESSORS, {"json": {"period": "2000-01"}}),
+    ("GET", "/api/v1/dashboard/payout-batches/{batch_id}"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/approve"): (COMM_PROCESSORS, {"json": {}}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/mark-paid"): (COMM_PROCESSORS, {"json": {"lines": []}}),
+    ("POST", "/api/v1/dashboard/payout-batches/{batch_id}/cancel"): (COMM_PROCESSORS, {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/dashboard/exports/commissions.csv"): (COMM_PROCESSORS, {}),
+    ("GET", "/api/v1/dashboard/exports/tds.csv"): (COMM_PROCESSORS, {}),
+    ("GET", "/api/v1/dashboard/exports/payout-bank-{batch_id}.csv"): ({"accounts"}, {}),
+    ("GET", "/api/v1/dashboard/commission-queries"): (COMM_READERS, {}),
+    ("POST", "/api/v1/dashboard/commission-queries/{query_id}/respond"):
+        (COMM_PROCESSORS, {"json": {"response": "x"}}),
+    ("POST", "/api/v1/dashboard/internal/check-commission-queries"): (ADMIN_ONLY, {}),
+    ("GET", "/api/v1/dashboard/network/summary"): ({"admin", "management"}, {}),
     # The placeholder engine's internal breakdown (PM-A: never customer-facing).
     ("POST", "/api/v1/pricing/breakdown"):
         ({"admin", "sales"}, {"json": {"segment": "residential", "size_kw": 5, "state": "West Bengal"}}),
@@ -237,9 +305,18 @@ ASSOCIATE = {
         ("write", {"json": {"rating_wp": "545"}}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/execution/units/{unit_id}/void"):
         ("write", {"json": {"reason": "x"}}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/handover"): ("read", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/handover/pdf"): ("documents", {}),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/service-requests"): ("read", {}),
+    ("POST", "/api/v1/associate/onboardings/{onboarding_id}/service-requests"): ("write", SR_FORM),
+    ("GET", "/api/v1/associate/onboardings/{onboarding_id}/service-requests/{request_id}"): ("read", {}),
     ("GET", "/api/v1/associate/payments/instructions"): ("own", {}),
     ("GET", "/api/v1/associate/home"): ("own", {}),
     ("GET", "/api/v1/associate/equipment"): ("own", {}),
+    ("GET", "/api/v1/associate/commissions"): ("own", {}),
+    ("GET", "/api/v1/associate/payouts"): ("own", {}),
+    ("POST", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {"json": {"message": "x"}}),
+    ("GET", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {"json": NEFT}),
     ("POST", "/api/v1/associate/onboardings/{onboarding_id}/payments/{payment_id}/proof"): ("owner", upload_form()),
@@ -294,11 +371,15 @@ def scenario(client, db_session, onboarding_ready, monkeypatch):
               "onboarding_id": oid, "stage": "portal_agreement_approved", "entry_id": "A1", "file_ref": "none",
               "submission_id": sub.json()["submission_id"], "unit_id": unit.json()["unit"]["unit_id"],
               "payment_id": payment.json()["payment"]["payment_id"], "party": "associate",
-              "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999}
+              "equipment_id": equipment_id, "correction_id": 999, "proposal_id": 999,
+              "schedule_id": 999, "batch_id": 999, "query_id": 999, "commission_entry_id": 999999, "request_id": 999999,
+              "project_id": 999999, "conversation_id": "0" * 32, "turn_id": "0" * 32}
     return {"owner": owner, "territory": territory, "sibling": sibling, "stranger": stranger, "values": values}
 
 
 def _fill(path: str, values: dict, method: str) -> str:
+    if "/commissions/{entry_id}" in path:   # a commission entry id, not a placeholder-registry id
+        values = {**values, "entry_id": values["commission_entry_id"]}
     if path.endswith("/execution/{stage}"):
         values = {**values, "stage": "feasibility_submitted"}
     if "/me/documents/" in path or path.endswith("/associates/{associate_id}/documents/{document}"):

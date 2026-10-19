@@ -121,6 +121,10 @@ class Recorder:
         self.events.append(("receipt_customer_email", kwargs))
         return True, None
 
+    def send_handover_to_customer(self, **kwargs):
+        self.events.append(("handover_customer_email", kwargs))
+        return True, None
+
     def __getattr__(self, name):   # the named helpers (new_lead, …) all route to notify
         return lambda *a, **k: None
 

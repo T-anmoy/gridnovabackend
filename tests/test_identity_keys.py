@@ -65,15 +65,18 @@ def test_fernet_rotation_keeps_every_secret_readable(client, kyc_ready, db_sessi
     old_key = settings.fernet_encryption_key
     app = db_session.query(AssociateApplication).one()
     plain = encryption.decrypt(app.bank_account_encrypted)
+    pan = encryption.decrypt(app.pan_encrypted)
 
     new_key = Fernet.generate_key().decode()
     monkeypatch.setattr(settings, "fernet_encryption_key", f"{new_key},{old_key}")
     assert encryption.decrypt(app.bank_account_encrypted) == plain           # old ciphertext still reads
-    assert rotate_fernet.rotate_all(db_session) == {"rotated": 1, "unreadable": 0}
+    # The bank account and (BE-4) the PAN.
+    assert rotate_fernet.rotate_all(db_session) == {"rotated": 2, "unreadable": 0}
     db_session.commit()
 
     monkeypatch.setattr(settings, "fernet_encryption_key", new_key)          # old key retired
     db_session.expire_all()
     assert encryption.decrypt(db_session.query(AssociateApplication).one().bank_account_encrypted) == plain
+    assert encryption.decrypt(db_session.query(AssociateApplication).one().pan_encrypted) == pan
     with pytest.raises(InvalidToken):
         Fernet(old_key.encode()).decrypt(db_session.query(AssociateApplication).one().bank_account_encrypted.encode())

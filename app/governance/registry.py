@@ -45,6 +45,15 @@ APPROVE_PROPOSAL = "approve_proposal"
 SEND_PROPOSAL = "send_proposal"
 ANSWER_EMPLOYEE_QUESTION = "answer_employee_question"
 READ_CUSTOMER_MEMORY = "read_customer_memory"
+# Nova Records (BE-9): reading project, lead, payment and warranty records for staff.
+ANSWER_STAFF_RECORDS_QUESTION = "answer_staff_records_question"
+READ_RECORDS = "read_records"
+# Actions nobody in this system delegates to an agent; listed so a records assistant can
+# be shown — and refused at runtime — as never taking them.
+CHANGE_RECORDS = "change_records"
+SEND_MESSAGE = "send_message"
+ASSIGN_WORK = "assign_work"
+RECORD_PAYMENT = "record_payment"
 
 
 class Autonomy:
@@ -146,7 +155,30 @@ MEMORY_AGENT = AgentSpec(
     module="app.agents.memory_agent",
 )
 
-AGENTS = {spec.id: spec for spec in (SALES_AGENT, PROPOSAL_AGENT, MEMORY_AGENT)}
+NOVA_RECORDS = AgentSpec(
+    id="nova_records",
+    name="Nova Records (staff assistant)",
+    purpose="Answer a signed-in employee's question about projects, leads, customers, payments, warranties "
+            "and associates from read-only records, within that employee's role.",
+    owner="Operations",
+    autonomy=Autonomy.READ_ONLY,
+    audience="employees",
+    capabilities=(ANSWER_STAFF_RECORDS_QUESTION, READ_RECORDS),
+    prohibitions=(
+        # It reads across every record a role may see, so it must never face a customer,
+        # and it changes nothing: every write, send, approval, price and booking is a person's.
+        REPLY_TO_CUSTOMER, WRITE_CUSTOMER_MEMORY, EXTRACT_FIELDS, OFFER_MEETING_SLOTS, BOOK_MEETING,
+        DRAFT_PROPOSAL, SET_PROPOSAL_PRICE, APPROVE_PROPOSAL, SEND_PROPOSAL,
+        CHANGE_RECORDS, SEND_MESSAGE, ASSIGN_WORK, RECORD_PAYMENT,
+    ),
+    human_gates=("an authenticated employee asks the question",),
+    uses_llm=True,
+    guardrails=("read-only tools scoped to the caller's role", "deterministic refusals",
+                "every fact verified against tool results", "templated answer when unverifiable"),
+    module="app.agents.records_agent",
+)
+
+AGENTS = {spec.id: spec for spec in (SALES_AGENT, PROPOSAL_AGENT, MEMORY_AGENT, NOVA_RECORDS)}
 
 
 def get(agent_id: str) -> Optional[AgentSpec]:

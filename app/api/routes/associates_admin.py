@@ -30,6 +30,7 @@ from app.memory.models import (
     TerritoryState,
 )
 from app.notifications.deferred import notify_after_commit
+from app.security import pii
 
 router = APIRouter(prefix="/api/v1/dashboard")
 
@@ -67,7 +68,10 @@ def _iso(value) -> Optional[str]:
 
 # ── Applications ─────────────────────────────────────────────────────────────────
 
-def _serialize_application(db: Session, application, application_type: AssociateType, full: bool) -> dict:
+def _serialize_application(db: Session, application, application_type: AssociateType, full: bool,
+                           reviewer: Optional[str] = None) -> dict:
+    """`full` adds the KYC detail. The PAN is decrypted for the reviewing Admin through
+    the audited helper (app/security/pii.py) — the caller commits that audit row."""
     associate = None
     if application.status == ApplicationStatus.approved:
         column = (Associate.associate_application_id if application_type == AssociateType.associate
@@ -98,7 +102,8 @@ def _serialize_application(db: Session, application, application_type: Associate
         "address_line": application.address_line,
         "pin_code": application.pin_code,
         "aadhaar_last4": application.aadhaar_last4,
-        "pan": application.pan,
+        "pan": pii.reveal(db, application, "pan", actor=reviewer, purpose="application_review") if reviewer else None,
+        "pan_last4": application.pan_last4,
         "bank_account_last4": application.bank_account_last4,
         "bank_ifsc": application.bank_ifsc,
         "kyc_consent_version": application.kyc_consent_version,
@@ -175,8 +180,10 @@ def list_applications(
 def get_application(application_type: AssociateType, application_id: int, db: Session = Depends(get_db),
                     employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "review associate applications")
-    return _serialize_application(db, _load_application(db, application_type, application_id), application_type,
-                                  full=True)
+    body = _serialize_application(db, _load_application(db, application_type, application_id), application_type,
+                                  full=True, reviewer=employee.employee_id)
+    db.commit()   # the PAN-decryption audit row
+    return body
 
 
 @router.get("/associate-applications/{application_type}/{application_id}/documents/{document}")
@@ -220,7 +227,9 @@ def change_application_status(application_type: AssociateType, application_id: i
         db.rollback()
         raise _error(exc)
     db.commit()
-    return _serialize_application(db, application, application_type, full=True)
+    body = _serialize_application(db, application, application_type, full=True, reviewer=employee.employee_id)
+    db.commit()   # the PAN-decryption audit row
+    return body
 
 
 class ApproveRequest(BaseModel):
@@ -295,8 +304,11 @@ def approve_application(application_type: AssociateType, application_id: int, bo
     runner.submit(lambda: issuance.issue_after_approval(associate_pk, approver, today),
                   f"associate issuance {associate.associate_id}")
     db.refresh(associate)
-    return {"application": _serialize_application(db, application, application_type, full=True),
+    body = {"application": _serialize_application(db, application, application_type, full=True,
+                                                  reviewer=employee.employee_id),
             "associate": serialize_associate(db, associate)}
+    db.commit()   # the PAN-decryption audit row
+    return body
 
 
 # ── Associates ───────────────────────────────────────────────────────────────────

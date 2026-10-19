@@ -2,6 +2,8 @@
 from Grid Nova's price list since PM-A) and the Admin/Sales-only /breakdown endpoint
 (the layered placeholder engine, internal only).
 """
+import pytest
+
 from tests.conftest import admin_headers, engineer_headers, management_headers, sales_headers
 
 
@@ -32,7 +34,7 @@ class TestPublicEstimate:
         assert (body["priced_kw"], body["priced_kw_differs"]) == (5, True)
 
     def test_outside_the_price_list_is_a_custom_quote(self, client):
-        for overrides in ({"state": "Bihar"}, {"segment": "commercial"}, {"connection_phase": None},
+        for overrides in ({"state": "Odisha"}, {"segment": "commercial"}, {"connection_phase": None},
                           {"size_kw": 12}):
             body = client.post("/api/v1/pricing/estimate",
                                json={k: v for k, v in _payload(**overrides).items() if v is not None}).json()
@@ -183,3 +185,52 @@ class TestFullBreakdown:
             "/api/v1/pricing/breakdown", json=_payload(segment="nope"), headers=admin_headers(),
         )
         assert r.status_code == 422
+
+
+class TestOneBillSizingRule:
+    """BE-7 N6: the same bill and state give the same size through /estimate,
+    /breakdown and /instant-estimate (app/pricing/sizing.py)."""
+
+    @pytest.mark.parametrize("bill, state", [(5000, "West Bengal"), (4000, "Bihar"), (12000, "Odisha")])
+    def test_estimate_and_instant_estimate_agree(self, client, bill, state):
+        from app.pricing import sizing
+
+        est = client.post("/api/v1/pricing/estimate",
+                          json={"segment": "residential", "monthly_bill_inr": bill, "state": state,
+                                "connection_phase": "single_phase"})
+        inst = client.post("/api/v1/pricing/instant-estimate",
+                           json={"segment": "residential", "state": state, "sizing_method": "by_bill",
+                                 "monthly_bill_inr": bill, "connection_phase": "single_phase"})
+        assert est.status_code == 200 and inst.status_code == 200, (est.text, inst.text)
+        assert est.json()["recommended_kw_exact"] == inst.json()["recommended_kw_exact"]
+        assert est.json()["priced_kw"] == inst.json()["priced_kw"]
+        assert inst.json()["sizing_detail"]["consumption_based_kw"] == round(sizing.estimate_size_from_bill(bill, state), 2)
+        assert est.json()["recommended_kw_exact"] == round(sizing.estimate_size_from_bill(bill, state), 2)
+
+    def test_five_thousand_a_month_is_four_point_one_seven_kw(self, client):
+        """₹5,000 ÷ ₹9/unit ÷ (30 × 4 kWh/kW/day) × 90% offset = 4.17 kW (was 4.57 kW
+        through the removed annual-yield helper)."""
+        body = client.post("/api/v1/pricing/estimate",
+                           json={"segment": "residential", "monthly_bill_inr": 5000, "state": "West Bengal"}).json()
+        assert body["recommended_kw_exact"] == 4.17
+
+    def test_breakdown_sizes_the_bill_the_same_way(self, client, monkeypatch):
+        from app.api.routes import pricing as pricing_route
+        from app.pricing import engine
+
+        seen = []
+        real = engine.calculate_full_estimate
+        monkeypatch.setattr(engine, "calculate_full_estimate",
+                            lambda memory, inputs: seen.append(inputs.size_kw) or real(memory, inputs))
+        assert pricing_route.BreakdownRequest(segment="residential", monthly_bill_inr=5000,
+                                              state="West Bengal").resolved_size_kw() == 4.17
+        r = client.post("/api/v1/pricing/breakdown", headers=admin_headers(),
+                        json={"segment": "residential", "monthly_bill_inr": 5000, "state": "West Bengal"})
+        assert r.status_code == 200, r.text
+        assert seen == [4.17]
+
+    def test_a_given_size_is_kept(self, client):
+        body = client.post("/api/v1/pricing/estimate",
+                           json={"segment": "residential", "size_kw": 3, "monthly_bill_inr": 5000,
+                                 "state": "West Bengal", "connection_phase": "single_phase"}).json()
+        assert body["priced_kw"] == 3

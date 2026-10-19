@@ -39,6 +39,14 @@ def _row(db, model, code):
     return db.execute(select(model).where(model.lgd_code == code)).scalar_one()
 
 
+def _protect(value: str) -> str:
+    """Fernet ciphertext when a key is configured (kyc_ready sets one), so the audited
+    decryption paths (application review, bank export) read real values."""
+    from app.config import settings
+    from app.security.encryption import encrypt
+    return encrypt(value) if settings.fernet_encryption_key.strip() else "enc"
+
+
 def make_associate(db, *, level: str | None = None, territory: int | None = None,
                    home_district: int = KOLKATA, home_block: int | None = None,
                    status: AssociateStatus = AssociateStatus.active,
@@ -55,7 +63,8 @@ def make_associate(db, *, level: str | None = None, territory: int | None = None
                   district_id=home.id, block_id=_row(db, TerritoryBlock, home_block).id if home_block else None,
                   pin_code=PIN[home_district],
                   mobile=f"70000{n:05d}", email=f"assoc{n}@example.test", aadhaar_last4="1234",
-                  pan=f"ABCPE{n:04d}F", bank_account_encrypted="enc", bank_account_last4="0000",
+                  pan_encrypted=_protect(f"ABCPE{n:04d}F"), pan_last4=f"{n:04d}F"[-4:],
+                  bank_account_encrypted=_protect(f"00001111{n:06d}"), bank_account_last4=f"{n:06d}"[-4:],
                   bank_ifsc="SBIN0001234", kyc_consent_version="v", kyc_consent_accepted_at=now, documents={},
                   verification_call_completed=False)
     associate_id = f"GNA-WB-26-{90000 + n:05d}"

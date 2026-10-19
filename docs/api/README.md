@@ -15,6 +15,10 @@ these files disagree, the code wins — fix the file.
 | [be1_public_contracts.md](be1_public_contracts.md) | BE-1: website chat sessions (`session_token`), paged leads list, accept-link codes, public booking limits, estimate-request calculator fields, health, auth changes, territory documents, validation, CSV, PDFs |
 | [be3_deploy_contracts.md](be3_deploy_contracts.md) | BE-3: associate approval answers before the invitation/PDFs, scheduled-job `skipped` answer and new counters, readiness cache, stricter token claims, per-instance rate limits |
 | [staff_contracts.md](staff_contracts.md) | BE-6: response shapes, roles, scoping and error strings for the staff lead endpoints (list/detail/assign/fields/stage/export/schedule-meeting), customer memory, memory ask and reflect; server-side lead filters; chat `locale` |
+| [commissions.md](commissions.md) | BE-4: commission rate schedules, the commission ledger (earn / reversal / recovery), approval, monthly payout batches and TDS, Accounts exports (commissions, TDS, payout bank file), commission queries and their overdue job, the associate commission/payout views and home-feed items, the network summary; PAN encrypted at rest |
+| [handover_warranty.md](handover_warranty.md) | BE-5: handover pack and gate, warranty register, handover PDF and the customer's tokenised link, service requests (staff / associate / customer), work-queue counts, `check-service-requests`, home-feed items |
+| [project_archive.md](project_archive.md) | BE-8: Project Archive — Admin CSV import (template, dry run, commit, void), archived-project list / detail / statistics, the live-and-archive project view, per-role field visibility |
+| [nova_records.md](nova_records.md) | BE-9: Nova Records, the internal staff assistant — ask, conversations, feedback, retention job; statuses, citations and paths, tables, role scoping and redaction, limits |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)

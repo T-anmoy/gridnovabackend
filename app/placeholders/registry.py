@@ -376,7 +376,29 @@ def _equipment_catalogue_not_real(db) -> int:
     return dummies + (0 if real else 1)
 
 
-QUERIES: dict[str, Callable] = {"equipment_catalogue_not_real": _equipment_catalogue_not_real}
+def _commission_rates_not_confirmed(db) -> int:
+    """1 until a non-placeholder commission rate schedule has been published (C5-RATES)."""
+    from sqlalchemy import func, select
+    from app.memory.models import CommissionRateSchedule
+
+    real = db.execute(select(func.count()).select_from(CommissionRateSchedule).where(
+        CommissionRateSchedule.is_placeholder.is_(False))).scalar_one()
+    return 0 if real else 1
+
+
+def _project_archive_empty(db) -> int:
+    """1 until at least one project from a non-voided import batch is on file (ARC-1)."""
+    from sqlalchemy import func, select
+    from app.memory.models import ArchivedProject
+
+    present = db.execute(select(func.count()).select_from(ArchivedProject).where(
+        ArchivedProject.voided_at.is_(None))).scalar_one()
+    return 0 if present else 1
+
+
+QUERIES: dict[str, Callable] = {"equipment_catalogue_not_real": _equipment_catalogue_not_real,
+                                "commission_rates_not_confirmed": _commission_rates_not_confirmed,
+                                "project_archive_empty": _project_archive_empty}
 
 
 def _resolutions(db) -> dict:

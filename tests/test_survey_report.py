@@ -109,6 +109,14 @@ class TestContents:
         # No unsupplied company fact is printed.
         assert "[PLACEHOLDER" not in html and "GSTIN" not in html
 
+    def test_letterhead_prints_the_patna_branch_under_the_head_office(self, client, db_session, onboarding_ready,
+                                                                      stub_render):
+        _, oid = _reviewed(client, db_session, outcome="feasible_with_conditions",
+                           conditions=["Reinforce the parapet"], notes="Checked from the photos")
+        assert _generate(client, oid).status_code == 200
+        html = stub_render[-1]
+        assert html.index("Patna Branch: C/O Parbati Bhawan") > html.index("Kolkata – 700107")
+
     def test_no_prices(self, client, db_session, onboarding_ready, stub_render):
         from app.survey import results
         _, oid = _reviewed(client, db_session)
