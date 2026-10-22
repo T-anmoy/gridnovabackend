@@ -234,7 +234,6 @@ def options(current: AuthenticatedAssociate = Depends(get_current_associate)):
                       for d in cfg["required_documents"]],
         "photo_slots": list(INSTALLATION_PHOTO_SLOTS),
         "customer_timelines": [t.value for t in CustomerTimeline],
-        "attribution_lock_days": cfg["attribution_lock_days"],
         "site_location": site_location.options(),
         "survey": survey_config.options(),
     }

@@ -29,9 +29,9 @@ notice_versions:
 
       You can ask Grid Nova to see, correct or delete your information at any time: info@gridnova.in · +91 98747 74440.
 
-# How long the first complete, staff-verified onboarding owns a customer (attribution
-# lock). A later conflicting onboarding raises an admin flag either way.
-attribution_lock_days: 90
+# The attribution lock has no time limit (Associate Terms A7, approved by Grid Nova on
+# 21 Oct 2026: attribution stays with the first verified Associate "until the project is
+# completed or closed"). It is derived in app/onboarding/service.py attribution().
 
 # BE-10 referral links (/estimate?ref=GNA-…). A referral is information, not attribution:
 # the referring Associate sees the enquiry in their portal, and the first complete,

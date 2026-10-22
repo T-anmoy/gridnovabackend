@@ -376,7 +376,7 @@ class TestEditRules:
         if status == OnboardingStatus.verified:
             from datetime import datetime, timezone
             o.verification_call_completed, o.verification_call_note = True, "x"
-            o.verified_by_employee_id, o.attribution_locked_until = "emp-admin-1", datetime.now(timezone.utc)
+            o.verified_by_employee_id, o.verified_at = "emp-admin-1", datetime.now(timezone.utc)
         db_session.commit()
         for r in (_set(client, gna, oid, GPS), _confirm(client, gna, oid)):
             assert r.status_code == 409 and r.json()["detail"]["code"] == "not_editable"

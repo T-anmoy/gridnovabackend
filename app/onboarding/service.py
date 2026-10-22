@@ -6,8 +6,10 @@ preferred_associate), Project (reference ID) and the site assessment (ProposalIn
 which staff already review) — and adds the associate-specific facts in
 customer_onboardings.
 
-Attribution: the first COMPLETE, STAFF-VERIFIED onboarding owns the customer for
-attribution_lock_days. An onboarding from a different associate that matches an
+Attribution (Associate Terms A7, approved 21 Oct 2026): the first COMPLETE,
+STAFF-VERIFIED onboarding owns the customer until the project is completed (handover
+complete) or closed (the lead marked lost, or the onboarding closed by an Admin) — no
+time limit; see attribution(). An onboarding from a different associate that matches an
 existing one (same consumer number or mobile) is still saved — no associate's work is
 thrown away — but it raises an OnboardingAttributionFlag for an Admin, and neither
 onboarding can be verified while that flag is open. Nothing is ever reassigned
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import or_, select
@@ -166,7 +168,7 @@ def _flag_conflicts(db: Session, memory: MemoryManager, onboarding: CustomerOnbo
             OnboardingAttributionFlag.existing_onboarding_id == other.id)).scalar_one_or_none()
         if exists:
             continue
-        locked = bool(other.attribution_locked_until and _aware(other.attribution_locked_until) > now)
+        locked = attribution(db, other)["locked"]
         flag = OnboardingAttributionFlag(onboarding_id=onboarding.id, existing_onboarding_id=other.id,
                                          matched_on=on, existing_was_locked=locked,
                                          status=AttributionFlagStatus.open, created_at=now)
@@ -189,6 +191,29 @@ def _flag_conflicts(db: Session, memory: MemoryManager, onboarding: CustomerOnbo
     return flags
 
 
+def attribution(db: Session, onboarding: CustomerOnboarding) -> dict:
+    """{"locked", "released_reason"} — Associate Terms A7: a verified onboarding holds
+    the customer until the project is completed or closed, whichever comes first.
+
+      released_reason  project_completed  handover_complete recorded (append-only: final)
+                       lead_lost          the lead is marked lost (re-opening it locks again)
+                       closed             an Admin closed the onboarding (attribution conflict)
+      locked false with no reason: not verified yet — the lock has not started.
+    """
+    if onboarding.status == OnboardingStatus.closed:
+        return {"locked": False, "released_reason": "closed"}
+    if onboarding.status != OnboardingStatus.verified:
+        return {"locked": False, "released_reason": None}
+    from app.memory.models import Lead, PipelineStage, ProjectStage
+    from app.onboarding import progress
+    if ProjectStage.handover_complete in progress.recorded(db, onboarding.project_id):
+        return {"locked": False, "released_reason": "project_completed"}
+    lead = db.get(Lead, onboarding.lead_id)
+    if lead is not None and lead.pipeline_stage == PipelineStage.lost:
+        return {"locked": False, "released_reason": "lead_lost"}
+    return {"locked": True, "released_reason": None}
+
+
 def open_flags(db: Session, onboarding_id: int) -> list[OnboardingAttributionFlag]:
     from app.onboarding.preload import current
     pre = current(db)
@@ -198,10 +223,6 @@ def open_flags(db: Session, onboarding_id: int) -> list[OnboardingAttributionFla
         OnboardingAttributionFlag.status == AttributionFlagStatus.open,
         or_(OnboardingAttributionFlag.onboarding_id == onboarding_id,
             OnboardingAttributionFlag.existing_onboarding_id == onboarding_id))).scalars())
-
-
-def _aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 # ── Create / update ──────────────────────────────────────────────────────────────
@@ -513,11 +534,10 @@ def record_verification_call(db: Session, onboarding: CustomerOnboarding, employ
     onboarding.verification_call_note = note
     onboarding.verified_by_employee_id = employee_id
     onboarding.verified_at = now
-    onboarding.attribution_locked_until = now + timedelta(days=config.load()["attribution_lock_days"])
     onboarding.status = OnboardingStatus.verified
     db.flush()
     _audit(db, onboarding.id, "verified", employee_id, before={"status": "submitted"},
-           after={"status": "verified", "attribution_locked_until": onboarding.attribution_locked_until.isoformat()})
+           after={"status": "verified", "attribution": "locked_until_completed_or_closed"})
     MemoryManager(db).add_timeline_event(lead_id=onboarding.lead_id, event_type=TimelineEventType.onboarding_verified,
                                          description="Verification call completed", created_by=employee_id)
     from app.memory.models import ProjectStage
@@ -532,7 +552,7 @@ def record_verification_call(db: Session, onboarding: CustomerOnboarding, employ
 def resolve_flag(db: Session, flag: OnboardingAttributionFlag, resolution: AttributionResolution,
                  note: str, employee_id: str) -> OnboardingAttributionFlag:
     """An Admin decides which onboarding keeps the customer. The other is closed —
-    kept as history, never deleted — and its attribution lock (if any) ends."""
+    kept as history, never deleted — which ends its attribution lock (if any)."""
     note = (note or "").strip()
     if not note:
         raise AssociateError("Explain the decision.", code="note_required", status_code=422, field="note")
@@ -547,11 +567,9 @@ def resolve_flag(db: Session, flag: OnboardingAttributionFlag, resolution: Attri
     flag.resolved_by_employee_id = employee_id
     flag.resolved_at = now
     if loser.status != OnboardingStatus.closed:
-        before = {"status": loser.status.value, "attribution_locked_until":
-                  loser.attribution_locked_until.isoformat() if loser.attribution_locked_until else None}
+        before = {"status": loser.status.value, "attribution_locked": attribution(db, loser)["locked"]}
         loser.status = OnboardingStatus.closed
         loser.closed_reason = f"Attribution flag #{flag.id} resolved ({resolution.value}): {note}"
-        loser.attribution_locked_until = None
         _audit(db, loser.id, "closed", employee_id, before=before,
                after={"status": "closed", "flag_id": flag.id, "resolution": resolution.value})
     db.flush()

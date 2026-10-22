@@ -95,7 +95,9 @@ def onboarding(db: Session, o: CustomerOnboarding, *, viewer_is_owner: Optional[
                    "recorded_by": o.notice_recorded_by},
         "submitted_at": _iso(o.submitted_at),
         "verification": {"completed": o.verification_call_completed, "verified_at": _iso(o.verified_at)},
-        "attribution": {"locked_until": _iso(o.attribution_locked_until), "under_review": bool(flags)},
+        # Associate Terms A7: attributed to the owner until the project is completed or
+        # closed — a state, not a date (service.attribution()).
+        "attribution": {**service.attribution(db, o), "under_review": bool(flags)},
         "closed_reason": o.closed_reason if staff else None,
         "score": scoring.serialize(o),
         # The formal proposal was requested but cannot be prepared yet — and why.

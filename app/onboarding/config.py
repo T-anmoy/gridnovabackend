@@ -29,8 +29,10 @@ def _validate(data: dict) -> dict:
     need(data.get("current_notice_version") in versions, "current_notice_version must name one of notice_versions")
     need(isinstance(data.get("territory_viewers_see_documents"), bool),
          "territory_viewers_see_documents must be true/false")
-    days = data.get("attribution_lock_days")
-    need(isinstance(days, int) and days > 0, "attribution_lock_days must be a positive whole number")
+    # Associate Terms A7 (approved 21 Oct 2026) removed the 90-day lock period.
+    need("attribution_lock_days" not in data,
+         "attribution_lock_days is no longer used: the attribution lock lasts until the project is "
+         "completed or closed (Associate Terms A7)")
     # REF-1: a referral link never attributes a customer; only false is implemented.
     need((data.get("referrals") or {}).get("auto_attribute") is False,
          "referrals.auto_attribute must be false (automatic attribution from a referral link is not built)")

@@ -1325,7 +1325,7 @@ class TerritorySeat(Base):
 class OnboardingStatus(str, enum.Enum):
     draft = "draft"            # being filled in by the associate
     submitted = "submitted"    # declared complete by the associate; awaiting the staff verification call
-    verified = "verified"      # staff verification call done — attribution lock running
+    verified = "verified"      # staff verification call done — attribution locked until completed/closed
     closed = "closed"          # an Admin resolved an attribution conflict against it (kept as history)
 
 
@@ -1379,7 +1379,7 @@ class CustomerOnboarding(Base):
         Index("ix_customer_onboardings_territory", "state_id", "district_id", "block_id"),
         CheckConstraint(
             "status != 'verified' OR (verification_call_completed = true AND verification_call_note IS NOT NULL "
-            "AND verified_by_employee_id IS NOT NULL AND attribution_locked_until IS NOT NULL)",
+            "AND verified_by_employee_id IS NOT NULL AND verified_at IS NOT NULL)",
             name="ck_customer_onboardings_verified_after_call",
         ),
         CheckConstraint(
@@ -1443,8 +1443,10 @@ class CustomerOnboarding(Base):
     verification_call_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     verification_call_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     verified_by_employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("employees.id"), nullable=True)
+    # The attribution lock starts here and holds until the project is completed or closed
+    # (Associate Terms A7, approved 21 Oct 2026) — derived, never stored as an end date:
+    # app/onboarding/service.py attribution().
     verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
-    attribution_locked_until: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     closed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # S1 — onboardings already submitted (or later) when the on-site survey arrived are
     # not held to the survey submit gate (migration 0044 backfill).

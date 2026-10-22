@@ -1,11 +1,11 @@
 """Phase 3A Step 1 — associate-led customer onboarding."""
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import dependencies as deps
+from app.onboarding.service import attribution
 from app.memory.models import (
     AuditLog, Customer, CustomerOnboarding, Lead, LeadSource, OnboardingAttributionFlag, OnboardingStatus, Project,
     ProposalInputs, TimelineEvent,
@@ -174,7 +174,8 @@ class TestDuplicatesAndAttribution:
         assert r.status_code == 200
         db_session.expire_all()
         old = db_session.get(CustomerOnboarding, first["onboarding_id"])
-        assert old.status == OnboardingStatus.closed and old.attribution_locked_until is None
+        assert old.status == OnboardingStatus.closed
+        assert attribution(db_session, old) == {"locked": False, "released_reason": "closed"}
         assert "Customer asked for B." in old.closed_reason
         assert _submit_and_verify(client, b, second["onboarding_id"]).json()["status"] == "verified"
 
@@ -296,8 +297,10 @@ class TestVerificationCall:
         oid = _create(client, gna)["onboarding_id"]
         r = _submit_and_verify(client, gna, oid)
         assert r.status_code == 200 and r.json()["status"] == "verified"
-        locked = datetime.fromisoformat(r.json()["attribution"]["locked_until"])
-        assert timedelta(days=89) < locked - datetime.now(timezone.utc) <= timedelta(days=90)
+        # Associate Terms A7: locked until the project is completed or closed — no date.
+        assert r.json()["attribution"] == {"locked": True, "released_reason": None, "under_review": False,
+                                           "open_flags": []}
+        assert client.get(f"{BASE}/{oid}", headers=headers(gna)).json()["attribution"]["locked"] is True
         assert r.json()["verification"]["note"] == "Spoke to the customer; details confirmed."
         # Associates never see the staff note.
         assert "note" not in client.get(f"{BASE}/{oid}", headers=headers(gna)).json()["verification"]
@@ -386,4 +389,4 @@ class TestTerritoryVisibility:
     def test_options(self, client, db_session, onboarding_ready):
         body = client.get(f"{BASE}/options", headers=headers(make_associate(db_session))).json()
         assert {p["key"] for p in body["equipment_packages"]} == {"nova_assured", "nova_signature", "as_recommended"}
-        assert "[PLACEHOLDER" in body["notice"]["text"] and body["attribution_lock_days"] == 90
+        assert "[PLACEHOLDER" in body["notice"]["text"] and "attribution_lock_days" not in body

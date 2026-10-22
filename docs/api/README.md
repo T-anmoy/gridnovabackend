@@ -20,6 +20,7 @@ these files disagree, the code wins — fix the file.
 | [project_archive.md](project_archive.md) | BE-8: Project Archive — Admin CSV import (template, dry run, commit, void), archived-project list / detail / statistics, the live-and-archive project view, per-role field visibility |
 | [nova_records.md](nova_records.md) | BE-9: Nova Records, the internal staff assistant — ask, conversations, feedback, retention job; statuses, citations and paths, tables, role scoping and redaction, limits |
 | [associate_ease.md](associate_ease.md) | BE-10: Associate referral links (`ref` / `share_with_referrer` on the public estimate request and call booking, the associate's referrals list and referral link, `referred_by` and its filter on staff leads, REF-1) and the estimated commission on the associate's customers |
+| [attribution_lock.md](attribution_lock.md) | BE-11: the attribution lock lasts until the project is completed or closed (Associate Terms A7) — `attribution.locked` / `released_reason` replace `locked_until`, `attribution_lock_days` removed from `/options`, migration 0053, what the frontend must change |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)
