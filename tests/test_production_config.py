@@ -111,10 +111,10 @@ class TestWarnings:
 
 
     def test_placeholder_associate_texts_warn(self):
-        """The shipped config/associate_documents.yaml really is still placeholder copy."""
+        """The KYC notice and welcome letter are approved copy now; the rest is still placeholder."""
         _, warnings = production_config_problems(_settings())
-        assert any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
-        assert any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
+        assert not any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
+        assert not any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
         assert any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
         assert any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
 

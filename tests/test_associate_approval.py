@@ -300,13 +300,13 @@ class TestDocumentsContent:
         # The card embeds exactly the QR symbol for that URL.
         assert documents.qr_svg(url) in documents.id_card_html(details)
 
-    def test_welcome_letter_uses_the_placeholder_not_invented_copy(self, client, ready, db_session):
+    def test_welcome_letter_uses_the_approved_copy(self, client, ready, db_session):
         from app.associates import documents, issuance, texts
         approve_flow(client, "associate", _apply(client))
         associate = db_session.execute(select(Associate)).scalar_one()
         html = documents.welcome_letter_html(issuance.card_details(db_session, associate, None, date(2026, 9, 27)),
                                              texts.welcome_letter_body())
-        assert "[PLACEHOLDER — the welcome letter text is to be supplied by Grid Nova.]" in html
+        assert "Welcome to the Grid Nova Associate Network." in html and "[PLACEHOLDER" not in html
 
     def test_values_are_html_escaped(self):
         from app.associates import documents

@@ -277,7 +277,9 @@ class TestPublicGuards:
 
     def test_production_refuses_registration_under_placeholder_consent(self, client, kyc_ready, monkeypatch):
         from app.config import settings
+        from app.associates import texts
         monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(texts, "consent_is_placeholder", lambda: True)
         r = submit(client, ASSOCIATE_APPLY, associate_form())
         assert r.status_code == 503 and r.json()["detail"]["code"] == "kyc_consent_not_configured"
 
@@ -302,7 +304,7 @@ class TestReferenceData:
 
     def test_kyc_consent(self, client):
         body = client.get("/api/v1/public/kyc-consent").json()
-        assert body["version"] and "[PLACEHOLDER" in body["text"]
+        assert body["version"] == "approved-v1" and "[PLACEHOLDER" not in body["text"]
 
     def test_seat_availability(self, client, territories):
         r = client.get("/api/v1/public/preferred/seat-availability",

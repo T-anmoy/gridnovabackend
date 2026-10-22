@@ -44,6 +44,13 @@ def test_flattened_for_pre_line_display():
     assert _notice().count("\n\n") == 4
 
 
-def test_the_current_versions_are_still_the_placeholders():
-    assert texts.current_consent()[0] == "placeholder-v0" and texts.consent_is_placeholder()
+def test_the_kyc_notice_is_live_and_matches_the_approved_draft():
+    version, text = texts.current_consent()
+    assert version == "approved-v1" and not texts.consent_is_placeholder()
+    assert text == _kyc()
+    assert not texts.welcome_letter_is_placeholder()
+    assert "+91 98747 74440" in texts.welcome_letter_body()
+
+
+def test_the_customer_notice_is_still_the_placeholder():
     assert onboarding_config.current_notice()[0] == "placeholder-v0" and onboarding_config.notice_is_placeholder()

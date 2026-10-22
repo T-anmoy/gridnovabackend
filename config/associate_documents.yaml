@@ -9,18 +9,19 @@
 # means adding a NEW version and pointing `current_kyc_consent_version` at it —
 # never editing a version applicants have already accepted, so what each applicant
 # agreed to stays on record exactly.
-current_kyc_consent_version: "placeholder-v0"
+current_kyc_consent_version: "approved-v1"
 kyc_consent_versions:
   placeholder-v0:
     text: >-
       [PLACEHOLDER — the KYC consent notice text is to be supplied by Grid Nova.
       While this placeholder is the current version, a production deployment
       refuses registrations rather than collect KYC data under it.]
-  # Grid Nova's drafted notice (content/policies/GridNova_Policies_Draft_v1.md, document 6),
-  # flattened for display with white-space: pre-line. Loaded, NOT current: point
-  # current_kyc_consent_version at it once Grid Nova approves the text.
+  # Grid Nova's notice (content/policies/GridNova_Policies_Draft_v1.md, document 6),
+  # flattened for display with white-space: pre-line. draft-v1.1 is the reviewed draft;
+  # approved-v1 is the SAME wording as approved by Grid Nova's partners on 21 Oct 2026 and is
+  # the version applicants accept. Never edit either: add a new version instead.
   draft-v1.1:
-    text: |-
+    text: &kyc_notice_text |-
       Why we are asking for this information
 
       Grid Nova needs to confirm who you are, keep the Associate Network safe for customers, and pay your commission correctly and lawfully.
@@ -49,8 +50,11 @@ kyc_consent_versions:
 
       You can ask to see, correct or erase your data, or withdraw this consent, by writing to info@gridnova.in. Withdrawing consent ends your association, because we cannot run it without this information.
 
+  approved-v1:
+    text: *kyc_notice_text
+
 # The body of the welcome letter PDF issued on approval. The letter's header
 # (name, Associate ID, date, programme, territory) is generated; only this
 # paragraph is Grid Nova's copy.
 welcome_letter_body: >-
-  [PLACEHOLDER — the welcome letter text is to be supplied by Grid Nova.]
+  Welcome to the Grid Nova Associate Network. Your Associate ID and ID card are attached. Please keep your ID card with you on every customer visit, collect payments only into Grid Nova's account, and contact us on +91 98747 74440 for any help.
