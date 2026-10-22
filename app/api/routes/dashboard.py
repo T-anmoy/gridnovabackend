@@ -25,6 +25,7 @@ from app.api.staff_schemas import (
     ReflectResponse, ScheduleMeetingResponse,
 )
 from app.api.lead_filters import parse_lead_filters
+from app.associates import referrals
 from app.auth.clerk_client import ClerkSyncError, update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
 from app.auth.scoping import lead_scope, require_lead_access
@@ -35,7 +36,7 @@ from app.memory.db import get_db
 from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import TERMINAL_STAGES, MemoryManager, ProposalTransitionError
 from app.memory.models import (
-    EmployeeRole, Lead, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
+    Associate, EmployeeRole, Lead, LeadSource, MemoryKind, PipelineStage, ProposalStatus, TimelineEventType,
 )
 from app.rules import approval_engine
 from app.rules.business_rules import evaluate_lead
@@ -167,6 +168,7 @@ def list_leads(
     max_score: Optional[str] = Query(default=None),
     created_from: Optional[str] = Query(default=None),
     created_to: Optional[str] = Query(default=None),
+    referred_by_associate_id: Optional[str] = Query(default=None, max_length=64),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=LEADS_MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
@@ -176,7 +178,8 @@ def list_leads(
     customer's name, email or phone, or a lead id — for an Engineer (who never sees
     contact details) only a lead id. Every filter runs in SQL.
     Optional: `stage` (repeatable), `min_score`/`max_score` (low<medium<high), `created_from`/
-    `created_to` (IST days, inclusive) — see docs/api/staff_contracts.md."""
+    `created_to` (IST days, inclusive) — see docs/api/staff_contracts.md; `referred_by_associate_id`
+    (an Associate ID: leads that came through that Associate's referral link — docs/api/associate_ease.md)."""
     source_enum: Optional[LeadSource] = None
     if source:
         try:
@@ -184,7 +187,7 @@ def list_leads(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown lead source: {source!r}")
 
-    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to)
+    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to, referred_by_associate_id)
     memory = MemoryManager(db)
     # One visibility rule (app/auth/scoping.py): Sales sees its own and unassigned
     # leads; ?assigned=me|unassigned|any narrows it for every role.
@@ -192,6 +195,7 @@ def list_leads(
         return {"items": [], "page": page, "page_size": page_size, "total": 0}
     leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q, filters=filters,
                                          page=page, page_size=page_size)
+    referrers = referrals.referrers_by_pk(db, (l.referred_by_associate_id for l in leads))
     items = [
         {
             "id": l.id,
@@ -202,6 +206,7 @@ def list_leads(
             "created_at": l.created_at.isoformat(),
             "assigned_employee_id": l.assigned_employee_id,
             "project_reference_id": l.project.reference_id if l.project else None,
+            "referred_by": referrals.brief(referrers.get(l.referred_by_associate_id)),
         }
         for l in leads
     ]
@@ -244,6 +249,7 @@ def export_leads(
     max_score: Optional[str] = Query(default=None),
     created_from: Optional[str] = Query(default=None),
     created_to: Optional[str] = Query(default=None),
+    referred_by_associate_id: Optional[str] = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
@@ -257,7 +263,7 @@ def export_leads(
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Unknown lead source: {source!r}")
 
-    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to)
+    filters = parse_lead_filters(stage, min_score, max_score, created_from, created_to, referred_by_associate_id)
     leads = memory_of(db).list_leads(source=source_enum, filters=filters)
     header = ["lead_id", "customer_name", "customer_email", "source",
               "pipeline_stage", "lead_score", "assigned_employee_id", "created_at"]
@@ -381,6 +387,8 @@ def get_lead(
         "lead_score": lead.lead_score,
         "source": lead.source,
         "assigned_employee_id": lead.assigned_employee_id,
+        "referred_by": referrals.brief(db.get(Associate, lead.referred_by_associate_id)
+                                       if lead.referred_by_associate_id else None),
         "project": _project_summary(lead.project),
         "collected_fields": lead.collected_fields,
         "proposals": [

@@ -31,6 +31,7 @@ from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.payments_admin import router as payments_admin_router
 from app.api.routes.commissions_admin import router as commissions_admin_router
 from app.api.routes.associate_commissions import router as associate_commissions_router
+from app.api.routes.associate_referrals import router as associate_referrals_router
 from app.api.routes.network_admin import router as network_admin_router
 from app.api.routes.placeholders_admin import router as placeholders_admin_router
 from app.api.routes.pricing import router as pricing_router
@@ -175,6 +176,7 @@ app.include_router(associate_payments_router)
 app.include_router(payments_admin_router)
 app.include_router(commissions_admin_router)
 app.include_router(associate_commissions_router)
+app.include_router(associate_referrals_router)
 app.include_router(network_admin_router)
 app.include_router(public_receipts_router)
 app.include_router(handover_admin_router)

@@ -31,6 +31,9 @@ def _validate(data: dict) -> dict:
          "territory_viewers_see_documents must be true/false")
     days = data.get("attribution_lock_days")
     need(isinstance(days, int) and days > 0, "attribution_lock_days must be a positive whole number")
+    # REF-1: a referral link never attributes a customer; only false is implemented.
+    need((data.get("referrals") or {}).get("auto_attribute") is False,
+         "referrals.auto_attribute must be false (automatic attribution from a referral link is not built)")
     docs = data.get("required_documents") or []
     need(docs, "required_documents must list at least one document")
     keys = [d.get("key") for d in docs]

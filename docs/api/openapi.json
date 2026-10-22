@@ -1385,10 +1385,32 @@
             ],
             "title": "Phone"
           },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
           "scheduled_at": {
             "format": "date-time",
             "title": "Scheduled At",
             "type": "string"
+          },
+          "share_with_referrer": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share With Referrer"
           },
           "sizing_method": {
             "anyOf": [
@@ -3357,6 +3379,16 @@
             "title": "Proposals",
             "type": "array"
           },
+          "referred_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadReferrer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/LeadSource"
           },
@@ -3491,6 +3523,16 @@
               }
             ],
             "title": "Project Reference Id"
+          },
+          "referred_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeadReferrer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/LeadSource"
@@ -3717,6 +3759,25 @@
           "status"
         ],
         "title": "LeadProposalBrief",
+        "type": "object"
+      },
+      "LeadReferrer": {
+        "description": "BE-10: the Associate whose referral link the enquiry came through.",
+        "properties": {
+          "associate_id": {
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "associate_id",
+          "full_name"
+        ],
+        "title": "LeadReferrer",
         "type": "object"
       },
       "LeadScore": {
@@ -6748,6 +6809,144 @@
         "title": "RecordStageRequest",
         "type": "object"
       },
+      "ReferralItem": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_mobile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Mobile"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "enquiry_kind": {
+            "enum": [
+              "estimate",
+              "call_booked",
+              "other"
+            ],
+            "title": "Enquiry Kind",
+            "type": "string"
+          },
+          "lead_id": {
+            "title": "Lead Id",
+            "type": "integer"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "pin_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pin Code"
+          },
+          "share_with_referrer": {
+            "title": "Share With Referrer",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "received",
+              "in_progress",
+              "proposal_sent",
+              "won",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lead_id",
+          "created_at",
+          "enquiry_kind",
+          "status",
+          "share_with_referrer"
+        ],
+        "title": "ReferralItem",
+        "type": "object"
+      },
+      "ReferralLinkResponse": {
+        "properties": {
+          "associate_id": {
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "share_path": {
+            "title": "Share Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "associate_id",
+          "share_path"
+        ],
+        "title": "ReferralLinkResponse",
+        "type": "object"
+      },
+      "ReferralListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReferralItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "ReferralListResponse",
+        "type": "object"
+      },
       "ReflectResponse": {
         "description": "Always 200 once access is granted — reflection never raises; a no-op or a\nfailure is reported in `skipped` (null when it ran).",
         "properties": {
@@ -8688,6 +8887,17 @@
             ],
             "title": "Pin Code"
           },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
           "roof_area": {
             "anyOf": [
               {
@@ -8724,6 +8934,17 @@
               }
             ],
             "title": "Shading"
+          },
+          "share_with_referrer": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share With Referrer"
           },
           "sizing_method": {
             "anyOf": [
@@ -11366,6 +11587,89 @@
           }
         ],
         "summary": "My Payouts"
+      }
+    },
+    "/api/v1/associate/referral-link": {
+      "get": {
+        "description": "The caller's Associate ID and the share path, so the frontend never builds it.",
+        "operationId": "referral_link_api_v1_associate_referral_link_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Referral Link"
+      }
+    },
+    "/api/v1/associate/referrals": {
+      "get": {
+        "description": "The caller's own referred enquiries, newest first.",
+        "operationId": "my_referrals_api_v1_associate_referrals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Referrals"
       }
     },
     "/api/v1/associate/territory/members": {
@@ -15002,7 +15306,7 @@
     },
     "/api/v1/dashboard/leads": {
       "get": {
-        "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.\nOptional: `stage` (repeatable), `min_score`/`max_score` (low<medium<high), `created_from`/\n`created_to` (IST days, inclusive) — see docs/api/staff_contracts.md.",
+        "description": "A page of leads, newest first: {items, page, page_size, total}. `q` matches the\ncustomer's name, email or phone, or a lead id — for an Engineer (who never sees\ncontact details) only a lead id. Every filter runs in SQL.\nOptional: `stage` (repeatable), `min_score`/`max_score` (low<medium<high), `created_from`/\n`created_to` (IST days, inclusive) — see docs/api/staff_contracts.md; `referred_by_associate_id`\n(an Associate ID: leads that came through that Associate's referral link — docs/api/associate_ease.md).",
         "operationId": "list_leads_api_v1_dashboard_leads_get",
         "parameters": [
           {
@@ -15135,6 +15439,23 @@
                 }
               ],
               "title": "Created To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "referred_by_associate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referred By Associate Id"
             }
           },
           {
@@ -15332,6 +15653,23 @@
                 }
               ],
               "title": "Created To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "referred_by_associate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referred By Associate Id"
             }
           }
         ],

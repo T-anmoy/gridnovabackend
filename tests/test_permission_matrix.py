@@ -33,7 +33,7 @@ COVERED_ROUTERS = ("associates_admin", "associate_portal", "associate_onboarding
                    "placeholders_admin", "associate_execution", "execution_admin", "execution_register_admin",
                    "associate_payments", "payments_admin", "pricing", "associate_equipment", "associate_survey",
                    "survey_admin", "commissions_admin", "associate_commissions", "network_admin", "handover_admin",
-                   "associate_handover", "archive_admin", "nova_records")
+                   "associate_handover", "archive_admin", "nova_records", "associate_referrals")
 ARCHIVE_READERS = set(ROLES)
 SURVEY_READERS = {"admin", "management", "sales", "engineer"}
 SURVEY_REVIEWERS = {"admin", "engineer"}
@@ -312,6 +312,8 @@ ASSOCIATE = {
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/service-requests/{request_id}"): ("read", {}),
     ("GET", "/api/v1/associate/payments/instructions"): ("own", {}),
     ("GET", "/api/v1/associate/home"): ("own", {}),
+    ("GET", "/api/v1/associate/referral-link"): ("own", {}),
+    ("GET", "/api/v1/associate/referrals"): ("own", {}),
     ("GET", "/api/v1/associate/equipment"): ("own", {}),
     ("GET", "/api/v1/associate/commissions"): ("own", {}),
     ("GET", "/api/v1/associate/payouts"): ("own", {}),

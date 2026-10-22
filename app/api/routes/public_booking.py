@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api import input_bounds as lim
+from app.associates import referrals
 from app.config import settings
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
@@ -202,6 +203,11 @@ class BookingRequest(BaseModel):
     sizing_method: Optional[str] = Field(default=None, max_length=50)
     sizing_value: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_INR)
     source: Optional[str] = Field(default=None, max_length=100)
+    # BE-10 referral link — as on the estimate request (app/api/routes/public_intake.py):
+    # ignored silently unless it is an active Associate's ID.
+    ref: Optional[str] = None
+    _ref = field_validator("ref", mode="before")(referrals.lenient_ref)
+    share_with_referrer: Optional[bool] = None
 
     @field_validator("email")
     @classmethod
@@ -272,6 +278,7 @@ def create_public_booking(
         performed_by="website",
         source=LeadSource.website_booking,
     )
+    referrals.record(db, lead, body.ref, body.share_with_referrer, performed_by="website")
 
     extra_fields = {
         k: v

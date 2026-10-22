@@ -466,6 +466,8 @@ class Lead(Base):
         Index("ix_leads_customer_id", "customer_id"),
         Index("ix_leads_assigned_employee_id", "assigned_employee_id"),
         Index("ix_leads_pipeline_stage_created_at", "pipeline_stage", "created_at"),
+        # BE-10 (migration 0052): an Associate's referred enquiries, newest first.
+        Index("ix_leads_referred_by_associate_id", "referred_by_associate_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -494,6 +496,13 @@ class Lead(Base):
     # staleness notification (so the same threshold isn't re-notified repeatedly).
     last_customer_message_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     stale_notified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # BE-10: the active Associate whose referral link (?ref=GNA-…) the public enquiry
+    # came through — information only, never attribution (app/associates/referrals.py).
+    # share_with_referrer: the customer agreed the referrer may see their mobile.
+    referred_by_associate_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("associates.id", name="fk_leads_referred_by_associate_id"), nullable=True)
+    share_with_referrer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                      server_default=false())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, onupdate=_now)
 

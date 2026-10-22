@@ -132,6 +132,10 @@ def create(db: Session, onboarding: CustomerOnboarding, performed_by: str, *, se
 
 
 def list_for(db: Session, onboarding: CustomerOnboarding) -> list[IndicativeEstimate]:
+    from app.onboarding.preload import current
+    pre = current(db)
+    if pre is not None and onboarding.id in pre.estimates:
+        return list(pre.estimates[onboarding.id])
     return list(db.execute(select(IndicativeEstimate).where(IndicativeEstimate.onboarding_id == onboarding.id)
                            .order_by(IndicativeEstimate.id.desc())).scalars())
 

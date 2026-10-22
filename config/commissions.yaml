@@ -41,6 +41,15 @@ commissions:
   # [UNCONFIRMED] engineering reading of A11 (C5-7)
   deactivated_associates_earn: false
 
+estimate:
+  # The associate portal's "what will I earn?" estimate (app/commissions/estimate.py) on a
+  # customer with no accepted proposal is worked out from their latest indicative
+  # estimate. When that estimate shows both packages (the onboarding chose "as
+  # recommended by Grid Nova"), this picks the one used: lowest_final (the cheaper
+  # package — never over-promise), or a package name (NOVA_ASSURED / NOVA_SIGNATURE).
+  # [UNCONFIRMED] engineering default (C5-EST)
+  indicative_package_when_several: lowest_final
+
 queries:
   # Policy 4.8: raise a query "within [30] days of it appearing"; Grid Nova responds
   # "within [15] working days".

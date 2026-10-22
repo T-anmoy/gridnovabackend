@@ -10,8 +10,9 @@ Two effects while the block is open:
     serializer makes is answered from the session's identity map (which on its own
     holds rows only weakly);
   * the per-customer SELECTs that are not `db.get()` — stage events, open attribution
-    flags, the execution row, stage submissions, the agreement, payment milestones and
-    the verified ledger total — consult the maps here first (see `current()`).
+    flags, the execution row, stage submissions, the agreement, payment milestones, the
+    verified ledger total, the accepted proposal and the indicative estimates — consult
+    the maps here first (see `current()`).
 
 Read-only by design: the cache lives only for the block, and list endpoints do not
 write inside it.
@@ -28,9 +29,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.memory.models import (
-    Associate, AttributionFlagStatus, Customer, CustomerAgreement, CustomerOnboarding, Lead,
+    Associate, AttributionFlagStatus, Customer, CustomerAgreement, CustomerOnboarding, IndicativeEstimate, Lead,
     OnboardingAttributionFlag, PaymentLedgerEntry, PaymentMilestone, Project, ProjectExecution, ProjectStageEvent,
-    ProposalInputs, StageSubmission, TerritoryBlock, TerritoryDistrict, TerritoryState,
+    Proposal, ProposalInputs, ProposalStatus, StageSubmission, TerritoryBlock, TerritoryDistrict, TerritoryState,
 )
 
 _KEY = "gridnova_onboarding_preload"
@@ -45,6 +46,8 @@ class Preload:
     agreements: dict = field(default_factory=dict)        # onboarding_id → CustomerAgreement | None
     milestones: dict = field(default_factory=dict)        # project_id → [PaymentMilestone]
     ledger_totals: dict = field(default_factory=dict)     # project_id → Decimal
+    accepted_proposals: dict = field(default_factory=dict)  # lead_id → Proposal | None (BE-10)
+    estimates: dict = field(default_factory=dict)         # onboarding_id → [IndicativeEstimate] (newest first)
     keep: list = field(default_factory=list)              # strong references for the identity map
 
 
@@ -105,7 +108,18 @@ def preloaded(db: Session, onboardings: list[CustomerOnboarding]):
                                         .where(PaymentLedgerEntry.project_id.in_(projects))
                                         .group_by(PaymentLedgerEntry.project_id)).all():
         pre.ledger_totals[project_id] = Decimal(str(total or 0))
+    leads = [o.lead_id for o in onboardings]
+    pre.accepted_proposals = {lead: None for lead in leads}
+    for p in db.execute(select(Proposal).where(Proposal.lead_id.in_(leads), Proposal.status == ProposalStatus.accepted)
+                        .order_by(Proposal.version.desc(), Proposal.id.desc())).scalars():
+        if pre.accepted_proposals[p.lead_id] is None:   # payments.accepted_proposal's order
+            pre.accepted_proposals[p.lead_id] = p
+    pre.estimates = {oid: [] for oid in ids}
+    for e in db.execute(select(IndicativeEstimate).where(IndicativeEstimate.onboarding_id.in_(ids))
+                        .order_by(IndicativeEstimate.id.desc())).scalars():
+        pre.estimates[e.onboarding_id].append(e)
     pre.keep += [x for x in pre.executions.values() if x] + [a for a in pre.agreements.values() if a]
+    pre.keep += [p for p in pre.accepted_proposals.values() if p] + [e for v in pre.estimates.values() for e in v]
     db.info[_KEY] = pre
     try:
         yield pre

@@ -11,9 +11,10 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.config import settings
-from app.memory.models import Lead, LeadScore, PipelineStage
+from app.memory.models import Associate, Lead, LeadScore, PipelineStage
 
 # Scores are ordinal labels, not numbers: low < medium < high.
 SCORE_ORDER = (LeadScore.low, LeadScore.medium, LeadScore.high)
@@ -29,6 +30,7 @@ class LeadFilters:
     scores: tuple[LeadScore, ...] = ()       # empty = no score filter
     created_from: Optional[datetime] = None  # inclusive, UTC
     created_before: Optional[datetime] = None  # exclusive, UTC
+    referred_by_associate_id: Optional[str] = None  # an Associate ID, GNA-…  (BE-10)
 
     def conditions(self) -> list:
         out = []
@@ -40,6 +42,9 @@ class LeadFilters:
             out.append(Lead.created_at >= self.created_from)
         if self.created_before is not None:
             out.append(Lead.created_at < self.created_before)
+        if self.referred_by_associate_id is not None:
+            out.append(Lead.referred_by_associate_id.in_(
+                select(Associate.id).where(Associate.associate_id == self.referred_by_associate_id)))
         return out
 
 
@@ -66,6 +71,7 @@ def parse_lead_filters(
     max_score: Optional[str] = None,
     created_from: Optional[str] = None,
     created_to: Optional[str] = None,
+    referred_by_associate_id: Optional[str] = None,
 ) -> LeadFilters:
     stages: list[PipelineStage] = []
     for raw in stage or []:
@@ -100,4 +106,11 @@ def parse_lead_filters(
         start = datetime.combine(d_from, time.min, tzinfo=tz).astimezone(timezone.utc)
     if d_to:
         end = datetime.combine(d_to + timedelta(days=1), time.min, tzinfo=tz).astimezone(timezone.utc)
-    return LeadFilters(tuple(stages), scores, start, end)
+    referrer = None
+    if referred_by_associate_id is not None and referred_by_associate_id.strip():
+        from app.associates.referrals import normalise
+        referrer = normalise(referred_by_associate_id)
+        if referrer is None:
+            raise _bad("invalid_associate_id", "referred_by_associate_id must be an Associate ID like "
+                       "GNA-WB-26-00001.", "referred_by_associate_id")
+    return LeadFilters(tuple(stages), scores, start, end, referrer)

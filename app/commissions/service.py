@@ -103,7 +103,16 @@ def basis_for(db: Session, onboarding: CustomerOnboarding, amount: Decimal) -> O
         return amount
     from app.payments import service as payments
     proposal = payments.accepted_proposal(db, onboarding)
-    pricing = ((proposal.content or {}).get("pricing") or {}) if proposal is not None else {}
+    return basis_of(amount, ((proposal.content or {}).get("pricing") or {}) if proposal is not None else {})
+
+
+def basis_of(amount: Decimal, pricing: dict) -> Optional[Decimal]:
+    """`amount` on the commission basis (config commissions.basis), given the price it
+    is part of ({"basic", "final"}): × basic ÷ final under basic_pro_rata, as received
+    under gross. None when the price has no usable basic/final. Also used, unchanged,
+    for the associate's estimated commission (app/commissions/estimate.py)."""
+    if config.commissions()["basis"] == "gross":
+        return amount
     try:
         basic, final = Decimal(str(pricing["basic"])), Decimal(str(pricing["final"]))
     except (KeyError, TypeError, ArithmeticError):
@@ -113,7 +122,7 @@ def basis_for(db: Session, onboarding: CustomerOnboarding, amount: Decimal) -> O
     return (amount * basic / final).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-def _earns(associate: Associate) -> bool:
+def earns(associate: Associate) -> bool:
     return config.commissions()["deactivated_associates_earn"] or associate.status != AssociateStatus.deactivated
 
 
@@ -133,7 +142,7 @@ def recipients(db: Session, onboarding: CustomerOnboarding, *, personal: bool,
     cfg = config.commissions()
     owner = db.get(Associate, onboarding.owner_associate_id)
     out = []
-    if personal and _earns(owner):
+    if personal and earns(owner):
         out.append((owner, CommissionRole.personal_sale, 1))
     if territory_at is None:
         return out
@@ -142,7 +151,7 @@ def recipients(db: Session, onboarding: CustomerOnboarding, *, personal: bool,
         if value is None:
             continue
         holders = [a for a in _seat_holders(db, level, column, value, territory_at)
-                   if _earns(a) and (cfg["territory_on_own_customers"] or a.id != owner.id)]
+                   if earns(a) and (cfg["territory_on_own_customers"] or a.id != owner.id)]
         share = len(holders) if cfg["multiple_territory_holders"] == "split_equally" else 1
         out += [(a, role, max(share, 1)) for a in holders]
     return out
@@ -247,12 +256,24 @@ def equal_parts(total: Decimal, n: int) -> list[Decimal]:
     return [base + (CENT if i < extra else 0) for i in range(n)]
 
 
-def _schedule_for(db: Session, entry: CommissionEntry,
-                  fallback: Optional[CommissionRateSchedule]) -> Optional[CommissionRateSchedule]:
-    schedule = rates.in_force(db, entry.agreement_date)
+def schedule_on(db: Session, day: date,
+                fallback: Optional[CommissionRateSchedule] = None) -> Optional[CommissionRateSchedule]:
+    """The confirmed schedule a commission dated `day` is rated with: the one in force
+    on that day unless it is a placeholder (or there is none), else `fallback`."""
+    schedule = rates.in_force(db, day)
     if schedule is not None and not schedule.is_placeholder:
         return schedule
     return fallback
+
+
+def _schedule_for(db: Session, entry: CommissionEntry,
+                  fallback: Optional[CommissionRateSchedule]) -> Optional[CommissionRateSchedule]:
+    return schedule_on(db, entry.agreement_date, fallback)
+
+
+def commission_of(basis: Decimal, percent: Decimal) -> Decimal:
+    """basis × percent, to the paisa — one holder's amount."""
+    return (basis * percent / 100).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def rate(db: Session, entries: Iterable[CommissionEntry], actor: str,
@@ -294,11 +315,10 @@ def rate(db: Session, entries: Iterable[CommissionEntry], actor: str,
             if holders > 1:
                 # A shared territory rate (one rate key per territory role): the holders'
                 # shares add up to basis × rate exactly.
-                total = (members[0].basis_amount * percents[0] / 100).quantize(CENT, rounding=ROUND_HALF_UP)
+                total = commission_of(members[0].basis_amount, percents[0])
                 amounts = equal_parts(total, holders)[:len(members)]
             else:
-                amounts = [(e.basis_amount * p / 100).quantize(CENT, rounding=ROUND_HALF_UP)
-                           for e, p in zip(members, percents)]
+                amounts = [commission_of(e.basis_amount, p) for e, p in zip(members, percents)]
             for e, percent, amount in zip(members, percents, amounts):
                 e.rate_percent = percent
                 e.amount, e.pending_reason, e.schedule_id = amount, None, schedule_id

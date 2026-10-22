@@ -1061,6 +1061,23 @@ entries:
     blocking: blocks_launch
     probe: yaml_contains_marker
 
+  - id: C5-EST
+    area: policies
+    location: {file: config/commissions.yaml, key: estimate.indicative_package_when_several}
+    description: "The associate portal's estimated commission on a customer with no accepted proposal uses their latest indicative estimate; when that estimate shows both packages, the cheaper one (lowest_final) is used. An estimate only — the real commission comes from the ledger."
+    dummy_value: lowest_final
+    needed_from_grid_nova: When an Associate's customer has been shown both packages and has not accepted a proposal yet, which package should the Associate's estimated commission be worked out on?
+    blocking: tunable
+    probe: yaml_contains_marker
+  # ── BE-10: associate referral links (config/associate_onboarding.yaml referrals) ──
+  - id: REF-1
+    area: associates
+    location: {file: config/associate_onboarding.yaml, key: referrals.auto_attribute}
+    description: "A customer who opens an Associate's referral link (/estimate?ref=GNA-…) and asks for an estimate or books a call is recorded on the lead as referred by that Associate — information only. Attribution is unchanged: the first complete onboarding verified by Grid Nova decides (Associate Terms A7). Only false is implemented."
+    dummy_value: false
+    needed_from_grid_nova: Should a customer who came through an Associate's referral link be automatically attributed to that Associate (today the first verified submission decides)?
+    blocking: tunable
+    probe: yaml_contains_marker
   # ── BE-5: handover, warranty and service requests (config/handover_warranty.yaml) ──
   - id: HW-GATE
     area: policies

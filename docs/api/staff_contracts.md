@@ -81,12 +81,12 @@ Errors: 404 `"Lead not found"`; 403 `"This customer's leads are assigned to anot
 ```json
 {"items": [{"id": 12, "customer_id": 7, "pipeline_stage": "qualified", "lead_score": "high",
             "source": "referral", "created_at": "…", "assigned_employee_id": null,
-            "project_reference_id": "GNE-…"}], "page": 1, "page_size": 25, "total": 1}
+            "project_reference_id": "GNE-…", "referred_by": null}], "page": 1, "page_size": 25, "total": 1}
 ```
 `lead_score` is `high|medium|low` or null. Other params: `source`, `assigned` (`me|unassigned|any`), `q`, `page`, `page_size` (≤200) — see be1_public_contracts.md §2.
 
 ### `GET /leads/{lead_id}` — `LeadDetailResponse` | `EngineerLeadDetailResponse`
-Non-Engineer: `{lead_id, customer:{id,name,email}|null, pipeline_stage, lead_score, source, assigned_employee_id, project:{id,reference_id,project_type,project_family,state,location,capacity_kw,roof_type,monthly_electricity_bill,budget,timeline,created_at}|null, collected_fields, proposals:[{id,version,status,total_value}], timeline:[{event_type,description,created_at}], messages:[{role,content,created_at}]}`.
+Non-Engineer: `{lead_id, customer:{id,name,email}|null, pipeline_stage, lead_score, source, assigned_employee_id, referred_by:{associate_id,full_name}|null, project:{id,reference_id,project_type,project_family,state,location,capacity_kw,roof_type,monthly_electricity_bill,budget,timeline,created_at}|null, collected_fields, proposals:[{id,version,status,total_value}], timeline:[{event_type,description,created_at}], messages:[{role,content,created_at}]}`.
 **Engineer** gets only `{lead_id, pipeline_stage, collected_fields}` (technical fields: `project_type, capacity_kw, location, roof_type`). Distinguish by the absence of `customer`.
 Errors: 404 `"Lead not found"`; 403 scope.
 
@@ -120,6 +120,7 @@ All optional, combined with AND, applied **inside the role scope and before pagi
 | `stage` | one or more pipeline stages: repeat (`?stage=new&stage=won`) or comma-separate (`?stage=new,won`). Values: `new, qualifying, qualified, proposal_draft, proposal_sent, negotiation, won, lost` |
 | `min_score`, `max_score` | `low` < `medium` < `high`, inclusive. Scores are labels, not numbers. Either may be used alone. **A lead with no score never matches a score filter** |
 | `created_from`, `created_to` | `YYYY-MM-DD`, **IST calendar days, inclusive** (`created_to=2026-09-03` includes everything up to 23:59:59 IST on the 3rd) |
+| `referred_by_associate_id` | BE-10: an Associate ID (`GNA-WB-26-00001`, case and spaces ignored) — leads that came through that Associate's referral link. An unknown ID matches nothing. See [associate_ease.md](associate_ease.md) |
 
 Structured 422s `{"detail": {"code", "message", "field"}}`:
 
@@ -130,5 +131,6 @@ Structured 422s `{"detail": {"code", "message", "field"}}`:
 | `invalid_score_range` | `min_score` | min above max |
 | `invalid_date` | `created_from` / `created_to` | not `YYYY-MM-DD` |
 | `invalid_date_range` | `created_from` | from after to |
+| `invalid_associate_id` | `referred_by_associate_id` | not shaped like an Associate ID |
 
 The export with the same filters returns exactly the rows the table shows (it has no `q`/`assigned`/paging).

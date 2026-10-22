@@ -274,8 +274,23 @@ def list_onboardings(status: Optional[OnboardingStatus] = None, mine_only: bool 
     total = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
     rows = list(db.execute(q.order_by(CustomerOnboarding.created_at.desc(), CustomerOnboarding.id.desc())
                            .offset((page - 1) * page_size).limit(page_size)).scalars())
-    return {"items": serialize.list_items(db, rows, lambda o: {"viewer_is_owner": o.owner_associate_id == associate.id}),
-            "page": page, "page_size": page_size, "total": total}
+    from app.onboarding.preload import preloaded
+    rate_cache: dict = {}
+    with preloaded(db, rows):
+        items = serialize.list_items(db, rows, lambda o: {"viewer_is_owner": o.owner_associate_id == associate.id})
+        for o, item in zip(rows, items):
+            item["estimated_commission"] = _estimated_commission(db, associate, o, rate_cache)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+
+def _estimated_commission(db: Session, associate: Associate, onboarding: CustomerOnboarding,
+                          rate_cache: Optional[dict] = None) -> Optional[dict]:
+    """BE-10: "what will I earn?" — an estimate only (app/commissions/estimate.py). Money
+    is owner-only: a Preferred Associate viewing a territory customer gets null."""
+    if onboarding.owner_associate_id != associate.id:
+        return None
+    from app.commissions.estimate import estimated_commission
+    return estimated_commission(db, onboarding, rate_cache)
 
 
 def _load(db: Session, onboarding_id: int) -> CustomerOnboarding:
@@ -291,7 +306,8 @@ def get_onboarding(onboarding_id: int, db: Session = Depends(get_db),
     associate = _associate(db, current)
     onboarding = _load(db, onboarding_id)
     require_onboarding_view(associate, onboarding)
-    return serialize.onboarding(db, onboarding, viewer_is_owner=onboarding.owner_associate_id == associate.id)
+    return {**serialize.onboarding(db, onboarding, viewer_is_owner=onboarding.owner_associate_id == associate.id),
+            "estimated_commission": _estimated_commission(db, associate, onboarding)}
 
 
 @router.patch("/{onboarding_id}")

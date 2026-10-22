@@ -19,6 +19,7 @@ these files disagree, the code wins — fix the file.
 | [handover_warranty.md](handover_warranty.md) | BE-5: handover pack and gate, warranty register, handover PDF and the customer's tokenised link, service requests (staff / associate / customer), work-queue counts, `check-service-requests`, home-feed items |
 | [project_archive.md](project_archive.md) | BE-8: Project Archive — Admin CSV import (template, dry run, commit, void), archived-project list / detail / statistics, the live-and-archive project view, per-role field visibility |
 | [nova_records.md](nova_records.md) | BE-9: Nova Records, the internal staff assistant — ask, conversations, feedback, retention job; statuses, citations and paths, tables, role scoping and redaction, limits |
+| [associate_ease.md](associate_ease.md) | BE-10: Associate referral links (`ref` / `share_with_referrer` on the public estimate request and call booking, the associate's referrals list and referral link, `referred_by` and its filter on staff leads, REF-1) and the estimated commission on the associate's customers |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)

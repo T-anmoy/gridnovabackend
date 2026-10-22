@@ -92,6 +92,10 @@ def _cfg() -> dict:
 # ── The accepted total and the schedule ──────────────────────────────────────────
 
 def accepted_proposal(db: Session, onboarding: CustomerOnboarding) -> Optional[Proposal]:
+    from app.onboarding.preload import current
+    pre = current(db)
+    if pre is not None and onboarding.lead_id in pre.accepted_proposals:
+        return pre.accepted_proposals[onboarding.lead_id]
     return db.execute(select(Proposal).where(Proposal.lead_id == onboarding.lead_id,
                                              Proposal.status == ProposalStatus.accepted)
                       .order_by(Proposal.version.desc(), Proposal.id.desc())).scalars().first()

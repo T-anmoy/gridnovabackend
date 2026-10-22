@@ -33,6 +33,15 @@ notice_versions:
 # lock). A later conflicting onboarding raises an admin flag either way.
 attribution_lock_days: 90
 
+# BE-10 referral links (/estimate?ref=GNA-…). A referral is information, not attribution:
+# the referring Associate sees the enquiry in their portal, and the first complete,
+# staff-verified onboarding still decides who the customer is attributed to (Associate
+# Terms A7). `false` is the only value implemented; app/onboarding/config.py refuses
+# anything else until Grid Nova decides otherwise and the rule is built.
+referrals:
+  # [UNCONFIRMED] engineering default (REF-1)
+  auto_attribute: false
+
 # Required documents. `required_when` is one of:
 #   always                 — every onboarding
 #   scheme_linked          — the site assessment is linked to a government scheme

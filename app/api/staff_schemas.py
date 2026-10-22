@@ -19,6 +19,12 @@ from app.memory.models import (
 
 # ── Leads ─────────────────────────────────────────────────────────────────────
 
+class LeadReferrer(BaseModel):
+    """BE-10: the Associate whose referral link the enquiry came through."""
+    associate_id: str
+    full_name: str
+
+
 class LeadListItem(BaseModel):
     id: int
     customer_id: int
@@ -28,6 +34,7 @@ class LeadListItem(BaseModel):
     created_at: str
     assigned_employee_id: Optional[str] = None
     project_reference_id: Optional[str] = None
+    referred_by: Optional[LeadReferrer] = None
 
 
 class LeadListResponse(BaseModel):
@@ -85,6 +92,7 @@ class LeadDetailResponse(BaseModel):
     lead_score: Optional[LeadScore] = None
     source: LeadSource
     assigned_employee_id: Optional[str] = None
+    referred_by: Optional[LeadReferrer] = None
     project: Optional[LeadProjectSummary] = None
     collected_fields: Optional[dict[str, Any]] = None
     proposals: list[LeadProposalBrief]

@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api import input_bounds as lim
+from app.associates import referrals
 from app.memory.db import get_db
 from app.memory.lead_fields import apply_lead_fields
 from app.memory.memory_manager import MemoryManager
@@ -130,6 +131,12 @@ class EstimateRequest(BaseModel):
     shading: Optional[str] = Field(default=None, max_length=50)
     subsidy_interest: Optional[Literal["yes", "no"]] = None
     indicative_total_inr: Optional[float] = lim.bounded(ge=0, le=lim.MAX_PROJECT_INR)
+    # BE-10 referral link (/estimate?ref=GNA-…): an Associate ID. Anything that is not an
+    # active Associate's ID is ignored silently — never an error (app/associates/referrals.py).
+    ref: Optional[str] = None
+    _ref = field_validator("ref", mode="before")(referrals.lenient_ref)
+    # The consent line "Share my details with the Grid Nova Associate who referred me".
+    share_with_referrer: Optional[bool] = None
 
 
 class EstimateResponse(BaseModel):
@@ -177,6 +184,7 @@ def submit_estimate_request(
         performed_by="website",
         source=LeadSource.website_estimate_form,
     )
+    referrals.record(db, lead, body.ref, body.share_with_referrer, performed_by="website")
 
     # Everything the form captured that has no dedicated Project column, plus
     # the identity fields — collected_fields is the same free-form store the

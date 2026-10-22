@@ -47,6 +47,10 @@ def _validate(data: dict) -> dict:
          f"commissions.multiple_territory_holders must be one of {MULTIPLE_HOLDERS}")
     for key in ("territory_on_own_customers", "deactivated_associates_earn"):
         need(isinstance(c.get(key), bool), f"commissions.{key} must be true or false")
+    from app.pricing.price_list import PACKAGES
+    e = data.get("estimate") or {}
+    need(e.get("indicative_package_when_several") in ("lowest_final", *PACKAGES),
+         f"estimate.indicative_package_when_several must be lowest_final or one of {PACKAGES}")
     q = data.get("queries") or {}
     for key in ("window_days", "response_working_days"):
         need(isinstance(q.get(key), int) and q[key] > 0, f"queries.{key} must be a positive whole number")
@@ -75,6 +79,10 @@ def load() -> dict:
 
 def commissions() -> dict:
     return load()["commissions"]
+
+
+def estimate() -> dict:
+    return load()["estimate"]
 
 
 def queries() -> dict:
