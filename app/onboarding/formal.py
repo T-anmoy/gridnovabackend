@@ -242,7 +242,8 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
                              f"{proposal.status.value}).", code="not_approved", status_code=409)
     problem = placeholder_problem(proposal)
     if problem:
-        raise AssociateError(problem["message"], code=problem["code"], status_code=409)
+        raise AssociateError(problem["message"], code=problem["code"], status_code=409,
+                             extra={"missing": problem["missing"]} if "missing" in problem else None)
     problem = reverification_problem(proposal)
     if problem:
         raise AssociateError(problem["message"], code=problem["code"], status_code=409,

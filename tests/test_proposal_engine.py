@@ -174,9 +174,13 @@ class TestDraftComposition:
         db_session.commit()
         assert result["used_fallback_template"] is False
         proposal = memory.get_proposal(result["proposal_id"])
+        # The rule matched; since BE-13 the customer document's own text (config/
+        # proposal_document.yaml) replaces the residential scope and subsidy note sections.
+        assert proposal.content["matched_rule_ids"] == ["residential_rooftop"]
+        assert proposal.content["document"]["segment"] == "residential"
+        assert proposal.content["document"]["coverage"] is None
         section_ids = [s["id"] for s in proposal.content["sections"]]
-        assert "residential_rooftop_scope" in section_ids
-        assert "pm_surya_ghar_subsidy_note" in section_ids
+        assert "residential_rooftop_scope" not in section_ids and "pm_surya_ghar_subsidy_note" not in section_ids
         assert proposal.used_fallback_template is False
 
     def test_unmatched_combination_flags_fallback(self, memory, db_session):
@@ -212,5 +216,8 @@ class TestDraftComposition:
         ids_a = [s["id"] for s in pa.content["sections"]]
         ids_b = [s["id"] for s in pb.content["sections"]]
         assert ids_a != ids_b
-        assert "residential_rooftop_scope" in ids_a
+        assert pa.content["matched_rule_ids"] == ["residential_rooftop"]
+        # Utility-scale is a segment the templates do not cover: its scope section stays
+        # (still Grid Nova's to supply) and blocks approval through the document.
         assert "utility_scale_scope" in ids_b
+        assert pb.content["document"]["coverage"] == "utility"

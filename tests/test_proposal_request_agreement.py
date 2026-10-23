@@ -14,6 +14,7 @@ from app.memory.models import (
     ProjectStageEvent, Proposal, ProposalStatus,
 )
 from app.onboarding import progress
+from tests.proposal_document_support import complete_document
 from tests.onboarding_support import (  # noqa: F401 — fixtures
     ADMIN, BASE, DASH, ENG, MGMT, SALES, headers, kyc_ready, make_associate, onboarding_body, onboarding_ready,
     territories, upload_required_documents, complete_survey, confirm_site_location, review_survey,
@@ -63,6 +64,7 @@ def _prepared(client, db_session, **kw):
 
 def _approved(client, db_session, **kw):
     gna, o, pid = _prepared(client, db_session, **kw)
+    complete_document(client, pid)   # BE-13: what staff fill in before approval
     assert client.post(f"{DASH}/proposals/{pid}/approve", headers=ADMIN).status_code == 200
     return gna, o, pid
 
@@ -252,6 +254,7 @@ class TestSeparateApprover:
         gna, o, pid = _prepared(client, db_session)
         r = client.post(f"{DASH}/proposals/{pid}/approve", headers=SALES)
         assert r.status_code == 403 and "different employee" in r.json()["detail"]
+        complete_document(client, pid)
         assert client.post(f"{DASH}/proposals/{pid}/approve", headers=ADMIN).status_code == 200
 
     @pytest.mark.parametrize("all_leads, expected", [(False, 200), (True, 403)])
@@ -269,6 +272,7 @@ class TestSeparateApprover:
         db_session.commit()
         pid = client.post(f"{DASH}/proposals/draft", json={"lead_id": lead.id, "customer_id": customer.id},
                           headers=SALES).json()["proposal_id"]
+        complete_document(client, pid)
         r = client.post(f"{DASH}/proposals/{pid}/approve", headers=SALES)
         assert r.status_code == expected, r.text
         if expected == 403:
@@ -285,6 +289,7 @@ class TestSeparateApprover:
         db_session.commit()
         pid = client.post(f"{DASH}/proposals/draft", json={"lead_id": lead.id, "customer_id": customer.id},
                           headers=SALES).json()["proposal_id"]
+        complete_document(client, pid)
         assert client.post(f"{DASH}/proposals/{pid}/approve", headers=SALES).status_code == 200
         assert db_session.execute(select(ProjectStageEvent)).first() is None
 
@@ -365,6 +370,7 @@ class TestAcceptance:
         oid = o["onboarding_id"]
         r = _in_person(client, headers(gna), oid, pid)
         assert r.status_code == 409 and r.json()["detail"]["code"] == "not_approved"  # still a draft
+        complete_document(client, pid)
         client.post(f"{DASH}/proposals/{pid}/approve", headers=ADMIN)
         assert _in_person(client, headers(gna), oid, pid, reference="").status_code == 422
         r = _in_person(client, headers(gna), oid, pid, reference="   ")
@@ -381,9 +387,18 @@ class TestAcceptance:
         assert r.status_code == 409 and r.json()["detail"]["code"] == "already_accepted"
 
     def test_send_guard_applies_in_person_too(self, client, db_session, onboarding_ready):
-        gna, o, pid = _approved(client, db_session)  # real placeholder proposal content
+        """The guard that stops the emailed send stops in-person acceptance too. A BE-13
+        document cannot be approved incomplete, so the gap is made after approval."""
+        gna, o, pid = _approved(client, db_session)
+        proposal = db_session.get(Proposal, pid)
+        content = dict(proposal.content)
+        content["document"] = {**content["document"],
+                               "addressee": {**content["document"]["addressee"], "name": None}}
+        proposal.content = content
+        db_session.commit()
         r = _in_person(client, headers(gna), o["onboarding_id"], pid)
-        assert r.status_code == 409 and r.json()["detail"]["code"] == "placeholder_content"
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "missing_required"
+        assert r.json()["detail"]["missing"] == [{"field": "addressee.name", "message": "the customer's name"}]
 
     def test_accepted_can_no_longer_be_hand_recorded(self, client, db_session, onboarding_ready):
         gna, o = _new(client, db_session)

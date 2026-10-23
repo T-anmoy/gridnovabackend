@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from app.memory.models import PipelineStage, ProposalStatus
 from tests.conftest import sales_headers, admin_headers
+from tests.proposal_document_support import complete_document
 
 
 def _make_qualified_lead(memory, db_session):
@@ -78,6 +79,7 @@ class TestR2UploadResilience:
         }, headers=sales_headers())
         assert r.status_code == 200
         pid = r.json()["proposal_id"]
+        complete_document(client, pid)   # BE-13: approvable
 
         # A genuinely transient failure (unlike a missing-config one) still retries
         # with back-off — bound that so this test doesn't spend several real

@@ -1,12 +1,136 @@
 {
   "components": {
     "schemas": {
-      "AdjustPricingRequest": {
+      "Addressee": {
+        "additionalProperties": false,
         "properties": {
+          "aadhaar_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aadhaar Last4"
+          },
+          "address_lines": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Address Lines",
+            "type": "array"
+          },
+          "attention": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          },
+          "customer_type": {
+            "default": "individual",
+            "enum": [
+              "individual",
+              "organisation"
+            ],
+            "title": "Customer Type",
+            "type": "string"
+          },
+          "mobile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mobile"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "salutation": {
+            "default": "",
+            "title": "Salutation",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "Addressee",
+        "type": "object"
+      },
+      "AdjustPricingRequest": {
+        "description": "Exactly one of: new_value (the total including GST — the original field),\nbasic_price (before GST; GST 8.9% and the total are computed) or rate_per_kwp\n(× the document's capacity). basic_price / rate_per_kwp need a BE-13 document.",
+        "properties": {
+          "basic_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basic Price"
+          },
           "new_value": {
-            "minimum": 0.0,
-            "title": "New Value",
-            "type": "number"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Value"
+          },
+          "rate_per_kwp": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Per Kwp"
           },
           "reason": {
             "minLength": 1,
@@ -15,7 +139,6 @@
           }
         },
         "required": [
-          "new_value",
           "reason"
         ],
         "title": "AdjustPricingRequest",
@@ -32,6 +155,45 @@
           "enabled"
         ],
         "title": "AgentToggleRequest",
+        "type": "object"
+      },
+      "AmountWords": {
+        "properties": {
+          "basic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basic"
+          },
+          "gst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gst"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "AmountWords",
         "type": "object"
       },
       "ApplicationStatus": {
@@ -1580,6 +1742,64 @@
         "title": "BookingResponse",
         "type": "object"
       },
+      "BoqRow": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "module",
+                  "inverter",
+                  "cable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "make": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Make",
+            "type": "string"
+          },
+          "quantity": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Quantity",
+            "type": "string"
+          },
+          "standard": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Standard"
+          }
+        },
+        "required": [
+          "description",
+          "quantity",
+          "make"
+        ],
+        "title": "BoqRow",
+        "type": "object"
+      },
       "BreakdownRequest": {
         "properties": {
           "equipment_selection": {
@@ -2011,6 +2231,93 @@
         ],
         "title": "CommissionRole",
         "type": "string"
+      },
+      "Connection": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Residential",
+                  "Commercial",
+                  "Industrial",
+                  "Government",
+                  "Agricultural"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "consumer_number": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumer Number"
+          },
+          "discom": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discom"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "single",
+                  "three"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "sanctioned_load_kw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanctioned Load Kw"
+          },
+          "sub_division": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Division"
+          }
+        },
+        "title": "Connection",
+        "type": "object"
       },
       "ConnectionPhase": {
         "enum": [
@@ -2486,6 +2793,337 @@
         "title": "DistrictStat",
         "type": "object"
       },
+      "DocumentEditRequest": {
+        "description": "Replace one section. `value` is the section's object (addressee, connection, site,\npm_surya_ghar, plant, system) or list (boq, customer_scope, payment_terms, notes).",
+        "properties": {
+          "base_revision": {
+            "minimum": 0.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "section": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Section",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "base_revision",
+          "section",
+          "value"
+        ],
+        "title": "DocumentEditRequest",
+        "type": "object"
+      },
+      "DocumentEditResponse": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/FieldChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TechnicalDocument"
+              },
+              {
+                "$ref": "#/components/schemas/ProposalDocument"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "document_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Date"
+          },
+          "document_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Reference"
+          },
+          "editable_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Editable Sections",
+            "type": "array"
+          },
+          "figures": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentFigures"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_document": {
+            "title": "Has Document",
+            "type": "boolean"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout"
+          },
+          "locked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked"
+          },
+          "missing_required": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MissingField"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Required"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "integer"
+          },
+          "regenerated_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regenerated Sections",
+            "type": "array"
+          },
+          "requires_manager_signoff": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Manager Signoff"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "signatory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Signatory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "total_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Value"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "has_document",
+          "changes",
+          "regenerated_sections"
+        ],
+        "title": "DocumentEditResponse",
+        "type": "object"
+      },
+      "DocumentFigures": {
+        "description": "Computed by app/proposals/document.figures — never typed.",
+        "properties": {
+          "basic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basic"
+          },
+          "capacity_kwp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Kwp"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/GenerationFigures"
+          },
+          "gst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gst"
+          },
+          "gst_rate": {
+            "title": "Gst Rate",
+            "type": "string"
+          },
+          "layout": {
+            "title": "Layout",
+            "type": "string"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentFigure"
+            },
+            "title": "Payments",
+            "type": "array"
+          },
+          "price_mode": {
+            "title": "Price Mode",
+            "type": "string"
+          },
+          "space_required_sqft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceFigures"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subsidy": {
+            "$ref": "#/components/schemas/SubsidyFigures"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "validity_days": {
+            "title": "Validity Days",
+            "type": "integer"
+          },
+          "whole_rupees": {
+            "title": "Whole Rupees",
+            "type": "boolean"
+          },
+          "words": {
+            "$ref": "#/components/schemas/AmountWords"
+          }
+        },
+        "required": [
+          "layout",
+          "price_mode",
+          "gst_rate",
+          "words",
+          "payments",
+          "whole_rupees",
+          "subsidy",
+          "generation",
+          "validity_days"
+        ],
+        "title": "DocumentFigures",
+        "type": "object"
+      },
       "DocumentRef": {
         "properties": {
           "filename": {
@@ -2513,6 +3151,156 @@
           "filename"
         ],
         "title": "DocumentRef",
+        "type": "object"
+      },
+      "DocumentView": {
+        "properties": {
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TechnicalDocument"
+              },
+              {
+                "$ref": "#/components/schemas/ProposalDocument"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "document_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Date"
+          },
+          "document_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Reference"
+          },
+          "editable_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Editable Sections",
+            "type": "array"
+          },
+          "figures": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentFigures"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_document": {
+            "title": "Has Document",
+            "type": "boolean"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout"
+          },
+          "locked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked"
+          },
+          "missing_required": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MissingField"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Required"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "integer"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "signatory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Signatory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "has_document"
+        ],
+        "title": "DocumentView",
         "type": "object"
       },
       "DraftRequest": {
@@ -2921,6 +3709,25 @@
         "title": "FeedbackResponse",
         "type": "object"
       },
+      "FieldChange": {
+        "properties": {
+          "after": {
+            "title": "After"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "FieldChange",
+        "type": "object"
+      },
       "FormalProposalRequest": {
         "properties": {
           "customer_email": {
@@ -2936,6 +3743,41 @@
           }
         },
         "title": "FormalProposalRequest",
+        "type": "object"
+      },
+      "GenerationFigures": {
+        "properties": {
+          "annual_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Units"
+          },
+          "monthly_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Units"
+          },
+          "units_per_kwp_per_month": {
+            "title": "Units Per Kwp Per Month",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "units_per_kwp_per_month"
+        ],
+        "title": "GenerationFigures",
         "type": "object"
       },
       "GovernmentScheme": {
@@ -4487,6 +5329,24 @@
           "trigger"
         ],
         "title": "MilestoneIn",
+        "type": "object"
+      },
+      "MissingField": {
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "MissingField",
         "type": "object"
       },
       "MyEffectiveRate": {
@@ -6236,6 +7096,40 @@
         "title": "PaidLineIn",
         "type": "object"
       },
+      "PaymentFigure": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "percent": {
+            "title": "Percent",
+            "type": "string"
+          },
+          "short_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Label"
+          }
+        },
+        "required": [
+          "percent",
+          "label",
+          "amount"
+        ],
+        "title": "PaymentFigure",
+        "type": "object"
+      },
       "PaymentIn": {
         "properties": {
           "amount": {
@@ -6341,6 +7235,39 @@
         ],
         "title": "PaymentStatus",
         "type": "string"
+      },
+      "PaymentTerm": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "percent": {
+            "title": "Percent",
+            "type": "string"
+          },
+          "short_label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Label"
+          }
+        },
+        "required": [
+          "percent",
+          "label"
+        ],
+        "title": "PaymentTerm",
+        "type": "object"
       },
       "PayoutBatchStatus": {
         "enum": [
@@ -6487,6 +7414,134 @@
         "title": "PipelineStage",
         "type": "string"
       },
+      "Plant": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity_kwp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Kwp"
+          },
+          "dcr": {
+            "default": false,
+            "title": "Dcr",
+            "type": "boolean"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "enum": [
+                  "NOVA_ASSURED",
+                  "NOVA_SIGNATURE"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          }
+        },
+        "title": "Plant",
+        "type": "object"
+      },
+      "PmSuryaGhar": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_capacity_kwp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Capacity Kwp"
+          },
+          "portal_registered": {
+            "default": false,
+            "title": "Portal Registered",
+            "type": "boolean"
+          },
+          "subsidy_opted": {
+            "default": false,
+            "title": "Subsidy Opted",
+            "type": "boolean"
+          }
+        },
+        "title": "PmSuryaGhar",
+        "type": "object"
+      },
+      "Price": {
+        "additionalProperties": false,
+        "properties": {
+          "basic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basic"
+          },
+          "mode": {
+            "default": "none",
+            "enum": [
+              "price_list",
+              "staff_basic",
+              "staff_total",
+              "none"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "price_list_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price List Version"
+          },
+          "rate_per_kwp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Per Kwp"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "Price",
+        "type": "object"
+      },
       "ProjectCard": {
         "properties": {
           "fields": {
@@ -6602,6 +7657,128 @@
           "total"
         ],
         "title": "ProjectPage",
+        "type": "object"
+      },
+      "ProposalDocument": {
+        "additionalProperties": false,
+        "description": "Version 1 of the structured document. `revision` increments on every saved edit\n(optimistic concurrency); `edited` lists the sections staff have changed: those are\nnever regenerated from defaults and are carried into a revision.",
+        "properties": {
+          "addressee": {
+            "$ref": "#/components/schemas/Addressee"
+          },
+          "boq": {
+            "items": {
+              "$ref": "#/components/schemas/BoqRow"
+            },
+            "maxItems": 30,
+            "title": "Boq",
+            "type": "array"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
+          "customer_scope": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Customer Scope",
+            "type": "array"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Defaults",
+            "type": "object"
+          },
+          "edited": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edited",
+            "type": "array"
+          },
+          "housing_society": {
+            "default": false,
+            "title": "Housing Society",
+            "type": "boolean"
+          },
+          "mount_type": {
+            "default": "rooftop",
+            "enum": [
+              "rooftop",
+              "ground_mounted"
+            ],
+            "title": "Mount Type",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Notes",
+            "type": "array"
+          },
+          "payment_terms": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentTerm"
+            },
+            "maxItems": 6,
+            "title": "Payment Terms",
+            "type": "array"
+          },
+          "plant": {
+            "$ref": "#/components/schemas/Plant"
+          },
+          "pm_surya_ghar": {
+            "$ref": "#/components/schemas/PmSuryaGhar"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          },
+          "revision": {
+            "default": 0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment"
+          },
+          "site": {
+            "$ref": "#/components/schemas/Site"
+          },
+          "system": {
+            "$ref": "#/components/schemas/System"
+          }
+        },
+        "title": "ProposalDocument",
         "type": "object"
       },
       "ProposalInputsCreate": {
@@ -8053,6 +9230,29 @@
         "title": "ShadingCondition",
         "type": "string"
       },
+      "Signatory": {
+        "properties": {
+          "for_line": {
+            "title": "For Line",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "for_line"
+        ],
+        "title": "Signatory",
+        "type": "object"
+      },
       "SignatureRef": {
         "properties": {
           "filename": {
@@ -8086,6 +9286,45 @@
           "filename"
         ],
         "title": "SignatureRef",
+        "type": "object"
+      },
+      "Site": {
+        "additionalProperties": false,
+        "properties": {
+          "address_lines": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Address Lines",
+            "type": "array"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "town": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Town"
+          }
+        },
+        "title": "Site",
         "type": "object"
       },
       "SiteLocationRequest": {
@@ -8135,6 +9374,29 @@
         ],
         "title": "SocietyNocStatus",
         "type": "string"
+      },
+      "SpaceFigures": {
+        "properties": {
+          "high": {
+            "title": "High",
+            "type": "integer"
+          },
+          "low": {
+            "title": "Low",
+            "type": "integer"
+          },
+          "single": {
+            "title": "Single",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "low",
+          "high",
+          "single"
+        ],
+        "title": "SpaceFigures",
+        "type": "object"
       },
       "StaffSiteLocationRequest": {
         "properties": {
@@ -8323,6 +9585,72 @@
         "title": "SubmitStageRequest",
         "type": "object"
       },
+      "SubsidyFigures": {
+        "properties": {
+          "applies": {
+            "title": "Applies",
+            "type": "boolean"
+          },
+          "effective_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Cost"
+          },
+          "slabs": {
+            "items": {
+              "$ref": "#/components/schemas/SubsidySlab"
+            },
+            "title": "Slabs",
+            "type": "array"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "applies",
+          "slabs"
+        ],
+        "title": "SubsidyFigures",
+        "type": "object"
+      },
+      "SubsidySlab": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "kw": {
+            "title": "Kw",
+            "type": "string"
+          },
+          "rate": {
+            "title": "Rate",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kw",
+          "rate",
+          "amount"
+        ],
+        "title": "SubsidySlab",
+        "type": "object"
+      },
       "Suggestion": {
         "properties": {
           "label": {
@@ -8450,6 +9778,42 @@
         "title": "SwitchModeRequest",
         "type": "object"
       },
+      "System": {
+        "additionalProperties": false,
+        "properties": {
+          "inverter": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inverter"
+          },
+          "module_technology": {
+            "default": "Mono PERC",
+            "title": "Module Technology",
+            "type": "string"
+          },
+          "mounting": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mounting"
+          }
+        },
+        "title": "System",
+        "type": "object"
+      },
       "Table": {
         "properties": {
           "columns": {
@@ -8509,6 +9873,68 @@
           "type"
         ],
         "title": "TableColumn",
+        "type": "object"
+      },
+      "TechnicalDocument": {
+        "additionalProperties": false,
+        "description": "What an Engineer sees: no customer, contact or price.",
+        "properties": {
+          "boq": {
+            "items": {
+              "$ref": "#/components/schemas/BoqRow"
+            },
+            "title": "Boq",
+            "type": "array"
+          },
+          "plant": {
+            "$ref": "#/components/schemas/TechnicalPlant"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "system": {
+            "$ref": "#/components/schemas/System"
+          },
+          "view": {
+            "const": "technical",
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "required": [
+          "view",
+          "revision",
+          "plant",
+          "system",
+          "boq"
+        ],
+        "title": "TechnicalDocument",
+        "type": "object"
+      },
+      "TechnicalPlant": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity_kwp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Kwp"
+          },
+          "dcr": {
+            "title": "Dcr",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dcr"
+        ],
+        "title": "TechnicalPlant",
         "type": "object"
       },
       "TerritoryLevel": {
@@ -21066,6 +22492,104 @@
         "summary": "Approve Proposal"
       }
     },
+    "/api/v1/dashboard/proposals/{proposal_id}/document": {
+      "get": {
+        "description": "The structured document, its computed figures, what still blocks approval and the\nsections this viewer may change (none once approved).",
+        "operationId": "get_proposal_document_api_v1_dashboard_proposals__proposal_id__document_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Proposal Document"
+      },
+      "patch": {
+        "description": "Change one section of a draft's document. 403 field_not_editable (role / fixed\nsection), 409 proposal_locked / stale_version / no_document, 422 invalid_value /\npayment_terms_total / make_not_in_catalogue.",
+        "operationId": "edit_proposal_document_api_v1_dashboard_proposals__proposal_id__document_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentEditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit Proposal Document"
+      }
+    },
     "/api/v1/dashboard/proposals/{proposal_id}/manager-sign-off": {
       "post": {
         "description": "Manager sign-off — only for proposals where requires_manager_signoff is True.",
@@ -21149,6 +22673,47 @@
           }
         ],
         "summary": "Get Proposal Pdf"
+      }
+    },
+    "/api/v1/dashboard/proposals/{proposal_id}/preview.pdf": {
+      "get": {
+        "description": "The document as the customer would receive it, rendered now and never stored —\nstamped \"DRAFT — NOT FOR CUSTOMER\" until the proposal is approved. It carries\npricing and contact details, so Engineers are refused, as for /pdf.",
+        "operationId": "preview_proposal_pdf_api_v1_dashboard_proposals__proposal_id__preview_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "The PDF"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Proposal Pdf"
       }
     },
     "/api/v1/dashboard/proposals/{proposal_id}/request-revision": {

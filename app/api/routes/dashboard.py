@@ -9,6 +9,7 @@ import io
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -757,6 +758,7 @@ def approve_proposal(
 
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot approve.")
+    _require_document_complete(db, proposal)
 
     lead_id = proposal.lead_id
     memory.transition_proposal_status(
@@ -814,6 +816,7 @@ def manager_sign_off(
 
     if proposal.status not in (ProposalStatus.pending_approval, ProposalStatus.pending_pricing_validation, ProposalStatus.draft):
         raise HTTPException(status_code=400, detail=f"Proposal is in status '{proposal.status}' — cannot sign off.")
+    _require_document_complete(db, proposal)
 
     lead_id = proposal.lead_id
     memory.transition_proposal_status(
@@ -843,6 +846,18 @@ def manager_sign_off(
     db.commit()
 
     return {"status": "approved", "proposal_id": proposal_id, "signoff_by": employee.employee_id}
+
+
+def _require_document_complete(db: Session, proposal) -> None:
+    """BE-13: a proposal whose customer document still lacks required data cannot be
+    approved (409 missing_required, with the list). On success the document's reference
+    and date are allocated in the approval's own transaction (app/proposals/reference.py)."""
+    from app.proposals import document_service, reference
+    problem = document_service.problem(proposal)
+    if problem is not None:
+        raise HTTPException(status_code=409, detail=problem)
+    if isinstance((proposal.content or {}).get("document"), dict):
+        reference.assign(db, proposal)
 
 
 class RevisionRequest(BaseModel):
@@ -891,8 +906,20 @@ def request_revision(
 
 
 class AdjustPricingRequest(BaseModel):
-    new_value: float = Field(ge=0)
+    """Exactly one of: new_value (the total including GST — the original field),
+    basic_price (before GST; GST 8.9% and the total are computed) or rate_per_kwp
+    (× the document's capacity). basic_price / rate_per_kwp need a BE-13 document."""
+    new_value: Optional[float] = Field(default=None, ge=0)
+    basic_price: Optional[Decimal] = Field(default=None, gt=0, max_digits=14, decimal_places=2)
+    rate_per_kwp: Optional[Decimal] = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_price(self):
+        given = [f for f in ("new_value", "basic_price", "rate_per_kwp") if getattr(self, f) is not None]
+        if len(given) != 1:
+            raise ValueError("Give exactly one of new_value, basic_price or rate_per_kwp.")
+        return self
 
 
 @router.patch("/proposals/{proposal_id}/adjust-pricing")
@@ -932,10 +959,28 @@ def adjust_pricing(
             ),
         )
 
+    # BE-13: a documented proposal's price lives in its document; the total including GST
+    # is computed there (one calculation) and becomes total_value.
+    from app.proposals import document as proposal_document, document_service
+    try:
+        document_content, document_total = document_service.priced_content(
+            proposal, basic=body.basic_price, rate_per_kwp=body.rate_per_kwp,
+            total=Decimal(str(body.new_value)) if body.new_value is not None else None)
+    except proposal_document.DocumentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.body())
+    if document_content is None and body.new_value is None:
+        raise HTTPException(status_code=409, detail={
+            "code": "no_document", "message": "basic_price and rate_per_kwp need a proposal with a structured "
+                                              "document; give new_value (the total including GST)."})
+    new_value = document_total if document_content is not None else body.new_value
+
     # Recompute the signoff requirement from the SAME rule used at draft time — this
     # also preserves a capacity-driven signoff requirement, never just the value one.
     collected = dict(lead.collected_fields or {}) if lead else {}
-    new_flag = evaluate_lead(collected, total_value=body.new_value).requires_manager_signoff
+    stored_document = proposal_document.stored(document_content)
+    if stored_document is not None and stored_document.plant.capacity_kwp is not None:
+        collected["capacity_kw"] = float(stored_document.plant.capacity_kwp)
+    new_flag = evaluate_lead(collected, total_value=new_value).requires_manager_signoff
     # Captured before the write — the size and direction of the correction is the
     # lesson, and it is unrecoverable once the row is overwritten.
     previous_value = proposal.total_value
@@ -943,15 +988,16 @@ def adjust_pricing(
 
     updated = memory.adjust_proposal_pricing(
         proposal_id=proposal_id,
-        new_value=body.new_value,
+        new_value=new_value,
         requires_manager_signoff=new_flag,
         reason=body.reason,
         performed_by=employee.employee_id,
+        content=document_content,
     )
     memory.add_timeline_event(
         lead_id=proposal.lead_id,
         event_type=TimelineEventType.pricing_adjusted,
-        description=f"Pricing adjusted to {body.new_value:,.0f}: {body.reason}",
+        description=f"Pricing adjusted to {new_value:,.0f}: {body.reason}",
         created_by=employee.employee_id,
     )
     reflection.record_proposal_outcome(
@@ -962,7 +1008,7 @@ def adjust_pricing(
         signoff_lead_id = proposal.lead_id
         memory.notify_after_commit(
             lambda: notifier.manager_signoff_required(
-                proposal_id=proposal_id, lead_id=signoff_lead_id, total_value=body.new_value,
+                proposal_id=proposal_id, lead_id=signoff_lead_id, total_value=new_value,
             ),
             "manager_signoff_required",
         )
@@ -978,6 +1024,9 @@ def adjust_pricing(
         # Set when the proposal was list-priced: the list Final and new − list.
         "list_price_final": pricing.get("list_price_final"),
         "variance": pricing.get("variance"),
+        # BE-13: the document's computed figures (null for a proposal without a document).
+        "figures": proposal_document.figures(proposal_document.stored(updated.content))
+        if proposal_document.stored(updated.content) is not None else None,
     }
 
 
@@ -1177,6 +1226,8 @@ def get_proposal_detail(
                 {"id": v.id, "version": v.version, "status": v.status}
                 for v in detail["versions"]
             ],
+            # BE-13: the technical part of the document (no customer, contact or price).
+            "document": _document_view(proposal, employee),
         }
 
     return {
@@ -1192,6 +1243,9 @@ def get_proposal_detail(
         "used_fallback_template": proposal.used_fallback_template,
         **reverification.serialize(proposal),
         "revision_reason": proposal.revision_reason,
+        # BE-13: the structured customer document, its figures and what blocks approval
+        # (has_document false for a proposal drafted before documents existed).
+        "document": _document_view(proposal, employee),
         "pdf_url": proposal.pdf_url,
         "pdf_available": bool(proposal.pdf_url or proposal.pdf_storage_key),
         "date_created": proposal.date_created.isoformat() if proposal.date_created else None,
@@ -1222,6 +1276,11 @@ def get_proposal_detail(
             for v in detail["versions"]
         ],
     }
+
+
+def _document_view(proposal, employee: AuthenticatedEmployee) -> dict:
+    from app.proposals import document_service
+    return document_service.view(proposal, employee.role.value)
 
 
 @router.get("/proposals/{proposal_id}/required-approval-tier")
@@ -2213,6 +2272,9 @@ def _trigger_pdf_generation(proposal_id: int, proposal, db: Session, memory: Mem
                 "version": inner_proposal.version,
                 "requires_manager_signoff": inner_proposal.requires_manager_signoff,
                 "total_value": inner_proposal.total_value,
+                # BE-13: printed on the customer document.
+                "document_reference": inner_proposal.document_reference,
+                "document_date": inner_proposal.document_date,
             }
             pdf_url = generate_and_upload_pdf(
                 proposal_data=proposal_data,

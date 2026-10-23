@@ -180,6 +180,8 @@ def reset_chat_inmemory_state():
     public_receipts._receipt_request_log.clear()
     from app.records import store as nova_records_store
     nova_records_store._minute_log.clear()
+    import app.api.routes.proposal_document as proposal_document
+    proposal_document._preview_log.clear()
     yield
     for log in (public_associates._apply_request_log, public_associates._verify_request_log,
                 public_associates._lookup_request_log):

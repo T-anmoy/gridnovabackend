@@ -44,6 +44,8 @@ entries:
     needed_from_grid_nova: Please supply the cover letter introduction for proposals.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (compact.letter, detailed.letter) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-2
     area: proposals
     location: {file: config/proposal_content.yaml, key: base_sections.standard_terms}
@@ -52,6 +54,8 @@ entries:
     needed_from_grid_nova: Please supply the standard terms and conditions (reviewed by counsel) for proposals.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: partially_resolved
+    status_note: "The samples carry Grid Nova's commercial notes, warranty and customer scope (config/proposal_document.yaml), and a proposal with a document is no longer held for this section. They do not carry counsel-reviewed terms and conditions: still needed if Grid Nova wants them in proposals."
   - id: PRO-3
     area: proposals
     location: {file: config/proposal_content.yaml, key: base_sections.closing}
@@ -60,6 +64,8 @@ entries:
     needed_from_grid_nova: Please supply the closing paragraph for proposals, including how long a proposal stays valid.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (detailed.closure, detailed.commercial_notes (15-day validity), the sign-off) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-4
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.residential_rooftop_scope}
@@ -68,6 +74,8 @@ entries:
     needed_from_grid_nova: Please supply the scope-of-work text for residential rooftop projects.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (compact.customer_scope, compact.boq) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-5
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.commercial_rooftop_scope}
@@ -76,6 +84,8 @@ entries:
     needed_from_grid_nova: Please supply the scope-of-work text for commercial rooftop projects.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (detailed.customer_scope, detailed.scope_sections) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-6
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.industrial_rooftop_scope}
@@ -84,6 +94,8 @@ entries:
     needed_from_grid_nova: Please supply the scope-of-work text for industrial rooftop projects.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (detailed.customer_scope, detailed.scope_sections — the 52 kWp sample is a commercial / industrial customer) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-7
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.utility_scale_scope}
@@ -108,6 +120,8 @@ entries:
     needed_from_grid_nova: Please supply the PM Surya Ghar subsidy note (eligibility and how the subsidy reduces the price).
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "Grid Nova's two sample proposals (Oct 2026) supply this text; it is in config/proposal_document.yaml (compact.highlights_footnote, compact.subsidy_note, compact.letter_pm_surya_ghar) and every proposal drafted since BE-13 renders it from there. The section here is no longer composed into a proposal that has a document."
   - id: PRO-10
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.pm_kusum_note}
@@ -152,6 +166,39 @@ entries:
     probe: yaml_contains_marker
     status: superseded
     status_note: "For list-priced proposals the price comes from Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); segment modifiers apply only outside the price list."
+
+  - id: PRO-15
+    area: proposals
+    location: {file: config/proposal_document.yaml, key: detailed.warranty_rows}
+    description: "Warranty table of the above-10 kWp proposal (12-month plant breakdown, 27-year panel performance as per manufacturer, inverter 8 years, structure 10 years) — copied from one sample, not from a Grid Nova decision."
+    dummy_value: "the 52 kWp sample's four warranty rows"
+    needed_from_grid_nova: "Are these the warranty terms for every proposal above 10 kWp (plant 12 months, panels 27 years performance, inverter 8 years, structure 10 years)?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: PRO-16
+    area: proposals
+    location: {file: config/proposal_document.yaml, key: compact.boq}
+    description: "Cable makes in the up-to-10 kWp Bill of Quantity: the sample prints Polycab / Mescab / Finolex / KEI / RR Kabel; the price list's approved cable makes (15 Oct 2026) add Havells and 'or equivalent'."
+    dummy_value: "Polycab / Mescab / Finolex / KEI / RR Kabel"
+    needed_from_grid_nova: "Should the proposal's cable row name Havells and 'Equivalent' as the price list does, or only the five makes in the sample?"
+    blocking: tunable
+    probe: manual
+  - id: PRO-17
+    area: proposals
+    location: {file: config/proposal_document.yaml, key: space_required}
+    description: "Shadow-free roof area printed as 'Space Required', per kWp (83–100 sq ft — implied by the two samples: 3 kWp → 250 – 300, 52 kWp → 4,300). Related to SRV-4 (the survey's area per kW, 90)."
+    dummy_value: {sqft_per_kwp_low: 83, sqft_per_kwp_high: 100}
+    needed_from_grid_nova: "How much shadow-free roof area per kWp should a proposal ask the customer for?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: PRO-18
+    area: proposals
+    location: {file: config/proposal_document.yaml, key: default_salutation}
+    description: "Salutation a new proposal starts with ('Dear Sir / Madam,'); staff can choose 'Dear Sir,' or 'Dear Madam,'. The samples say 'Dear Sir,' — a customer's gender is never guessed from a name."
+    dummy_value: "Dear Sir / Madam,"
+    needed_from_grid_nova: "Which salutation should a proposal start with when staff have not chosen one?"
+    blocking: tunable
+    probe: yaml_contains_marker
 
   # ── Pricing engine (instant estimate / Solar Calculator) ───────────────────────
   # These live in Python, not config: resolving one is a code edit until they move
@@ -1222,6 +1269,8 @@ exemptions:
   - {file: app/proposals/content_engine.py, anchor: compose_content, reason: "fallback text when a config key or the customer is missing: deliberately trips the send-guard"}
   - {file: app/proposals/content_engine.py, anchor: _format_pricing_body, reason: "fallback text when no price exists: deliberately trips the send-guard"}
   - {file: app/pdf/generator.py, anchor: _render_body_sections, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
+  - {file: app/proposals/document.py, anchor: _MARKERS, reason: detector — refuses placeholder markers in text staff type and finds open segment text}
+  - {file: app/proposals/document_render.py, anchor: _LEFTOVER, reason: detector — refuses to render a customer document that still contains a marker}
   - {file: app/pdf/generator.py, anchor: _build_html, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
   - {file: app/memory/memory_manager.py, anchor: PLACEHOLDER_EMAIL_DOMAIN, reason: internal domain for customers with no email yet — a mechanism, not a dummy value}
   - {file: app/config.py, anchor: production_config_problems, reason: boot warnings that name the marker}

@@ -3,3 +3,5 @@
 -r requirements.txt
 pytest==8.3.4
 pytest-asyncio==0.24.0
+# pypdf: tests read the text of generated proposal PDFs (BE-13: signatory, no placeholder text).
+pypdf==6.19.0

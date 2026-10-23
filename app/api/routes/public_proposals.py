@@ -65,11 +65,14 @@ def _summary(proposal) -> dict:
     ]
     valid_until, expired = _validity(proposal)
     state = "accepted" if proposal.accepted_at else ("expired" if expired else "acceptable")
+    from app.proposals import document_service
     return {
         "proposal_id": proposal.id,
         "version": proposal.version,
         "scope": scope,
         "price": proposal.total_value,
+        # BE-13: the figures the customer's PDF prints (null for an older proposal).
+        "document": document_service.summary_for_customer(proposal),
         "valid_until": valid_until,
         "state": state,
         "accepted_at": proposal.accepted_at.isoformat() if proposal.accepted_at else None,

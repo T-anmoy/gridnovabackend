@@ -36,3 +36,6 @@ uvicorn.log
 
 # Live LLM evaluation reports (scripts/eval_nova.py)
 eval_reports/
+
+# Real customer documents and local renders (never committed)
+_private/

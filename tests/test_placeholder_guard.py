@@ -1,10 +1,12 @@
 """Placeholder send-guard: a proposal whose stored sections still carry placeholder
-copy, or that has no real price, can be approved internally but never sent to a
-customer. adjust-pricing is how staff set a real price, and it clears that part."""
+copy, or that has no real price, is never sent to a customer — and since BE-13 a
+proposal whose structured document still misses required data cannot be approved
+either. adjust-pricing is how staff set a real price, and it clears that part."""
 import pytest
 
 from app.memory.models import PipelineStage, ProposalStatus
 from tests.conftest import admin_headers, engineer_headers
+from tests.proposal_document_support import complete_document
 
 DASH = "/api/v1/dashboard"
 
@@ -34,53 +36,50 @@ def _detail(client, pid):
 
 
 class TestWithTheRealPlaceholderConfig:
+    """BE-13: a drafted proposal carries a structured document. The generic sections the
+    document replaces are not composed into it; what is still missing is listed by the
+    document, and it blocks approval as well as sending (fix 6)."""
+
     def test_draft_is_flagged_on_detail_and_summary(self, client, memory, db_session):
         _, pid = _draft(client, memory, db_session)
         detail = _detail(client, pid)
         assert detail["has_placeholder_content"] is True
         assert detail["total_value"] is None
         stored = [s["id"] for s in detail["content"]["sections"] if "[PLACEHOLDER" in s["body"]]
-        assert detail["placeholder_sections"] == stored and stored
-        # The real rooftop tier matches at a 0 rate: the engine writes "Pricing pending"
-        # (no marker) and leaves the price unset — blocked on the price, not the copy.
-        assert "pricing" not in stored
+        assert detail["placeholder_sections"] == stored
+        assert not {"cover_letter_intro", "standard_terms", "closing", "residential_rooftop_scope"} & \
+            {s["id"] for s in detail["content"]["sections"]}
+        missing = {m["field"] for m in detail["document"]["missing_required"]}
+        assert {"price", "connection.phase"} <= missing
 
         row = next(r for r in client.get(f"{DASH}/proposals", headers=admin_headers()).json()["items"]
                    if r["id"] == pid)
         assert row["has_placeholder_content"] is True
         assert row["placeholder_sections"] == stored
 
-    def test_approval_still_works_but_send_is_blocked(self, client, memory, db_session):
+    def test_approval_and_send_are_blocked_while_data_is_missing(self, client, memory, db_session):
         lid, pid = _draft(client, memory, db_session)
-        assert client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers()).status_code == 200
-
-        r = client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers())
+        r = client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers())
         assert r.status_code == 409
         detail = r.json()["detail"]
-        assert detail["code"] == "placeholder_content"
-        assert detail["missing_total_value"] is True
-        assert detail["placeholder_sections"] == _detail(client, pid)["placeholder_sections"]
-        for section in detail["placeholder_sections"]:
-            assert section in detail["message"]
-        assert "no price set" in detail["message"]
+        assert detail["code"] == "missing_required"
+        assert "price" in {m["field"] for m in detail["missing"]}
+        assert "a price" in detail["message"]
 
         db_session.expire_all()
         proposal = memory.get_proposal(pid)
-        assert proposal.status == ProposalStatus.approved
-        assert proposal.accept_token is None and proposal.date_sent is None
+        assert proposal.status == ProposalStatus.draft
+        assert proposal.accept_token is None and proposal.date_sent is None and proposal.document_reference is None
         assert memory.get_lead(lid).pipeline_stage == PipelineStage.proposal_draft
 
-    def test_a_real_price_alone_does_not_unblock_placeholder_copy(self, client, memory, db_session):
+    def test_a_real_price_alone_does_not_unblock_missing_data(self, client, memory, db_session):
         _, pid = _draft(client, memory, db_session)
         client.patch(f"{DASH}/proposals/{pid}/adjust-pricing",
                      json={"new_value": 300_000, "reason": "surveyed"}, headers=admin_headers())
-        client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers())
-        r = client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers())
+        r = client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers())
         assert r.status_code == 409
-        detail = r.json()["detail"]
-        assert detail["missing_total_value"] is False
-        assert "pricing" not in detail["placeholder_sections"]
-        assert detail["placeholder_sections"]
+        missing = {m["field"] for m in r.json()["detail"]["missing"]}
+        assert "price" not in missing and "connection.phase" in missing
 
 
 @pytest.mark.usefixtures("sendable_proposal_content")
@@ -89,7 +88,10 @@ class TestWithRealContent:
         lid, pid = _draft(client, memory, db_session)
         detail = _detail(client, pid)
         assert detail["total_value"] == 300_000  # 6 kW × the fixture's 50,000/kW
-        assert detail["has_placeholder_content"] is False and detail["placeholder_sections"] == []
+        assert detail["placeholder_sections"] == []
+        complete_document(client, pid)
+        assert _detail(client, pid)["has_placeholder_content"] is False
+        assert _detail(client, pid)["total_value"] == 300_000      # the engine's price, kept exactly
         client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers())
         assert client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers()).status_code == 200
 
@@ -107,8 +109,11 @@ class TestWithRealContent:
         pricing = next(s for s in after["content"]["sections"] if s["id"] == "pricing")
         assert pricing["body"] == "Proposed project value: Rs 1,80,000.00."
         assert pricing["total_value"] == 180_000 and after["content"]["pricing"]["total_value"] == 180_000
-        assert after["has_placeholder_content"] is False
+        assert after["placeholder_sections"] == []
+        assert "price" not in {m["field"] for m in after["document"]["missing_required"]}
 
+        complete_document(client, pid)
+        assert _detail(client, pid)["has_placeholder_content"] is False
         client.post(f"{DASH}/proposals/{pid}/approve", headers=admin_headers())
         assert client.post(f"{DASH}/proposals/{pid}/send", headers=admin_headers()).status_code == 200
 

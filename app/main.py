@@ -23,6 +23,7 @@ from app.api.routes.associate_survey import router as associate_survey_router
 from app.api.routes.associates_admin import router as associates_admin_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.proposal_document import router as proposal_document_router
 from app.api.routes.equipment import router as equipment_router
 from app.api.routes.execution_admin import router as execution_admin_router
 from app.api.routes.execution_register_admin import router as execution_register_admin_router
@@ -64,6 +65,9 @@ async def lifespan(app: FastAPI):
     # than discovering it mid-request while drafting a proposal.
     from app.proposals.content_engine import load_content_config
     load_content_config(force_reload=True)
+    # And the two proposal layouts (config/proposal_document.yaml, BE-13).
+    from app.proposals.document_config import load as load_document_config
+    load_document_config()
     # Same for the associate onboarding config (checklist, thresholds, notice text).
     from app.onboarding.config import load as load_onboarding_config
     load_onboarding_config()
@@ -151,6 +155,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(dashboard_router)
+app.include_router(proposal_document_router)
 app.include_router(public_proposals_router)
 app.include_router(proposal_inputs_router)
 app.include_router(public_intake_router)

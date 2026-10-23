@@ -1094,8 +1094,11 @@ class MemoryManager:
         requires_manager_signoff: bool,
         reason: str,
         performed_by: str,
+        content: Optional[dict] = None,
     ) -> Proposal:
         """Set a proposal's total_value and the RECOMPUTED manager-signoff flag together.
+        `content`, when given, is the proposal content with its BE-13 document already
+        repriced (app/proposals/document_service.priced_content).
 
         The flag is passed in already recomputed by the caller (from the Business Rules
         Engine) — this method never leaves total_value and requires_manager_signoff out
@@ -1112,7 +1115,7 @@ class MemoryManager:
         # print "INR X" above a pricing section still saying "to be confirmed".
         from app.proposals.content_engine import list_price_variance, with_adjusted_price
         list_final, variance = list_price_variance(proposal.content, new_value)
-        proposal.content = with_adjusted_price(proposal.content, new_value)
+        proposal.content = with_adjusted_price(content if content is not None else proposal.content, new_value)
         self._db.flush()
         self._audit(
             "proposal", str(proposal_id), "pricing_adjusted", performed_by,

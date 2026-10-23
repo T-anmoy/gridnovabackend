@@ -1,6 +1,10 @@
 """
 PDF generation (WeasyPrint) and upload to Cloudflare R2 (S3-compatible).
 
+Proposals with a BE-13 structured document render through the two fixed layouts in
+app/proposals/document_render.py; the generic template here is kept only for proposals
+drafted before them.
+
 If the R2 upload fails, the approval transition still succeeds — the PDF
 is retried separately. Callers check `proposal.pdf_url` to detect "pending".
 """
@@ -197,7 +201,19 @@ def _build_html(proposal_data: dict, content_config: dict) -> str:
 
 
 def render_pdf(proposal_data: dict, content_config: dict) -> bytes:
-    """Render proposal HTML to PDF bytes using WeasyPrint."""
+    """Render a proposal to PDF bytes using WeasyPrint. A proposal with a BE-13 structured
+    document renders through its layout (app/proposals/document_render.py: Compact up to
+    10 kWp, Detailed above) — the customer document, with its reference and date. A
+    proposal drafted before BE-13 has no document and keeps the generic template below,
+    so an already-approved proposal is never re-rendered with content nobody approved."""
+    if isinstance(proposal_data.get("document"), dict):
+        from app.proposals import document, document_render
+        from app.proposals.reference import today_ist
+
+        return document_render.render(
+            document.parse(proposal_data["document"]), reference=proposal_data.get("document_reference"),
+            doc_date=proposal_data.get("document_date") or today_ist(),
+            draft=not proposal_data.get("document_reference"))
     from app.pdf.fetcher import render_pdf as render_with_safe_fetcher
 
     return render_with_safe_fetcher(_build_html(proposal_data, content_config))

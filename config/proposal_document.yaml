@@ -1,0 +1,440 @@
+# Grid Nova Energy — the proposal document: two fixed layouts (BE-13).
+#
+# Read by app/proposals/document_config.py and validated at startup (a malformed file
+# stops the boot). The header, footer, watermark, letterhead, signatory, colours and every
+# fixed sentence below are the same on every proposal; only the data changes.
+#
+# Source: Grid Nova's two sample proposals of Oct 2026 (an up-to-10 kW PM Surya Ghar
+# residential proposal and a 52 kWp commercial proposal). Every fixed sentence is copied
+# from them verbatim — apart from the fixes BE-13 applies (Raju Paul as the only
+# signatory, Aadhaar last four digits only, a unique reference, panel life from the price
+# list, destination from the site's state). Where the samples have nothing, there is no
+# sentence: the row is left out rather than written here.
+#
+# Placeholders (filled by app/proposals/document.py from the proposal's structured
+# document and its computed figures — never typed):
+#   {capacity_kwp}          plant capacity, e.g. 3 or 52 (decimals only when not whole)
+#   {customer_short_name}   the customer's name without a title ("Raj Metal Industries")
+#   {site_town}             the town in the letter ("Habra", "Amta, Howrah")
+#   {site_state}            the site's state ("West Bengal") — Destination
+#   {discom}                the DISCOM ("WBSEDCL")
+#   {sub_division}          the DISCOM sub-division ("Habra / Ashoknagar CCC")
+#   {phase_hyphen}          "single-phase" / "three-phase"
+#   {phase_words}           "single phase" / "three phase"
+#   {phase_title}           "Single Phase" / "Three Phase"
+#   {phase_cap}             "Single-phase" / "Three-phase"
+#   {phase_supply}          "Single-Phase" / "Three-Phase"
+#   {package_name}          the price-list package ("Nova Assured")
+#   {module_technology}     "Mono PERC" / "TOPCon" (price list technology options)
+#   {module_phrase}         the module wording for the letter (see module_phrases)
+#   {module_short}          the module wording for tables (see module_phrases)
+#   {dcr_label}             "DCR" / "Non-DCR"
+#   {approved_capacity_kwp} capacity approved on the PM Surya Ghar portal
+#   {subsidy_up_to}         computed PM Surya Ghar subsidy (app/pricing/subsidy.py)
+#   {standard_warranty_years} from price_list.yaml commercial_terms.standard_warranty
+#   {validity_days}         sales_policy.yaml proposal_validity_days
+#   {space_required_sqft}   computed shadow-free roof area (space_required below)
+#   {list_kw}               the price-list size in kW (whole number)
+
+schema_version: 1
+
+# Exact colours measured from the sample PDFs' content streams.
+colours:
+  navy: "#1B2F5E"            # headings, table headers, total bars, labels
+  orange: "#E8A21A"          # section numbers, rules, caps labels, card borders
+  text: "#222831"            # body text
+  muted: "#5F6B7A"           # kicker, sub-lines, small print
+  fill: "#F3F5F8"            # cards, strips
+  label_fill: "#EEF1F6"      # label column of key/value tables
+  zebra: "#FAFBFC"           # alternate table rows
+  border: "#D9DEE6"          # table borders
+  note_fill: "#FFF7E8"       # the BOQ quality note box
+
+# Brand images extracted from the samples (app/pdf/assets/) — embedded as data: URIs.
+# Placement in points on an A4 page (595.3 × 841.9), measured from the samples.
+brand:
+  header_image: header.jpg              # top band, every page: 595.3 × 93.7 at the top
+  watermark_image: watermark.jpg        # faint logo behind the text, every page
+  letterhead_image: footer-letterhead.jpg   # contact + offices band, last page only
+  qr_url: https://www.gridnova.in       # the QR code on the last page (generated, segno)
+  company_line: GRID NOVA ENERGY        # page-footer line, left part
+
+# The authorised signatory — the same on every proposal, both layouts. Not editable
+# through the dashboard (owner's instruction, 24 Oct 2026).
+signatory:
+  name: RAJU PAUL
+  title: Authorised Signatory
+  for_line: For Grid Nova Energy
+
+# capacity ≤ compact_max_kwp → Compact (3 pages); above → Detailed (8 pages). Automatic.
+layout_rule:
+  compact_max_kwp: 10
+
+# Design basis for estimated generation — both samples: "~120 units / kWp / month".
+generation:
+  units_per_kwp_per_month: 120
+
+# Shadow-free roof area the plant needs, per kWp. The samples imply about 83–100 sq ft
+# per kWp (3 kWp → 250 – 300; 52 kWp → 4,300). Compact prints the range rounded to 10 sq
+# ft; Detailed prints the low figure rounded to 100. See SRV-4 (survey area per kW).
+space_required:
+  sqft_per_kwp_low: 83                  # [UNCONFIRMED]
+  sqft_per_kwp_high: 100                # [UNCONFIRMED]
+
+# Salutations staff may choose; the default is the developer's working choice (the
+# samples say "Dear Sir," — a customer's gender is never guessed from a name).
+salutations: ["Dear Sir,", "Dear Madam,", "Dear Sir / Madam,"]
+default_salutation: "Dear Sir / Madam,"   # [UNCONFIRMED]
+titles: ["Mr.", "Ms.", "Mrs.", "Dr.", "M/s"]
+
+# Who may change which part of the document through the dashboard (server-enforced).
+# Header, footer, watermark, letterhead, signatory, the company letter paragraphs, the
+# quality policy, legal / subsidy notes, the GST rule and every computed figure are not
+# sections here: they change only in this file. The price changes only through
+# adjust-pricing (Admin, Sales — the existing rule).
+edit_permissions:
+  addressee: [admin, sales]
+  connection: [admin, sales]
+  site: [admin, sales]
+  pm_surya_ghar: [admin, sales]
+  plant: [admin, sales]                 # capacity, package, DCR — they move the price and the subsidy
+  system: [admin, sales, engineer]      # module technology, inverter and mounting wording
+  boq: [admin, sales, engineer]
+  customer_scope: [admin, sales]
+  payment_terms: [admin, sales]
+  notes: [admin, sales]
+
+# Make / brand names a BOQ row may name besides the equipment catalogue and the price
+# list's makes (words the samples use in the make column).
+boq_make_words: ["Equivalent", "Branded", "Liaison with DISCOM"]
+
+# Module wording, from the samples.
+module_phrases:
+  dcr:
+    letter: "{module_technology} DCR (Domestic Content Requirement)"
+    short: "{module_technology} DCR"
+    table: "{module_technology}  |  DCR (Domestic Content Requirement)"
+    pair: "{module_technology}  |  DCR"
+  non_dcr:
+    letter: "Non-DCR {module_technology}"
+    short: "Non-DCR {module_technology}"
+    table: "{module_technology}  |  Non-DCR"
+    pair: "{module_technology}  |  Non-DCR"
+
+common:
+  kicker: "TECHNICAL & COMMERCIAL PROPOSAL"
+  title: "{capacity_kwp} KWP GRID-TIED ROOFTOP SOLAR POWER PLANT"
+  footer_title: "{capacity_kwp} kWp Grid-Tied Rooftop Solar Proposal"
+  strip_labels: {date: DATE, reference: REFERENCE, project: PROJECT, customer: CUSTOMER}
+  project_label: "{capacity_kwp} KWP ROOFTOP"
+  project_label_dcr: "{capacity_kwp} KWP DCR ROOFTOP"
+  subject: "Proposal for Supply, Installation & Commissioning of a {capacity_kwp} kWp Grid-Tied Rooftop Solar Power Plant."
+  location_residence: "at your residence in {site_town}"
+  location_site: "at your project site in {site_town}"
+  site_card_label: PROJECT SITE
+  site_card_title: Rooftop Solar Plant Site
+  connection_card_label: ELECTRICITY CONNECTION
+  to_label: TO
+  attention_label: "Kind Attn:"
+  amount_label: "Rs."
+  in_words: "In words:"
+  words_suffix: "."
+  highlights_label: KEY HIGHLIGHTS
+  gst_line: "GST @ 8.9%"
+  gst_line_detail: "GST @ 8.9%  (5% on 70% + 18% on 30% of basic price)"
+  total_line: "TOTAL AMOUNT (INCL. GST)"
+  generation_note: "Actual generation depends on solar irradiation, weather, shading, orientation, tilt and module cleanliness at site."
+  space_compact: "Approx. {space_low} – {space_high} sq. ft. of shadow-free roof area (to be confirmed during site survey)"
+  space_detailed: "Approx. {space_required_sqft} sq. ft. of shadow-free roof area (to be confirmed during site survey)"
+  grid_integration_with_subdivision: "Net metering through {discom}, {sub_division}"
+  grid_integration_with_discom: "Net metering through {discom}"
+  grid_integration_local: "Net metering through the local DISCOM"
+  mounting: "Rooftop module mounting structure, designed for the roof type"
+  closing_working_with: "We look forward to the opportunity of working with {customer_short_name} on this initiative towards clean and sustainable energy."
+
+# ── Up to 10 kWp ─────────────────────────────────────────────────────────────────
+compact:
+  pm_surya_ghar_eligible: "PM SURYA GHAR SUBSIDY ELIGIBLE*"
+  package_part: "{package_name} PACKAGE"
+  modules_part: "{module_short} MODULES"
+  letter:
+    - "Thank you for choosing rooftop solar. Grid Nova Energy is a professionally managed solar company engaged in the design, engineering, procurement, installation and maintenance of solar power systems across India, following MNRE guidelines and applicable state policies."
+    - "We are pleased to submit our proposal for a {capacity_kwp} kWp grid-tied, {phase_hyphen} rooftop solar power plant {location}{package_clause}, using {module_phrase} solar modules."
+  package_clause: " under our {package_name} package"
+  letter_pm_surya_ghar: "Your application on the PM Surya Ghar portal is registered with an approved capacity of {approved_capacity_kwp} kWp (With DCR), making the plant eligible for central financial assistance of up to Rs. {subsidy_up_to}, as per DISCOM policy, subject to customer eligibility and availability."
+  letter_warranty: "The plant is backed by a {standard_warranty_years}-year standard warranty from handover and free operation & maintenance for the first year."
+  letter_closing_residence: "We look forward to powering your home with clean and sustainable solar energy."
+  status_label: PM SURYA GHAR APPLICATION STATUS
+  status_cells:
+    - {value: Registered, label: PORTAL APPLICATION}
+    - {value: "{approved_capacity_kwp} kWp", label: APPROVED CAPACITY}
+    - {value: With DCR, label: DCR CATEGORY}
+    - {value: Opted, label: SUBSIDY}
+  highlights_pm_surya_ghar:
+    - {value: "{capacity_kwp} kWp", label: "{dcr_plant_label}"}
+    - {value: "{total}", label: TOTAL INCL. GST}
+    - {value: "{subsidy}", label: SUBSIDY* (UP TO)}
+    - {value: "{effective_cost}", label: EFFECTIVE COST*}
+  dcr_plant_label: DCR SOLAR PLANT
+  highlights_footnote: "*Subsidy under PM Surya Ghar: Muft Bijli Yojana, as per DISCOM policy, subject to customer eligibility and availability. It is credited by the Government directly to the customer’s bank account; effective cost is indicative."
+  s1_title: SYSTEM DESIGN & TECHNICAL CONFIGURATION
+  s1_sub: Proposed system, estimated generation and site requirements.
+  system_rows:
+    system_type: "Grid-tied (on-grid) rooftop solar PV with net metering, {phase_words}"
+    capacity_pm_surya_ghar: "{capacity_kwp} kWp – as approved on the PM Surya Ghar portal"
+    capacity: "{capacity_kwp} kWp"
+  system_labels: {system_type: System Type, capacity: Plant Capacity, modules: Solar Modules, inverter: Inverter, mounting: Mounting Structure, grid: Grid Integration, space: Space Required}
+  inverter_default: "{capacity_kwp} kW {phase_hyphen} grid-tied inverter"
+  generation_label: Estimated Energy Generation
+  generation_cards:
+    - {value: "~{per_kwp} units", label: PER kWp PER MONTH (DESIGN BASIS)}
+    - {value: "~{monthly} units", label: PER MONTH}
+    - {value: "~{annual} units", label: PER YEAR}
+  s2_title: BILL OF QUANTITY
+  s2_sub_package: "Scope of supply and services for the {capacity_kwp} kWp {package_name} system."
+  s2_sub: Scope of supply and services included in the quoted price.
+  s3_title: CUSTOMER SCOPE
+  s3_sub_pm_surya_ghar: Customer-side provisions for smooth installation, net metering and subsidy release.
+  s3_sub: Client-side provisions required for smooth installation and commissioning.
+  s4_title_pm_surya_ghar: COMMERCIAL OFFER & SUBSIDY
+  s4_title: COMMERCIAL PROPOSAL
+  s4_sub_price_list: "Pricing as per the Grid Nova price master ({list_kw} kW, {phase_title}, {package_name})."
+  s4_sub: Pricing, GST, payment terms and warranty.
+  price_description: "Supply, installation, testing & commissioning of a {capacity_kwp} kWp {phase_hyphen} grid-tied rooftop solar plant with {module_short} modules{package_suffix}"
+  package_suffix: " – {package_name}"
+  payment_label: Payment Terms
+  subsidy_label: PM Surya Ghar Subsidy & Effective Cost (Indicative)
+  subsidy_total_line: Total project cost (incl. GST)
+  subsidy_first_slab: "Less: Subsidy for first {kw} kW @ Rs. {rate} per kW"
+  subsidy_third_slab: "Less: Subsidy for 3rd kW @ Rs. {rate} per kW"
+  subsidy_effective: EFFECTIVE COST AFTER SUBSIDY
+  subsidy_note: "Subsidy under PM Surya Ghar: Muft Bijli Yojana, as per DISCOM policy, subject to customer eligibility and availability. The customer pays the full amount as per the payment terms; the subsidy is credited by the Government directly to the customer’s bank account after installation, net metering and DISCOM inspection."
+  warranty_label: Warranty & Terms
+  # Values come from price_list.yaml commercial_terms (warranty, O&M, panel life span),
+  # the GST rule, the site's state and the samples' price clause.
+  warranty_rows:
+    - [{label: Standard Warranty, value: "{standard_warranty}"}, {label: O&M, value: "{o_and_m}"}]
+    - [{label: Panel Life Span, value: "{panel_life_span}"}, {label: Destination, value: "Within {site_state}"}]
+    - [{label: GST, value: Effective 8.9%}, {label: Price, value: Subject to change with market conditions}]
+  notes_label: Notes
+  # Default customer-scope bullets. `when`: pm_surya_ghar = only when the PM Surya Ghar
+  # subsidy applies. Tokens in braces are filled when the PDF is rendered.
+  customer_scope:
+    - text: "Provide shadow-free roof area, safe roof access and covered wall space for the inverter near the main electrical board."
+    - text: "Provide a safe place to store materials on delivery, and water and electricity during installation."
+    - text: "Submit subsidy bank details on the PM Surya Ghar portal and provide the electricity bill, Aadhaar card and bank details."
+      when: pm_surya_ghar
+    - text: "Net-meter and DISCOM application charges, if applicable, as per {discom} norms."
+    - text: "Any structural modification or civil work, if required, shall be in the customer’s scope."
+  # Default BOQ rows. makes_from: the chosen package's price-list makes (+ "Equivalent") —
+  # for Nova Assured exactly what the sample prints. Cable makes are the sample's own list,
+  # which omits Havells and "Equivalent" from the price list's approved cable makes (PRO-16).
+  # `when`: up_to_5kw (the price list's common electrical specification applies only up to
+  # 5 kW), above_5kw, pm_surya_ghar, not_pm_surya_ghar.
+  boq:
+    - {description: "Solar PV Modules – {module_technology}, {dcr_label}", quantity: "{capacity_kwp} kWp", makes_from: solar_panel, kind: module}
+    - {description: "{phase_cap} grid-tied inverter – {capacity_kwp} kW", quantity: 1 No., makes_from: inverter, kind: inverter}
+    - {description: Module mounting structure, quantity: 1 Set, make: "–"}
+    - {description: DC & AC cable – 4 sq. mm copper, quantity: As per site, make: "Polycab / Mescab / Finolex / KEI / RR Kabel", kind: cable, when: up_to_5kw}
+    - {description: Earthing cable – 6 sq. mm copper, quantity: As per site, make: "Polycab / Mescab / Finolex / KEI / RR Kabel", when: up_to_5kw}
+    - {description: Conduit pipe (water SDP) & flex pipe (inside), quantity: As per site, make: Supreme / Branded, when: up_to_5kw}
+    - {description: DC solar cables (UV-resistant), quantity: As per site conditions, make: "Polycab / Mescab / Finolex / KEI / RR Kabel", kind: cable, when: above_5kw}
+    - {description: AC cables, quantity: As per site conditions, make: "Polycab / Mescab / Finolex / KEI / RR Kabel", when: above_5kw}
+    - {description: Earthing system, quantity: As per design, make: "–", when: above_5kw}
+    - {description: "Accessories (MC4 connectors, lugs, conduits, cable ties, fasteners)", quantity: Lumpsum, make: "–", when: above_5kw}
+    - {description: "Installation, testing & commissioning", quantity: Lumpsum, make: "–"}
+    - {description: PM Surya Ghar portal & net-metering support, quantity: Lumpsum, make: "–", when: pm_surya_ghar}
+    - {description: Net-metering support & documentation, quantity: Lumpsum, make: Liaison with DISCOM, when: not_pm_surya_ghar}
+  # Compact payment terms are Grid Nova's price-list schedule (price_list.yaml
+  # commercial_terms.payment_schedule): 20 / 60 / 20.
+  highlights:
+    - {value: "{capacity_kwp} kWp", label: PLANT CAPACITY}
+    - {value: "~{annual} units", label: EST. ANNUAL GENERATION}
+    - {value: "{total}", label: TOTAL INCL. GST}
+    - {value: "{validity_days} Days", label: OFFER VALIDITY}
+
+# ── Above 10 kWp ─────────────────────────────────────────────────────────────────
+detailed:
+  letter:
+    - "We take this opportunity to introduce Grid Nova Energy, a professionally managed solar energy company engaged in the design, engineering, procurement, installation and maintenance of solar power systems across India. The company is committed to supporting India’s renewable energy transition by delivering reliable, cost-effective and sustainable solar solutions."
+    - "Grid Nova Energy has experience in executing rooftop and ground-mounted solar projects for residential, commercial, institutional and industrial consumers, with a strong focus on quality, safety and regulatory compliance. Our technical team follows MNRE guidelines and applicable state policies to ensure efficient system performance and long-term value."
+    - "Based on our discussions, we are pleased to submit our techno-commercial proposal for a {capacity_kwp} kWp grid-tied, {phase_hyphen} rooftop solar power plant {location}. The plant is designed with {module_phrase} solar modules and string inverters from reputed manufacturers, to deliver dependable generation and lasting savings on your electricity costs."
+    - "Thank you for your time and consideration. {closing_working_with}"
+  highlights:
+    - {value: "{capacity_kwp} kWp", label: PLANT CAPACITY}
+    - {value: "~{annual} units", label: EST. ANNUAL GENERATION}
+    - {value: "{total}", label: TOTAL INCL. GST}
+    - {value: "{validity_days} Days", label: OFFER VALIDITY}
+  glance_title: PROPOSAL AT A GLANCE
+  glance_sub: A one-page summary of the proposed plant and the commercial offer.
+  glance_labels: {customer: Customer, site: Project Site, plant: Proposed Plant, category: Category & Supply, modules: Solar Modules, inverter: Inverter, generation: Estimated Generation, basic: Base Project Price, gst: GST @ 8.9%, total: Total Amount incl. GST, payment: Payment Terms, validity: Offer Validity}
+  glance_plant: "{capacity_kwp} kWp Grid-Tied Rooftop Solar Power Plant"
+  glance_generation: "~{monthly} units per month; ~{annual} units per annum (approx.)"
+  glance_validity: "{validity_days} days from the date of this proposal"
+  inverter_short: "{phase_cap} grid-tied string inverter"
+  s1_title: PROJECT OVERVIEW
+  s1_sub: Customer, site, proposed system and infrastructure requirements.
+  customer_site_label: Customer & Site Details
+  customer_site_labels: {customer: Customer, attention: Attention, office: Office Address, site: Project Site, mount: Mount Type}
+  mount_type: Rooftop
+  proposed_system_label: Proposed System
+  proposed_system:
+    - {label: System Type, value: "Grid-Tied (On-Grid) Rooftop Solar PV with Net Metering"}
+    - {label: Plant Capacity, value: "{capacity_kwp} kWp"}
+    - {label: Consumer Category, value: "{category}"}
+    - {label: Electrical Supply, value: "{phase_supply}"}
+    - {label: Module Technology, value: "{module_pair}"}
+    - {label: Inverter Type, value: "{inverter}"}
+  inverter_default: "{phase_cap} grid-tied string inverter with remote monitoring"
+  summary_label: Executive Summary
+  summary: "Grid Nova Energy proposes a {capacity_kwp} kWp grid-connected rooftop solar PV power plant for {customer_short_name} at its {site_town} site. The plant is designed to significantly reduce electricity costs, stabilise long-term energy expenses and lower the carbon footprint of the premises. With net metering, surplus solar energy is exported to the grid and adjusted against the energy drawn from the grid."
+  resource_label: Solar Resource Assessment & Estimated Generation
+  resource_rows:
+    - {label: Average solar generation potential, value: "3.8 – 4.0 units / kWp / day"}
+    - {label: Design basis, value: "~{per_kwp} units / kWp / month (conservative)"}
+    - {label: Plant capacity, value: "{capacity_kwp} kWp"}
+    - {label: Estimated monthly generation, value: "~{monthly} units"}
+    - {label: Estimated annual generation, value: "~{annual} units"}
+  resource_note: "Note: Actual generation depends on solar irradiation, weather, shading, orientation, tilt and module cleanliness at site."
+  infrastructure_label: Infrastructure Requirements
+  infrastructure_rows:
+    - {label: Space Requirement, value: "{space}"}
+    - {label: Load Bearing Capacity, value: Roof suitable for solar plant installation}
+    - {label: Roof Access, value: Safe and permanent access to the roof – client scope}
+    - {label: Internet Connection, value: For remote monitoring (GSM / LAN) – client scope}
+    - {label: LT Panel / Spare Feeder, value: Required for grid interconnection}
+    - {label: Installation & Commissioning, value: Water and electricity during installation – client scope}
+  advantages_label: Key Advantages of Installing a Solar Power Plant
+  advantages:
+    - Significant reduction in monthly electricity expenses.
+    - Hedge against future electricity tariff increases.
+    - Zero fuel cost for 25+ years, with low maintenance and high reliability.
+    - Improved ESG and sustainability profile for the business.
+  stages_label: Project Execution Stages
+  stages_headers: [S. No., Stage, Key Activities]
+  stages:
+    - [Site Survey & Detailed Engineering, "Roof survey, shadow analysis, layout and electrical design finalisation"]
+    - [Procurement & Delivery, "Supply of solar modules, inverters, mounting structure and balance of system to site"]
+    - [Installation, "Structure erection, module mounting, DC / AC cabling, earthing and lightning protection"]
+    - [Testing & Commissioning, "Pre-commissioning checks, inverter start-up and performance verification"]
+    - [Net Metering & Handover, "DISCOM liaison for net metering, documentation and handover to the client team"]
+  s2_title: TECHNICAL CONFIGURATION
+  s2_sub: Core system configuration, preferred makes and component details.
+  config_label: System Configuration
+  config_rows:
+    - {label: System Type, value: "Grid-connected rooftop solar PV system, {phase_hyphen}"}
+    - {label: Solar Modules, value: "{module_technology}, {dcr_label} (module wattage as per detailed design)"}
+    - {label: Inverter, value: "{phase_cap} grid-tied string inverter(s), rated to match the {capacity_kwp} kWp array"}
+    - {label: Mounting Structure, value: "{mounting}"}
+    - {label: Protection, value: DCDB and ACDB with Surge Protection Devices (SPD)}
+    - {label: Grid Integration, value: "{grid_integration}"}
+    - {label: Performance Monitoring, value: Web and mobile based remote monitoring}
+  makes_label: Preferred Makes
+  makes_rows:
+    - {label: "Solar Panels ({dcr_label}, {module_technology})", kind: module}
+    - {label: String Inverter, kind: inverter}
+    - {label: Wires & Cables, kind: cable}
+  component_text:
+    - label: Solar PV Modules
+      bullets:
+        - "High-efficiency {module_technology} half-cut solar cells."
+        - High-transparency, low-iron tempered glass for better light transmission, stiffness and impact resistance.
+        - Integrated bypass diodes to protect the cell circuit from hot spots during partial shading.
+        - Strong low-light performance; certified to IEC 61215 and IEC 61730.
+    - label: String Inverter
+      text: "{phase_cap} grid-tied string inverters with multiple MPPT inputs convert the DC power from the solar array into grid-synchronised AC power with precise voltage and stable frequency. The inverters include protection against overload, short circuit and islanding, and support remote monitoring of plant generation through web and mobile platforms."
+    - label: Module Mounting Structure
+      text: Correct mounting maximises power production and protects the investment from wind loads. The mounting structure provides stability and the proper orientation and tilt for the solar array, and will be finalised during detailed engineering based on the roof type and site conditions.
+    - label: Cables
+      text: All cables are selected to minimise losses and to perform reliably at high temperatures. Solar-grade DC cables are UV-resistant and weatherproof for outdoor runs; AC cables are sized for the inverter output and the interconnection point. Final cable sizes and routing will be confirmed during detailed engineering.
+    - label: Earthing & Lightning Protection
+      text: The module mounting structure and all metallic parts of the plant will be properly earthed using an adequate number of earthing kits, to ensure the safety of the power plant. The system is protected by surge protection devices in the DCDB and ACDB, along with a lightning arrester.
+  s3_title: BILL OF QUANTITY
+  s3_sub: Scope of supply and services included in the quoted price.
+  quality_note_label: "Quality & Standards:"
+  quality_note: All major equipment is sourced from the preferred makes listed in this proposal and conforms to the applicable IEC / IS standards. Final quantities, ratings and cable sizes will be confirmed during detailed engineering.
+  # Default BOQ rows, verbatim from the 52 kWp sample (makes as that proposal names them).
+  boq:
+    - {description: "Solar PV Modules – {module_technology}, {dcr_label}", quantity: "{capacity_kwp} kWp", standard: IEC 61215 / IEC 61730, make: HR Solar / Sova Solar / Novasys / Equivalent, kind: module}
+    - {description: "{phase_cap} grid-tied string inverter with remote monitoring", quantity: As per design, standard: IEC 61683 / IEC 62109, make: Power One / Deye / Microtek / V-Sole / Equivalent, kind: inverter}
+    - {description: Module mounting structure, quantity: 1 Set, standard: As per design, make: "–"}
+    - {description: DC Distribution Box (DCDB) with SPD, quantity: As per design, standard: IEC 60947, make: "–"}
+    - {description: AC Distribution Box (ACDB) with SPD, quantity: As per design, standard: IEC 60947, make: "–"}
+    - {description: DC solar cables (UV-resistant), quantity: As per site conditions, standard: EN 50618, make: Havells / Finolex / RR Cables / Mescab / Equivalent, kind: cable}
+    - {description: AC cables, quantity: As per site conditions, standard: IS 694 / IS 7098, make: Havells / Finolex / RR Cables / Mescab / Equivalent}
+    - {description: Earthing system, quantity: As per design, standard: IEC 62561, make: "–"}
+    - {description: Lightning arrester, quantity: 1 Set, standard: IEC 62305, make: "–"}
+    - {description: "Accessories (MC4 connectors, lugs, conduits, cable ties, fasteners)", quantity: Lumpsum, standard: "–", make: "–"}
+    - {description: "Installation, testing & commissioning", quantity: Lumpsum, standard: "–", make: "–"}
+    - {description: Net-metering support & documentation, quantity: Lumpsum, standard: "–", make: Liaison with DISCOM}
+  s4_title: COMMERCIAL PROPOSAL
+  s4_sub: Pricing, GST, payment terms and warranty.
+  pricing_label: Pricing
+  price_description: "Supply, installation, testing & commissioning of a {capacity_kwp} kWp grid-tied rooftop solar power plant ({module_short} modules, string inverter, BOS as per BOQ)"
+  words_labels: {basic: "Base Price:", gst: "GST @ 8.9%:", total: "Total Amount:"}
+  payment_label: Payment Terms
+  payment_headers: [S. No., Milestone, Payment, Amount (Rs.)]
+  payment_note: Milestone amounts are calculated on the total amount including GST.
+  payment_terms:
+    - {percent: "25", label: Advance along with the order, short_label: advance with order}
+    - {percent: "60", label: Against delivery of active materials (solar modules & inverter), short_label: against delivery of active materials}
+    - {percent: "15", label: On execution (completion of installation), short_label: on execution}
+  warranty_label: Warranty
+  # From one sample, not from a Grid Nova decision: see PRO-15.
+  warranty_rows:                        # [UNCONFIRMED]
+    - {label: Overall Power Plant, value: 12 months breakdown warranty from the date of commissioning}
+    - {label: Solar Panels, value: "27 years linear performance warranty (90% of rated output for the first 10 years and 85% for the balance period), as per manufacturer"}
+    - {label: Inverter, value: "8 years from the date of commissioning, as per manufacturer"}
+    - {label: Mounting Structure, value: 10 years from the date of commissioning}
+  notes_label: Commercial Notes
+  commercial_notes:
+    - The price covers the scope of supply and services listed in the Bill of Quantity.
+    - GST is applicable at 8.9%, as shown above.
+    - Any work beyond the stated scope will be quoted and billed separately.
+    - "This offer is valid for {validity_days} days from the date of this proposal."
+  s5_title: CUSTOMER SCOPE OF WORK
+  s5_sub: Client-side provisions required for smooth installation and commissioning.
+  customer_scope:
+    - text: "Provide approx. {space_required_sqft} sq. ft. of shadow-free roof area, clear of obstructions such as trees, water tanks, equipment or dummy pillars."
+    - text: Provide suitable space for installation of the inverters and electrical panels.
+    - text: Provide a safe and secure storage area for project materials on receipt at site. After delivery, the customer shall be responsible for the safety and security of the material until it is taken over by Grid Nova Energy’s team for installation.
+    - text: Provide safe and permanent access to the roof for installation and future maintenance.
+    - text: Provide a spare feeder / connection point in the existing LT panel or ACDB for interconnection of the solar system.
+    - text: Provide internet connectivity to the inverter for remote monitoring of energy generation.
+    - text: Provide power and water required during installation and commissioning.
+    - text: Provide all applications and documents required for net metering and statutory approvals.
+    - text: "Transformer or contracted-load enhancement, if required as per net-metering regulations, shall be at the customer’s cost."
+    - text: "Any structural modification or civil work, if required, shall be in the customer’s scope."
+    - text: Statutory inspection (CEIG / DISCOM) fees, if applicable, shall be paid by the customer at actuals.
+  scope_sections:
+    - label: Storage Area & Inverter Location
+      text: The customer is required to provide safe storage space for the material on receipt at site. Inverters are generally IP65 rated and can be installed outdoors; the inverter location will be decided after detailed engineering and site study, preferably on the terrace with adequate space, access and ventilation.
+    - label: Electrical Works
+      text: Cabling between the solar panels, DCDB and inverters will be mostly outdoor and done using UV-resistant solar-grade cables. AC cabling from the inverter to the ACDB and the interconnection point will be done with suitable copper / aluminium cables, routed through existing cable trays or conduits or securely anchored to walls. The exact cable routing will be finalised during detailed engineering.
+    - label: Validity
+      text: "This offer is valid for {validity_days} days from the date on the title page of this document."
+  s6_title: GRID NOVA ENERGY – COMPANY & CLOSING
+  s6_sub: Our commitment to quality and long-term value.
+  why_label: Why Grid Nova Energy?
+  why:
+    - Proven expertise in C&I and residential solar projects.
+    - Strong understanding of DISCOM compliance and net-metering processes.
+    - End-to-end project execution – design to commissioning.
+    - Performance-driven system design.
+    - Dedicated after-sales and O&M support.
+  quality_label: Quality Policy
+  quality_policy: We are committed to consistently meeting our customers’ aspirations and delivering products and services of the highest possible standards, to satisfy our customers’ needs, quality expectations and reliability. Our team works continuously to assure quality through the right choice of design, use of the right technologies, the highest quality components, qualified vendors, adherence to established processes and extensive testing.
+  value_label: Value Offering
+  value_offering: We provide a complete team that delivers the project from the planning stage through commissioning, with a focus on quality and discipline, followed by trained personnel for operations and maintenance.
+  closure_label: PROJECT CLOSURE
+  closure: "Thank you for considering Grid Nova Energy for the {capacity_kwp} kWp grid-tied rooftop solar power plant for {customer_short_name}."
+  notes_label_extra: Notes
+
+# Segments the samples do not cover keep the existing "manual review required" flag:
+# their proposals render in the Detailed layout but cannot be approved or sent while the
+# segment's scope text in config/proposal_content.yaml is still a placeholder.
+uncovered_segments:
+  government: [sections_library.government_scope, sections_library.government_compliance_note]
+  utility: [sections_library.utility_scale_scope]
+  agricultural: [sections_library.pm_kusum_note]
+  fallback: [sections_library.fallback_generic_scope]

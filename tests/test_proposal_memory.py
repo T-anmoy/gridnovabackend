@@ -12,6 +12,7 @@ from app.memory.memory_manager import MemoryManager
 from app.memory.models import MemoryKind, MemorySource, PipelineStage
 from app.proposals import drafting_notes
 from tests.conftest import admin_headers, sales_headers
+from tests.proposal_document_support import complete_document
 
 # These tests write employee ids directly (no request provisions them first).
 pytestmark = pytest.mark.usefixtures("known_employees")
@@ -167,6 +168,8 @@ class TestOutcomesThroughTheApi:
             json={"new_value": 250_000.0, "reason": "site survey pricing"},
             headers=sales_headers("emp-sales-1"),
         ).status_code == 200
+        # BE-13: and fill what the customer document still needs before approval.
+        complete_document(client, proposal_id)
 
     def _outcomes(self, _isolated_db, customer_id):
         session = _isolated_db()

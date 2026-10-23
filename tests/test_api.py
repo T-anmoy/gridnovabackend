@@ -4,6 +4,7 @@ Uses FastAPI TestClient with the in-memory DB override from conftest.
 """
 import pytest
 from tests.conftest import admin_headers, sales_headers, management_headers
+from tests.proposal_document_support import complete_document
 
 
 def _seed_qualified_lead(client, memory, db_session):
@@ -125,6 +126,8 @@ class TestProposalFlow:
                          json={"new_value": 250_000.0, "reason": "site survey pricing"},
                          headers=sales_headers())
         assert r.status_code == 200
+        # BE-13: the customer document needs what the chat never collected (phase, DISCOM…).
+        complete_document(client, proposal_id)
 
         # Standard approval (Sales can do this)
         r = client.post(f"/api/v1/dashboard/proposals/{proposal_id}/approve", headers=sales_headers())

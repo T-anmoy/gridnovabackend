@@ -370,8 +370,14 @@ def placeholder_sections(content: Optional[dict]) -> list[str]:
 
 def has_placeholder_content(content: Optional[dict], total_value: Optional[float]) -> bool:
     """True while a proposal is not fit to send to a customer: some section is still
-    placeholder copy, or it has no real price."""
-    return bool(placeholder_sections(content)) or not total_value
+    placeholder copy, it has no real price, or (a BE-13 document) required data is
+    missing."""
+    if bool(placeholder_sections(content)) or not total_value:
+        return True
+    if isinstance((content or {}).get("document"), dict):
+        from app.proposals import document
+        return bool(document.missing_required(document.stored(content)))
+    return False
 
 
 def price_list_version() -> int:

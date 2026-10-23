@@ -32,7 +32,8 @@ INPUT_REVIEWERS = {"admin", "engineer", "sales"}
 NOT_ENGINEER = ALL - {"engineer"}                      # engineers never see pricing or analytics
 PRICE_READERS = {"admin", "management", "sales"}       # lead readers minus engineers
 
-COVERED_ROUTERS = ("dashboard", "proposal_inputs", "equipment", "agent_governance")
+COVERED_ROUTERS = ("dashboard", "proposal_inputs", "equipment", "agent_governance", "proposal_document")
+DOCUMENT_EDITORS = {"admin", "sales", "engineer"}      # config/proposal_document.yaml edit_permissions
 D = "/api/v1/dashboard"
 PDF = b"%PDF-1.4 matrix test"
 
@@ -57,6 +58,11 @@ STAFF = {
     ("GET", f"{D}/proposals"): (ALL, {}),
     ("GET", f"{D}/proposals/{{proposal_id}}"): (LEAD_READERS, {}),
     ("GET", f"{D}/proposals/{{proposal_id}}/required-approval-tier"): (PRICE_READERS, {}),
+    # BE-13 — the structured document (Engineers: technical part; edits per section)
+    ("GET", f"{D}/proposals/{{proposal_id}}/document"): (LEAD_READERS, {}),
+    ("PATCH", f"{D}/proposals/{{proposal_id}}/document"): (DOCUMENT_EDITORS, {"json": {
+        "base_revision": 0, "section": "boq", "value": []}}),
+    ("GET", f"{D}/proposals/{{proposal_id}}/preview.pdf"): (PRICE_READERS, {}),
     ("GET", f"{D}/analytics"): (NOT_ENGINEER, {}),
     ("GET", f"{D}/analytics/conversion-by-source"): (ANALYSTS, {}),
     ("GET", f"{D}/analytics/deal-size-by-tier"): (ANALYSTS, {}),

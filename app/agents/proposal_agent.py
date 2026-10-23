@@ -60,9 +60,15 @@ class ProposalAgent:
         # feeds the manager-signoff rule. Grid Nova's price list prices it when the
         # lead's site assessment is list-priceable (app/proposals/price_list_content.py).
         from app.proposals import price_list_content
-        ctx = {**ctx, "list_pricing": price_list_content.context_for_lead(memory._db, lead)}
+        list_ctx = price_list_content.context_for_lead(memory._db, lead)
+        ctx = {**ctx, "list_pricing": list_ctx}
         content = content_engine.compose_content(ctx, cfg)
-        total_value = content["pricing"]["total_value"]
+        # The structured customer document (BE-13): built from the lead, the site
+        # assessment, the onboarding and the price list — or, for a revision, carried
+        # forward from the previous version. Its one calculation sets the price, and its
+        # coverage decides whether the proposal needs manual review (the fallback flag).
+        from app.proposals import document_service
+        content, total_value = document_service.attach(memory._db, lead, content, list_ctx)
         used_fallback = content["used_fallback_template"]
 
         # Re-validate even though Orchestrator checked — defence in depth.

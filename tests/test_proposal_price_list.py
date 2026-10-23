@@ -70,11 +70,15 @@ class TestListPriced:
         assert p.total_value == 453024.0
         assert _section(p.content, "electrical_specification") is None
 
-    def test_still_blocked_by_the_unsupplied_proposal_wording(self, client, db_session, onboarding_ready):
+    def test_ready_to_send_without_typing(self, client, db_session, onboarding_ready):
+        """BE-13: Grid Nova's own proposal wording (the samples) replaces the placeholder
+        sections, and the onboarding + survey hold everything the up-to-10 kW document
+        needs — nothing blocks this list-priced proposal."""
         p = _proposal(client, db_session, **LISTED)
-        problem = placeholder_problem(p)
-        assert problem and problem["missing_total_value"] is False
-        assert "pricing" not in problem["placeholder_sections"] and "standard_terms" in problem["placeholder_sections"]
+        assert not {"standard_terms", "cover_letter_intro", "closing", "fallback_generic_scope"} & \
+            {s["id"] for s in p.content["sections"]}
+        assert p.used_fallback_template is False
+        assert placeholder_problem(p) is None
 
     def test_pdf_prints_rs(self, client, db_session, onboarding_ready):
         p = _proposal(client, db_session, **LISTED)
@@ -108,7 +112,8 @@ class TestNotListPriced:
         assert p.content["pricing"]["price_status"] == "custom_quote"
         assert reason in p.content["pricing"]["custom_quote_reasons"]
         assert _section(p.content, "pricing")["body"] == "[PLACEHOLDER: Price to be confirmed by Grid Nova.]"
-        assert placeholder_problem(p)["missing_total_value"] is True
+        problem = placeholder_problem(p)
+        assert problem["code"] == "missing_required" and "price" in {m["field"] for m in problem["missing"]}
         assert _section(p.content, "price_terms") is None
 
     def test_adjust_pricing_on_an_unlisted_proposal_has_no_variance(self, client, db_session, onboarding_ready):

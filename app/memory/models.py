@@ -528,6 +528,8 @@ class Proposal(Base):
         # BE-3 P2 (migration 0047): PostgreSQL does not index foreign keys by itself.
         Index("ix_proposals_lead_id_status", "lead_id", "status"),
         Index("ix_proposals_date_created", "date_created"),
+        # BE-13 (migration 0055): a customer reference is never issued twice.
+        Index("uq_proposals_document_reference", "document_reference", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -565,9 +567,23 @@ class Proposal(Base):
     reverification_flagged_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     reverification_cleared_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     reverification_cleared_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # BE-13 — the reference and date printed on the customer document, allocated when the
+    # version is approved (app/proposals/reference.py): GN/23/10/2026/01, a revision of an
+    # issued proposal GN/23/10/2026/01-R1. Never reallocated.
+    document_reference: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    document_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
     lead: Mapped["Lead"] = relationship(back_populates="proposals")
     approved_by: Mapped[Optional["Employee"]] = relationship(back_populates="approved_proposals")
+
+
+class ProposalReferenceSequence(Base):
+    """Per-day proposal reference counter (IST day), advanced atomically
+    (INSERT … ON CONFLICT … RETURNING) — app/proposals/reference.py."""
+    __tablename__ = "proposal_reference_sequences"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class ProposalInputs(Base):
