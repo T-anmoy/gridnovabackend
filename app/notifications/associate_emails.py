@@ -3,7 +3,9 @@
   * the formal proposal is approved and ready to hand over;
   * an execution stage was sent back, with the reviewer's note;
   * a payment was verified, with the receipt link;
-  * an Engineer reviewed the customer's site survey (S1), with what to do next.
+  * an Engineer reviewed the customer's site survey (S1), with what to do next;
+  * BE-12: an Admin changed the associate's own commission rate (the rates and the date
+    only — never the reason, which is internal).
 
 Sent after the commit, never raising. Skipped cleanly when NOTIFY_ASSOCIATES is off or
 the associate has no email. Each email names only that customer and links to that
@@ -128,3 +130,33 @@ def survey_reviewed(db: Session, onboarding: CustomerOnboarding, outcome) -> Non
                [line.format(name=name) for line in _SURVEY_OUTCOME_LINES[value]], "Open customer", url)
     except Exception:
         logger.exception("associate survey-reviewed email not queued")
+
+
+def _percent_text(value) -> str:
+    text = format(value.normalize(), "f") if value is not None else ""
+    return f"{text}%"
+
+
+def commission_rate_changed(db: Session, associate: Associate, before, after, effective_from) -> None:
+    """BE-12: "Your commission rate changes from X% to Y% from <date>." `before` /
+    `after` are Decimals or None (no confirmed rate). Links to the associate's own
+    commissions page."""
+    from app.config import settings
+    try:
+        if not settings.notify_associates or not (associate.email or "").strip():
+            return
+        when = f"{effective_from.day} {effective_from.strftime('%B %Y')}"
+        if before is not None and after is not None:
+            line = f"Your commission rate changes from {_percent_text(before)} to {_percent_text(after)} from {when}."
+        elif after is not None:
+            line = f"Your commission rate is {_percent_text(after)} from {when}."
+        else:
+            line = f"Your commission rate changes from {when}; Grid Nova will publish the new rate in the portal."
+        section = "preferred" if associate.associate_type == AssociateType.preferred_associate else "associates"
+        url = f"{(settings.frontend_base_url or '').rstrip('/')}/{section}/portal/earnings"
+        _queue(db, "associate_commission_rate_changed", associate.email.strip(), "Your commission rate is changing",
+               [line, "The rate that applies to a customer is the one in force on the date their agreement is "
+                      "signed. Commission already recorded does not change."],
+               "Open your earnings", url)
+    except Exception:
+        logger.exception("associate commission-rate email not queued")

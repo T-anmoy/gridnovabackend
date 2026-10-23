@@ -239,6 +239,12 @@ STAFF = {
         (COMM_PROCESSORS, {"json": {"response": "x"}}),
     ("POST", "/api/v1/dashboard/internal/check-commission-queries"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/network/summary"): ({"admin", "management"}, {}),
+    # BE-12 individual rates: Admin sets, Management reads (with the internal reason) —
+    # Accounts sees rates only as recorded on ledger entries.
+    ("GET", "/api/v1/dashboard/associates/{associate_id}/commission-rate"): ({"admin", "management"}, {}),
+    ("POST", "/api/v1/dashboard/associates/{associate_id}/commission-rate"):
+        (ADMIN_ONLY, {"json": {"rate_percent": "101", "effective_from": "2026-01-01", "reason": "matrix gate check"}}),
+    ("GET", "/api/v1/dashboard/associates/{associate_id}/performance"): ({"admin", "management"}, {}),
     # The placeholder engine's internal breakdown (PM-A: never customer-facing).
     ("POST", "/api/v1/pricing/breakdown"):
         ({"admin", "sales"}, {"json": {"segment": "residential", "size_kw": 5, "state": "West Bengal"}}),
@@ -317,6 +323,7 @@ ASSOCIATE = {
     ("GET", "/api/v1/associate/equipment"): ("own", {}),
     ("GET", "/api/v1/associate/commissions"): ("own", {}),
     ("GET", "/api/v1/associate/payouts"): ("own", {}),
+    ("GET", "/api/v1/associate/commission-rate"): ("own", {}),
     ("POST", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {"json": {"message": "x"}}),
     ("GET", "/api/v1/associate/commissions/{entry_id}/queries"): ("own", {}),
     ("GET", "/api/v1/associate/onboardings/{onboarding_id}/payments"): ("owner", {}),

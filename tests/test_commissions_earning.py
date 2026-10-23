@@ -222,6 +222,9 @@ class TestSchedules:
     URL = f"{DASH}/commission-rate-schedules"
 
     def test_publish_needs_notice_every_key_and_admin(self, client, db_session, onboarding_ready):
+        # BE-12: the first real schedule needs no notice (test_first_real_schedule_*), so
+        # one is on file before the notice rule is exercised.
+        first = publish(db_session, effective_from=date(2025, 1, 1))
         soon = (periods.today_ist() + timedelta(days=3)).isoformat()
         r = client.post(self.URL, json={"effective_from": soon, "rates": TEST_RATES}, headers=ADMIN)
         assert r.status_code == 422 and r.json()["detail"]["code"] == "notice_period"
@@ -240,10 +243,11 @@ class TestSchedules:
         r = client.post(self.URL, json={"effective_from": earliest.isoformat(), "rates": TEST_RATES}, headers=ADMIN)
         assert r.status_code == 201, r.text
         body = r.json()
-        assert body["version"] == 1 and body["rates"]["territory_block"] == "1.5000" and not body["in_effect"]
+        assert body["version"] == 2 and body["rates"]["territory_block"] == "1.5000" and not body["in_effect"]
         listing = client.get(self.URL, headers=MGMT).json()
-        assert [s["schedule_id"] for s in listing["items"]] == [body["schedule_id"]]
-        assert listing["in_force_schedule_id"] is None and listing["rate_keys"] == list(rates.RATE_KEYS)
+        assert [s["schedule_id"] for s in listing["items"]] == [body["schedule_id"], first.id]
+        assert listing["in_force_schedule_id"] == first.id and listing["rate_keys"] == list(rates.RATE_KEYS)
+        assert listing["earliest_effective_from"] == earliest.isoformat() and not listing["next_real_schedule_is_first"]
         assert client.get(self.URL, headers=OPS).status_code == 403
 
     def test_a_placeholder_schedule_needs_no_notice_but_not_the_past(self, client, db_session, onboarding_ready):

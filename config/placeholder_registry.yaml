@@ -1069,6 +1069,23 @@ entries:
     needed_from_grid_nova: When an Associate's customer has been shown both packages and has not accepted a proposal yet, which package should the Associate's estimated commission be worked out on?
     blocking: tunable
     probe: yaml_contains_marker
+  # ── BE-12: individual commission rates (config/commissions.yaml commissions.individual_rate_*) ──
+  - id: C5-IND-1
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.individual_rate_increase_needs_notice}
+    description: "An Admin may raise or lower one Associate's personal-sale rate (POST /api/v1/dashboard/associates/{id}/commission-rate). A reduction always needs commissions.rate_change_notice_days' notice; an increase takes effect as early as today (false). Policy 4.1 / A14 speak only of the published schedule; the wording for individual rates is with Grid Nova separately."
+    dummy_value: false
+    needed_from_grid_nova: May an individual rate increase take effect immediately, or does it also need 15 days' notice?
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: C5-IND-2
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.individual_rate_min_percent}
+    description: "The lowest and highest individual rate an Admin may set (commissions.individual_rate_min_percent / individual_rate_max_percent). Both null: no limit beyond 0-100 %, because none has been given."
+    dummy_value: null (no limits)
+    needed_from_grid_nova: What is the lowest and highest individual rate Grid Nova will set?
+    blocking: tunable
+    probe: yaml_contains_marker
   # ── BE-10: associate referral links (config/associate_onboarding.yaml referrals) ──
   - id: REF-1
     area: associates

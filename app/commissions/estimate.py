@@ -11,9 +11,9 @@ Worked out with the ledger's own rules, never a copy of them:
   * the commission basis — service.basis_for / service.basis_of (config commissions.basis:
     pre-GST under basic_pro_rata), exactly what the ledger records for a payment of that
     value;
-  * the rate — the personal_sale rate for the associate's type and capability/level in
-    the confirmed schedule in force on the agreement date (today until the agreement is
-    signed): service.schedule_on + rates.rate_key;
+  * the rate — the associate's personal_sale rate on the agreement date (today until
+    the agreement is signed): rates.resolve, the ledger's own lookup — their individual
+    rate when an Admin set one (BE-12), else the confirmed schedule in force then;
   * the amount — service.commission_of.
 
 With no confirmed schedule the rate and amount are null (pending_reason
@@ -59,8 +59,8 @@ def _indicative(db: Session, onboarding: CustomerOnboarding) -> Optional[tuple[D
 
 def estimated_commission(db: Session, onboarding: CustomerOnboarding,
                          rate_cache: Optional[dict] = None) -> Optional[dict]:
-    """{amount, rate, basis, value_used, basis_amount, pending_reason} or None. Writes
-    nothing. `rate_cache` (schedules by day, rates by schedule) saves queries across a
+    """{amount, rate, rate_source, basis, value_used, basis_amount, pending_reason} or
+    None. Writes nothing. `rate_cache` (rates.resolve's cache) saves queries across a
     page; open app/onboarding/preload.py's `preloaded` around a page as well."""
     from app.payments import service as payments
 
@@ -79,20 +79,15 @@ def estimated_commission(db: Session, onboarding: CustomerOnboarding,
         value, pricing = found
         source, basis_amount = "indicative_estimate", service.basis_of(value, pricing)
 
-    cache = rate_cache if rate_cache is not None else {}
     day = service.agreement_date(db, onboarding) or periods.today_ist()
-    if ("schedule", day) not in cache:
-        cache[("schedule", day)] = service.schedule_on(db, day)
-    schedule = cache[("schedule", day)]
-    percent = amount = None
-    if schedule is not None:
-        if schedule.id not in cache:
-            cache[schedule.id] = rates.rates_of(db, schedule.id)
-        table = cache[schedule.id]
-        percent = table.get(rates.rate_key(CommissionRole.personal_sale, owner))
+    resolved = rates.resolve(db, owner, CommissionRole.personal_sale, day,
+                             cache=rate_cache if rate_cache is not None else {})
+    percent = resolved.percent if resolved is not None else None
+    amount = None
     if percent is not None and basis_amount is not None:
         amount = service.commission_of(basis_amount, percent)
     reason = ("basis_unavailable" if basis_amount is None else
               "placeholder_rates" if percent is None else None)
-    return {"amount": s(amount), "rate": pct(percent), "basis": source, "value_used": s(value),
+    return {"amount": s(amount), "rate": pct(percent), "rate_source": resolved.source if resolved else None,
+            "basis": source, "value_used": s(value),
             "basis_amount": s(basis_amount), "pending_reason": reason}

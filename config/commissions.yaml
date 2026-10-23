@@ -40,6 +40,17 @@ commissions:
   # payment verified after an associate is deactivated earns that associate nothing.
   # [UNCONFIRMED] engineering reading of A11 (C5-7)
   deactivated_associates_earn: false
+  # BE-12 individual rates: an Admin may raise or lower one Associate's personal-sale
+  # rate (POST /api/v1/dashboard/associates/{id}/commission-rate). A reduction always
+  # needs rate_change_notice_days' notice. false = an increase may take effect today;
+  # true = an increase needs the same notice.
+  # [UNCONFIRMED] engineering default (C5-IND-1)
+  individual_rate_increase_needs_notice: false
+  # The lowest and highest individual rate an Admin may set, as percentage strings, or
+  # null for no limit beyond 0-100. No limits have been given: both null.
+  # [UNCONFIRMED] no limits supplied (C5-IND-2)
+  individual_rate_min_percent: null
+  individual_rate_max_percent: null
 
 estimate:
   # The associate portal's "what will I earn?" estimate (app/commissions/estimate.py) on a

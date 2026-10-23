@@ -5,11 +5,15 @@ Who: can_view_commissions (Admin, Management, Accounts) reads; can_process_commi
 can_manage_commission_rates (Admin) publishes schedules, re-rates and reverses entries;
 the payout bank file (full account numbers) is Accounts only. Sales, Engineer and
 Operations: none. Amounts are decimal strings.
+
+BE-12: an Associate's individual rate and performance summary — can_view_individual_rates
+(Admin, Management) reads; can_manage_commission_rates (Admin) sets. Contract:
+docs/api/commission_rates_individual.md.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,12 +23,13 @@ from sqlalchemy.orm import Session
 from app.api.routes.dashboard import _require_admin_or_internal_key
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
-from app.commissions import payouts, periods, rates, serialize
+from app.associates import service as associate_service
+from app.commissions import config, network, payouts, performance, periods, rates, serialize
 from app.commissions import service as commissions
 from app.memory.db import get_db
 from app.memory.models import (
-    Associate, CommissionEntry, CommissionEntryKind, CommissionEntryStatus, CommissionQuery, CommissionQueryStatus,
-    CommissionRateSchedule, CommissionRole, PayoutBatch, PayoutBatchStatus,
+    Associate, AssociateCommissionRate, CommissionEntry, CommissionEntryKind, CommissionEntryStatus, CommissionQuery,
+    CommissionQueryStatus, CommissionRateSchedule, CommissionRole, PayoutBatch, PayoutBatchStatus,
 )
 
 router = APIRouter(prefix="/api/v1/dashboard")
@@ -167,10 +172,14 @@ def list_rate_schedules(db: Session = Depends(get_db),
     today = periods.today_ist()
     rows = list(db.execute(select(CommissionRateSchedule).order_by(CommissionRateSchedule.version.desc())).scalars())
     current = rates.in_force(db, today)
+    first_real = rates.no_real_schedule_yet(db)
     return {"items": [rates.schedule_json(r, rates.rates_of(db, r.id), today) for r in rows],
             "in_force_schedule_id": current.id if current else None,
             "rate_keys": list(rates.RATE_KEYS),
-            "earliest_effective_from": rates.earliest_effective_from(today, False).isoformat()}
+            # For a real schedule: today while none has ever been published (BE-12), else
+            # today + the notice period.
+            "earliest_effective_from": rates.earliest_effective_from(today, False, first_real).isoformat(),
+            "next_real_schedule_is_first": first_real}
 
 
 class ScheduleIn(BaseModel):
@@ -200,6 +209,220 @@ def re_rate(schedule_id: int, body: ReasonIn, db: Session = Depends(get_db),
     at this (real) schedule."""
     _rates_admin(employee)
     return _act(db, lambda: commissions.re_rate(db, schedule_id, employee.employee_id, body.reason))
+
+
+# ── Individual rates (BE-12) ─────────────────────────────────────────────────────
+
+RateSource = Literal["standard", "individual"]
+
+
+class EffectiveRate(BaseModel):
+    """The rate that applies on a date. rate_percent null = no confirmed rate
+    (pending_reason placeholder_rates)."""
+    rate_percent: Optional[str]
+    source: Optional[RateSource]
+    effective_from: Optional[str]
+    pending_reason: Optional[Literal["placeholder_rates"]]
+
+
+class StandardRate(BaseModel):
+    rate_percent: str
+    schedule_id: int
+    schedule_version: int
+    effective_from: str
+
+
+class IndividualRateNow(BaseModel):
+    individual_rate_id: int
+    rate_percent: str
+    effective_from: str
+
+
+class ScheduledChange(BaseModel):
+    effective_from: str
+    rate_percent: Optional[str]
+    source: Optional[RateSource]
+
+
+class IndividualRateRow(BaseModel):
+    individual_rate_id: int
+    rate_key: str
+    # null = back to the standard schedule
+    rate_percent: Optional[str]
+    effective_from: str
+    reason: str
+    set_by: str
+    created_at: str
+    status: Literal["in_force", "scheduled", "superseded"]
+
+
+class RateNotice(BaseModel):
+    increase_earliest_effective_from: str
+    reduction_earliest_effective_from: str
+    increase_needs_notice: bool
+    notice_days: int
+
+
+class RateBounds(BaseModel):
+    min_percent: Optional[str]
+    max_percent: Optional[str]
+
+
+class AssociateRateResponse(BaseModel):
+    associate_id: str
+    full_name: str
+    rate_key: str
+    today: str
+    standard: Optional[StandardRate]
+    individual: Optional[IndividualRateNow]
+    effective: EffectiveRate
+    scheduled_changes: list[ScheduledChange]
+    history: list[IndividualRateRow]
+    notice: RateNotice
+    bounds: RateBounds
+
+
+class SetRateResponse(BaseModel):
+    change: IndividualRateRow
+    rate: AssociateRateResponse
+
+
+class SetRateIn(BaseModel):
+    # A percentage string ("8.5"), or null to return to the standard schedule. Required.
+    rate_percent: Optional[str] = Field(..., max_length=20)
+    effective_from: date
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+def _individual_reader(employee: AuthenticatedEmployee) -> None:
+    if not employee.can_view_individual_rates():
+        raise HTTPException(status_code=403, detail="Only Admin or Management can view individual rates.")
+
+
+def _associate(db: Session, associate_id: str) -> Associate:
+    associate = associate_service.get_associate(db, associate_id)
+    if associate is None:
+        raise HTTPException(status_code=404, detail="Associate not found")
+    return associate
+
+
+def _row_json(row: AssociateCommissionRate, in_force_id: Optional[int], today: date) -> dict:
+    return {"individual_rate_id": row.id, "rate_key": row.rate_key, "rate_percent": serialize.pct(row.rate_percent),
+            "effective_from": row.effective_from.isoformat(), "reason": row.reason, "set_by": row.set_by,
+            "created_at": serialize.iso(row.created_at),
+            "status": "scheduled" if row.effective_from > today else
+                      "in_force" if row.id == in_force_id else "superseded"}
+
+
+def _rate_view(db: Session, associate: Associate, today: date) -> dict:
+    role, cache = CommissionRole.personal_sale, {}
+    key = rates.rate_key(role, associate)
+    std = rates.standard(db, associate, role, today, cache=cache)
+    now = rates.individual_on(db, associate.id, key, today, cache=cache)
+    cfg = config.commissions()
+    notice_from = today + timedelta(days=cfg["rate_change_notice_days"])
+    history = db.execute(select(AssociateCommissionRate).where(AssociateCommissionRate.associate_id == associate.id)
+                         .order_by(AssociateCommissionRate.effective_from.desc(),
+                                   AssociateCommissionRate.id.desc())).scalars()
+    return {
+        "associate_id": associate.associate_id, "full_name": associate.full_name, "rate_key": key,
+        "today": today.isoformat(),
+        "standard": {"rate_percent": serialize.pct(std.percent), "schedule_id": std.schedule.id,
+                     "schedule_version": std.schedule.version,
+                     "effective_from": std.schedule.effective_from.isoformat()} if std else None,
+        "individual": {"individual_rate_id": now.id, "rate_percent": serialize.pct(now.rate_percent),
+                       "effective_from": now.effective_from.isoformat()}
+                      if now is not None and now.rate_percent is not None else None,
+        "effective": rates.resolved_json(rates.resolve(db, associate, role, today, cache=cache)),
+        "scheduled_changes": rates.scheduled_changes(db, associate, today, cache),
+        "history": [_row_json(r, now.id if now else None, today) for r in history],
+        "notice": {"increase_earliest_effective_from":
+                   (notice_from if cfg["individual_rate_increase_needs_notice"] else today).isoformat(),
+                   "reduction_earliest_effective_from": notice_from.isoformat(),
+                   "increase_needs_notice": cfg["individual_rate_increase_needs_notice"],
+                   "notice_days": cfg["rate_change_notice_days"]},
+        "bounds": {"min_percent": serialize.pct(rates.bound("individual_rate_min_percent")),
+                   "max_percent": serialize.pct(rates.bound("individual_rate_max_percent"))},
+    }
+
+
+@router.get("/associates/{associate_id}/commission-rate", response_model=AssociateRateResponse)
+def associate_commission_rate(associate_id: str, db: Session = Depends(get_db),
+                              employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Admin / Management: the Associate's personal-sale rate today — standard, individual
+    and effective — every scheduled change, the full history of individual rates (with
+    the internal reason) and the earliest dates a change may take effect."""
+    _individual_reader(employee)
+    return _rate_view(db, _associate(db, associate_id), periods.today_ist())
+
+
+@router.post("/associates/{associate_id}/commission-rate", response_model=SetRateResponse, status_code=201)
+def set_associate_commission_rate(associate_id: str, body: SetRateIn, db: Session = Depends(get_db),
+                                  employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Admin: set the Associate's individual rate from effective_from (rate_percent null =
+    back to the standard schedule). A reduction needs the notice period; an increase may
+    take effect today. A new row every time — nothing is edited. Audited; the
+    Associate is told (home feed, email) without the reason."""
+    _rates_admin(employee)
+    associate = _associate(db, associate_id)
+    today = periods.today_ist()
+    row = _act(db, lambda: rates.set_individual(db, associate, rate_percent=body.rate_percent,
+                                                effective_from=body.effective_from, reason=body.reason,
+                                                actor=employee.employee_id, today=today))
+    now = rates.individual_on(db, associate.id, row.rate_key, today)
+    return {"change": _row_json(row, now.id if now else None, today), "rate": _rate_view(db, associate, today)}
+
+
+class PerformanceCustomers(BaseModel):
+    onboarded: int
+    verified: int
+    commissioned: int
+
+
+class PerformancePayments(BaseModel):
+    credits: str
+    reversals: str
+    net: str
+
+
+class PerformanceCommission(BaseModel):
+    earned: str
+    earned_personal_sale: str
+    reversed: str
+    pending_count: int
+
+
+class PerformancePeriod(BaseModel):
+    date_from: str
+    date_to: str
+
+
+class PerformanceResponse(BaseModel):
+    associate_id: str
+    period: PerformancePeriod
+    customers: PerformanceCustomers
+    verified_payments: PerformancePayments
+    commission: PerformanceCommission
+
+
+@router.get("/associates/{associate_id}/performance", response_model=PerformanceResponse)
+def associate_performance(associate_id: str, date_from: Optional[date] = None, date_to: Optional[date] = None,
+                          db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """Admin / Management: one Associate's customers, verified payments and commission in
+    a period (IST days, inclusive; default this month so far, at most 366 days) —
+    app/commissions/performance.py defines each figure."""
+    _individual_reader(employee)
+    associate = _associate(db, associate_id)
+    default_from, default_to = network.default_period(periods.today_ist())
+    date_from, date_to = date_from or default_from, date_to or default_to
+    if date_to < date_from or (date_to - date_from).days > MAX_PERFORMANCE_DAYS:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_period", "field": "date_from",
+            "message": f"date_from must be on or before date_to, at most {MAX_PERFORMANCE_DAYS} days apart."})
+    return performance.summary(db, associate, date_from, date_to)
+
+
+MAX_PERFORMANCE_DAYS = 366
 
 
 # ── Payout batches ───────────────────────────────────────────────────────────────

@@ -128,7 +128,7 @@ gain `estimated_commission`:
 
 ```json
 "estimated_commission": {
-  "amount": "5000.00", "rate": "5.0000", "basis": "accepted_proposal",
+  "amount": "5000.00", "rate": "5.0000", "rate_source": "standard", "basis": "accepted_proposal",
   "value_used": "108900.00", "basis_amount": "100000.00", "pending_reason": null
 }
 ```
@@ -146,7 +146,8 @@ Show it as an estimate.
 | `basis` | Where the value comes from: `accepted_proposal` — the customer's accepted proposal; else `indicative_estimate` — their latest list-priced indicative estimate. With neither, `estimated_commission` is `null`. |
 | `value_used` | The customer price used (decimal string, ₹): the accepted proposal's total, or the estimate package's final price (incl. GST). When the estimate shows both packages, the one chosen by `config/commissions.yaml estimate.indicative_package_when_several` (`lowest_final` today — **C5-EST**, `[UNCONFIRMED]`). |
 | `basis_amount` | What the rate applies to, by the ledger's own rule (`commissions.basis`): the value **without GST** under `basic_pro_rata` (value × basic ÷ final), or the value as is under `gross`. `null` when it cannot be known (a custom quote has no basic price). |
-| `rate` | The Associate's own personal-sale percentage (4 decimals) for their type and capability/level, from the **confirmed** rate schedule in force on the agreement date — today, until the agreement is signed. Rates are published by an Admin (`commissions.md`); none is in config. `null` while no confirmed schedule is in force (registry C5-RATES). |
+| `rate` | The Associate's own personal-sale percentage (4 decimals) on the agreement date — today, until the agreement is signed — by the ledger's own lookup (BE-12, [commission_rates_individual.md](commission_rates_individual.md)): their **individual rate** when an Admin set one, else the rate for their type and capability/level in the **confirmed** rate schedule in force then. Rates are published by an Admin (`commissions.md`); none is in config. `null` while neither exists (registry C5-RATES). |
+| `rate_source` | BE-12: `"individual"`, `"standard"`, or `null` with no rate. |
 | `amount` | `basis_amount × rate ÷ 100`, to the paisa — the same rounding the ledger uses. `null` when either is unknown. |
 | `pending_reason` | `null`, or why there is no amount — the ledger's own reasons: `placeholder_rates` (no confirmed schedule), `basis_unavailable` (no basic price). |
 

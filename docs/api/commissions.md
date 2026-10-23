@@ -26,8 +26,11 @@ payout can include them.
 * **Basis.** The verified amount without GST: verified × the accepted proposal's basic
   price ÷ its final price (`basis: basic_pro_rata`). A custom-quoted proposal has no
   stored basic price, so its entries wait with `basis_unavailable`.
-* **Rate (4.1).** The schedule in force on the date the customer's agreement was signed
-  (the day the signed agreement was recorded; config `agreement_date_source`).
+* **Rate (4.1).** The rate in force on the date the customer's agreement was signed
+  (the day the signed agreement was recorded; config `agreement_date_source`): the
+  associate's **individual rate** on that date when an Admin set one (BE-12,
+  [commission_rates_individual.md](commission_rates_individual.md); personal sale only),
+  otherwise the confirmed schedule in force then. The entry's `rate_source` says which.
 * **Waiting entries.** `amount` is `null` and `pending_reason` says why:
   `agreement_not_signed` (rated automatically when the agreement is recorded),
   `placeholder_rates` (no confirmed schedule — rated by an Admin's re-rate),
@@ -57,6 +60,8 @@ payout can include them.
 | Commission ledger, schedules, batches, queries (read) | ✓ | ✓ | ✓ | 403 | own entries only |
 | Approve entries; prepare / approve / pay / cancel batches; answer queries; commission & TDS CSV | ✓ | 403 | ✓ | 403 | — |
 | Publish a rate schedule; re-rate; reverse an entry | ✓ | 403 | 403 | 403 | — |
+| Set an associate's individual rate (BE-12) | ✓ | 403 | 403 | 403 | — |
+| Read an associate's individual rate, its history and performance summary (BE-12) | ✓ | ✓ | 403 | 403 | own rate only, never the reason |
 | Payout bank file (full account numbers) | **403** | 403 | ✓ | 403 | — |
 | Network summary | ✓ | ✓ | 403 | 403 | — |
 
@@ -73,13 +78,17 @@ Associate tokens on staff routes and staff tokens on associate routes: 401 (dev 
  "kind": "earn|reversal|recovery|adjustment", "status": "earned|approved|paid|reversed",
  "customer_name": "…", "project_reference_id": "GNE-WB-RES-2026-00012", "onboarding_id": 5, "payment_id": 9,
  "basis_amount": "20000.00", "rate_percent": "5.0000", "holders": 1, "amount": "1000.00",
- "pending_reason": null, "pending_message_key": null, "schedule_version": 1, "agreement_date": "2026-10-13",
+ "pending_reason": null, "pending_message_key": null, "schedule_version": 1, "rate_source": "standard",
+ "agreement_date": "2026-10-13",
  "reverses_entry_id": null, "reversed_by_entry_id": null, "reason": null,
  "batch": {"batch_id": 3, "period": "2026-10", "status": "approved"},
  "created_at": "…", "approved_at": "…", "paid_at": null}
 ```
 
-Staff responses add `created_by`, `approved_by`, `rated_by`, `rated_at`. Associate
+`rate_source` (BE-12): `"standard"` (rated at schedule `schedule_version`), `"individual"`
+(rated at the associate's individual rate; `schedule_version` is then `null`), or `null`
+(not rated yet). Staff responses add `created_by`, `approved_by`, `rated_by`, `rated_at`,
+`individual_rate_id` (BE-12; `null` unless `rate_source` is `individual`). Associate
 responses add `query: {"open": bool, "window_closes_at": "<UTC ISO>"}`. A reversal or
 recovery has negative `amount`, `basis_amount`/`rate_percent` null, `reverses_entry_id`
 set and `reason`. `adjustment` is reserved — nothing creates one yet.
@@ -123,14 +132,21 @@ structured detail), 422 `invalid_message`, 409 `query_window_closed` (+ `window_
 ### `GET /commissions/{entry_id}/queries`
 `{items: [query]}`, newest first. 404 (plain) when it is not the caller's entry.
 
-### Home feed (`GET /api/v1/associate/home`) — two new item kinds, priority 3
+### Home feed (`GET /api/v1/associate/home`) — new item kinds, priority 3
 
 | kind / message_key | params | onboarding_id |
 |---|---|---|
 | `commission_payout_paid` / `todo.commission_payout_paid` | `batch_id, period, net, bank_reference, bank_account_last4` | `null` |
 | `commission_query_answered` / `todo.commission_query_answered` | `query_id, entry_id` | the entry's customer (may be `null`) |
+| `commission_rate_changed` / `todo.commission_rate_changed` (BE-12) | `rate_percent_from, rate_percent_to, effective_from, scheduled` | `null` |
 
-Both for `payout.recent_days` (7) days; `customer_name` is `null`.
+The first two for `payout.recent_days` (7) days; `commission_rate_changed` while the change
+was set in the last 7 days or takes effect later — see
+[commission_rates_individual.md](commission_rates_individual.md). `customer_name` is `null`.
+
+### `GET /commission-rate` (BE-12)
+The caller's own personal-sale rate today and every scheduled change —
+[commission_rates_individual.md](commission_rates_individual.md).
 
 ## Staff endpoints (`/api/v1/dashboard`)
 
@@ -152,7 +168,10 @@ or recovery>}`. 404 `not_found`; 409 `not_reversible` (not an earn entry, or alr
 reversed); 422 `reason_required`.
 
 ### `GET /commission-rate-schedules`
-`{items: [schedule], in_force_schedule_id, rate_keys: [...], earliest_effective_from}`.
+`{items: [schedule], in_force_schedule_id, rate_keys: [...], earliest_effective_from,
+next_real_schedule_is_first}`. `earliest_effective_from` is for a real schedule: today while
+no real schedule has ever been published (`next_real_schedule_is_first: true`, BE-12),
+otherwise today IST + 15 days.
 Schedule: `{schedule_id, version, effective_from, is_placeholder, note, published_by,
 published_at, rates: {rate_key: "5.0000"}, in_effect}`. Rate keys:
 `personal_sale.associate.sales`, `personal_sale.associate.execution`,
@@ -164,11 +183,20 @@ Body `{"effective_from": "YYYY-MM-DD", "is_placeholder": false, "rates": {every 
 "note"?: "…"}`. A schedule is never edited; this publishes the next version. Errors:
 422 `invalid_rate_keys` (+ `missing`, `unknown`), 422 `invalid_rate` (field `rates.<key>`;
 0–100, ≤ 4 decimals), 422 `notice_period` (+ `earliest_effective_from` = today IST + 15
-days) for a real schedule, 422 `effective_in_past` for a placeholder one, 409
+days) for a real schedule other than the first, 422 `effective_in_past` (+
+`earliest_effective_from` = today) for a placeholder or the first real one, 409
 `concurrent_publish`.
+
+**The first real schedule (BE-12).** While no non-placeholder schedule has ever been
+published — in force or future-dated — nobody has relied on a confirmed rate, so the first
+real schedule may take effect today. Detected in the same query that picks the next
+version number, so two first schedules published at once cannot both skip the notice
+(the second gets 409 `concurrent_publish`). Every later real schedule needs the 15 days.
+The audit row's `after_value.first_real_schedule` records which case applied.
 
 ### `POST /commission-rate-schedules/{schedule_id}/re-rate` (Admin)
 Body `{"reason": "…"}`. Rates every entry waiting with `placeholder_rates` — at the
+associate's individual rate on its agreement date if they have one (BE-12), else at the
 schedule in force on its agreement date when that is a real schedule, otherwise at this
 one. Audited. → `{schedule_id, rated, total_amount, still_pending}`. 404 `not_found`,
 409 `schedule_is_placeholder`, 422 `reason_required`.
@@ -241,7 +269,12 @@ Period = IST days, default this month so far, at most 366 days (422 `invalid_per
 `verified_revenue` and `commissions` (except `pending_count`) are for the period: ledger
 entries, entries created, entries approved, payouts paid within it. Everything else is
 now. Overdue payment *milestones* are not included (computed per project, not stored).
-`by_current_stage` excludes closed onboardings.
+`by_current_stage` excludes closed onboardings. Per-Associate figures (BE-12):
+`GET /associates/{associate_id}/performance` — [commission_rates_individual.md](commission_rates_individual.md).
+
+### `GET|POST /associates/{associate_id}/commission-rate` (BE-12)
+An Associate's individual rate: read (Admin, Management), set or clear (Admin) —
+[commission_rates_individual.md](commission_rates_individual.md).
 
 ## Changed elsewhere
 

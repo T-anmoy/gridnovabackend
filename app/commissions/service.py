@@ -12,8 +12,10 @@ one `earn` entry for the verified amount:
     Several holders share the rate or each earn it (multiple_territory_holders).
 
 The basis is the verified amount without GST (basis_pro_rata: × the accepted proposal's
-basic ÷ final price) or the verified amount as received (gross). The rate is the
-schedule in force on the date the customer's agreement was signed (4.1).
+basic ÷ final price) or the verified amount as received (gross). The rate is the one in
+force on the date the customer's agreement was signed (4.1): rates.resolve — the
+Associate's individual rate on that date when an Admin set one (BE-12; the entry keeps
+individual_rate_id), else the confirmed schedule in force then (schedule_id).
 
 An entry whose rate cannot be known yet is recorded with its basis and no amount:
 pending_reason `agreement_not_signed` (rated automatically when the agreement is
@@ -258,17 +260,8 @@ def equal_parts(total: Decimal, n: int) -> list[Decimal]:
 
 def schedule_on(db: Session, day: date,
                 fallback: Optional[CommissionRateSchedule] = None) -> Optional[CommissionRateSchedule]:
-    """The confirmed schedule a commission dated `day` is rated with: the one in force
-    on that day unless it is a placeholder (or there is none), else `fallback`."""
-    schedule = rates.in_force(db, day)
-    if schedule is not None and not schedule.is_placeholder:
-        return schedule
-    return fallback
-
-
-def _schedule_for(db: Session, entry: CommissionEntry,
-                  fallback: Optional[CommissionRateSchedule]) -> Optional[CommissionRateSchedule]:
-    return schedule_on(db, entry.agreement_date, fallback)
+    """The confirmed schedule a commission dated `day` is rated with (rates.confirmed_on)."""
+    return rates.confirmed_on(db, day, fallback)
 
 
 def commission_of(basis: Decimal, percent: Decimal) -> Decimal:
@@ -281,8 +274,10 @@ def rate(db: Session, entries: Iterable[CommissionEntry], actor: str,
     """Fill in the amount of every unrated earn entry given that can be rated now
     (and of the reversals mirroring them); set the pending reason of the rest.
     `fallback` is the real schedule an Admin's re-rate applies where the schedule in
-    force on the agreement date is a placeholder (or there is none)."""
+    force on the agreement date is a placeholder (or there is none). Each rate is
+    rates.resolve's for the entry's associate, role and agreement date."""
     rated = []
+    cache: dict = {}
     groups: dict[tuple, list[CommissionEntry]] = {}
     for entry in entries:
         if entry.kind != CommissionEntryKind.earn or entry.amount is not None:
@@ -293,41 +288,51 @@ def rate(db: Session, entries: Iterable[CommissionEntry], actor: str,
         if entry.agreement_date is None:
             entry.pending_reason = "agreement_not_signed"
             continue
-        schedule = _schedule_for(db, entry, fallback)
-        if schedule is None:
+        if _resolve(db, entry, fallback, cache) is None:
             entry.pending_reason = "placeholder_rates"
             continue
-        groups.setdefault((entry.payment_id, entry.earning_role, schedule.id), []).append(entry)
-    cache: dict[int, dict] = {}
-    for (payment_id, role, schedule_id), _ in groups.items():
+        groups.setdefault((entry.payment_id, entry.earning_role), []).append(entry)
+    for payment_id, role in groups:
         # Every holder sharing this role on this payment, rated together so the shares
         # add up to the rate exactly.
         siblings = list(db.execute(select(CommissionEntry).where(
             CommissionEntry.payment_id == payment_id, CommissionEntry.earning_role == role,
             CommissionEntry.kind == CommissionEntryKind.earn, CommissionEntry.amount.is_(None))
             .order_by(CommissionEntry.associate_id)).scalars())
-        table = cache.setdefault(schedule_id, rates.rates_of(db, schedule_id))
         by_holders: dict[int, list[CommissionEntry]] = defaultdict(list)
         for e in siblings:
             by_holders[e.holders].append(e)
         for holders, members in by_holders.items():
-            percents = [table[rates.rate_key(role, db.get(Associate, e.associate_id))] for e in members]
+            found = [(e, _resolve(db, e, fallback, cache)) for e in members]
+            found = [(e, r) for e, r in found if r is not None]
+            if not found:
+                continue
+            members, resolved = [e for e, _ in found], [r for _, r in found]
             if holders > 1:
-                # A shared territory rate (one rate key per territory role): the holders'
-                # shares add up to basis × rate exactly.
-                total = commission_of(members[0].basis_amount, percents[0])
+                # A shared territory rate (one rate key per territory role, never an
+                # individual rate): the holders' shares add up to basis × rate exactly.
+                total = commission_of(members[0].basis_amount, resolved[0].percent)
                 amounts = equal_parts(total, holders)[:len(members)]
             else:
-                amounts = [commission_of(e.basis_amount, p) for e, p in zip(members, percents)]
-            for e, percent, amount in zip(members, percents, amounts):
-                e.rate_percent = percent
-                e.amount, e.pending_reason, e.schedule_id = amount, None, schedule_id
+                amounts = [commission_of(e.basis_amount, r.percent) for e, r in zip(members, resolved)]
+            for e, r, amount in zip(members, resolved, amounts):
+                e.rate_percent, e.amount, e.pending_reason = r.percent, amount, None
+                e.schedule_id = r.schedule.id if r.schedule is not None else None
+                e.individual_rate_id = r.individual.id if r.individual is not None else None
                 e.rated_by, e.rated_at = actor, _now()
                 rated.append(e)
     db.flush()
     for e in rated:
         _mirror_reversal(db, e)
     return rated
+
+
+def _resolve(db: Session, entry: CommissionEntry, fallback: Optional[CommissionRateSchedule],
+             cache: dict) -> Optional[rates.Resolved]:
+    if entry.agreement_date is None:
+        return None
+    return rates.resolve(db, db.get(Associate, entry.associate_id), entry.earning_role, entry.agreement_date,
+                         fallback=fallback, cache=cache)
 
 
 def _mirror_reversal(db: Session, earn: CommissionEntry) -> None:
@@ -341,7 +346,8 @@ def _mirror_reversal(db: Session, earn: CommissionEntry) -> None:
 def re_rate(db: Session, schedule_id: int, actor: str, reason: str) -> dict:
     """Admin, audited: rate every entry pending under placeholder rates, using the
     schedule in force on its agreement date where that schedule is real, else
-    `schedule_id` (a published, non-placeholder schedule)."""
+    `schedule_id` (a published, non-placeholder schedule) — unless the Associate has
+    an individual rate on that date, which wins (rates.resolve)."""
     reason = (reason or "").strip()
     if not reason:
         raise AssociateError("Say why the pending entries are being rated.", code="reason_required",

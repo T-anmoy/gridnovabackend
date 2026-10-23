@@ -45,8 +45,17 @@ def _validate(data: dict) -> dict:
          f"commissions.agreement_date_source must be one of {AGREEMENT_DATE_SOURCES}")
     need(c.get("multiple_territory_holders") in MULTIPLE_HOLDERS,
          f"commissions.multiple_territory_holders must be one of {MULTIPLE_HOLDERS}")
-    for key in ("territory_on_own_customers", "deactivated_associates_earn"):
+    for key in ("territory_on_own_customers", "deactivated_associates_earn", "individual_rate_increase_needs_notice"):
         need(isinstance(c.get(key), bool), f"commissions.{key} must be true or false")
+    bounds = {}
+    for key in ("individual_rate_min_percent", "individual_rate_max_percent"):
+        need(key in c, f"commissions.{key} must be set (null for no limit)")
+        if c[key] is not None:
+            v = _decimal(c[key])
+            need(v.is_finite() and Decimal(0) <= v <= Decimal(100), f"commissions.{key} must be a percentage 0-100 or null")
+            bounds[key] = v
+    need(len(bounds) < 2 or bounds["individual_rate_min_percent"] <= bounds["individual_rate_max_percent"],
+         "commissions.individual_rate_min_percent must not exceed individual_rate_max_percent")
     from app.pricing.price_list import PACKAGES
     e = data.get("estimate") or {}
     need(e.get("indicative_package_when_several") in ("lowest_final", *PACKAGES),

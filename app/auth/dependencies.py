@@ -314,6 +314,12 @@ class AuthenticatedEmployee:
         """Publish a rate schedule, re-rate pending entries, reverse an entry (4.7)."""
         return self.role == EmployeeRole.admin
 
+    def can_view_individual_rates(self) -> bool:
+        """BE-12: an Associate's individual rate, its history (with the internal reason)
+        and their performance summary. Admin sets; Management reads; Accounts reads
+        the rates on the ledger entries only."""
+        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+
     def can_export_payout_bank_file(self) -> bool:
         """The payout bank file carries full account numbers: Accounts only."""
         return self.role == EmployeeRole.accounts

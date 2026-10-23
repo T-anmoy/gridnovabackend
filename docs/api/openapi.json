@@ -345,6 +345,84 @@
         "title": "AssignRequest",
         "type": "object"
       },
+      "AssociateRateResponse": {
+        "properties": {
+          "associate_id": {
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "bounds": {
+            "$ref": "#/components/schemas/RateBounds"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveRate"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/IndividualRateRow"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "individual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndividualRateNow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notice": {
+            "$ref": "#/components/schemas/RateNotice"
+          },
+          "rate_key": {
+            "title": "Rate Key",
+            "type": "string"
+          },
+          "scheduled_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledChange"
+            },
+            "title": "Scheduled Changes",
+            "type": "array"
+          },
+          "standard": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StandardRate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          }
+        },
+        "required": [
+          "associate_id",
+          "full_name",
+          "rate_key",
+          "today",
+          "standard",
+          "individual",
+          "effective",
+          "scheduled_changes",
+          "history",
+          "notice",
+          "bounds"
+        ],
+        "title": "AssociateRateResponse",
+        "type": "object"
+      },
       "AssociateStatus": {
         "enum": [
           "active",
@@ -2455,6 +2533,68 @@
         "title": "DraftRequest",
         "type": "object"
       },
+      "EffectiveRate": {
+        "description": "The rate that applies on a date. rate_percent null = no confirmed rate\n(pending_reason placeholder_rates).",
+        "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "pending_reason": {
+            "anyOf": [
+              {
+                "const": "placeholder_rates",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Reason"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "individual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "rate_percent",
+          "source",
+          "effective_from",
+          "pending_reason"
+        ],
+        "title": "EffectiveRate",
+        "type": "object"
+      },
       "EmployeeRole": {
         "enum": [
           "admin",
@@ -3037,6 +3177,89 @@
           "reference"
         ],
         "title": "InPersonAcceptanceRequest",
+        "type": "object"
+      },
+      "IndividualRateNow": {
+        "properties": {
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "individual_rate_id": {
+            "title": "Individual Rate Id",
+            "type": "integer"
+          },
+          "rate_percent": {
+            "title": "Rate Percent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "individual_rate_id",
+          "rate_percent",
+          "effective_from"
+        ],
+        "title": "IndividualRateNow",
+        "type": "object"
+      },
+      "IndividualRateRow": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "individual_rate_id": {
+            "title": "Individual Rate Id",
+            "type": "integer"
+          },
+          "rate_key": {
+            "title": "Rate Key",
+            "type": "string"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "set_by": {
+            "title": "Set By",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "in_force",
+              "scheduled",
+              "superseded"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "individual_rate_id",
+          "rate_key",
+          "rate_percent",
+          "effective_from",
+          "reason",
+          "set_by",
+          "created_at",
+          "status"
+        ],
+        "title": "IndividualRateRow",
         "type": "object"
       },
       "InputStatus": {
@@ -4264,6 +4487,139 @@
           "trigger"
         ],
         "title": "MilestoneIn",
+        "type": "object"
+      },
+      "MyEffectiveRate": {
+        "description": "rate_percent null = no confirmed rate yet (pending_reason placeholder_rates).",
+        "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "pending_reason": {
+            "anyOf": [
+              {
+                "const": "placeholder_rates",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Reason"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "individual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "rate_percent",
+          "source",
+          "effective_from",
+          "pending_reason"
+        ],
+        "title": "MyEffectiveRate",
+        "type": "object"
+      },
+      "MyRateResponse": {
+        "properties": {
+          "effective": {
+            "$ref": "#/components/schemas/MyEffectiveRate"
+          },
+          "rate_key": {
+            "title": "Rate Key",
+            "type": "string"
+          },
+          "scheduled_changes": {
+            "items": {
+              "$ref": "#/components/schemas/MyScheduledChange"
+            },
+            "title": "Scheduled Changes",
+            "type": "array"
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rate_key",
+          "today",
+          "effective",
+          "scheduled_changes"
+        ],
+        "title": "MyRateResponse",
+        "type": "object"
+      },
+      "MyScheduledChange": {
+        "properties": {
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "individual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "effective_from",
+          "rate_percent",
+          "source"
+        ],
+        "title": "MyScheduledChange",
         "type": "object"
       },
       "NewBlockRequest": {
@@ -5996,6 +6352,127 @@
         "title": "PayoutBatchStatus",
         "type": "string"
       },
+      "PerformanceCommission": {
+        "properties": {
+          "earned": {
+            "title": "Earned",
+            "type": "string"
+          },
+          "earned_personal_sale": {
+            "title": "Earned Personal Sale",
+            "type": "string"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "reversed": {
+            "title": "Reversed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "earned",
+          "earned_personal_sale",
+          "reversed",
+          "pending_count"
+        ],
+        "title": "PerformanceCommission",
+        "type": "object"
+      },
+      "PerformanceCustomers": {
+        "properties": {
+          "commissioned": {
+            "title": "Commissioned",
+            "type": "integer"
+          },
+          "onboarded": {
+            "title": "Onboarded",
+            "type": "integer"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "onboarded",
+          "verified",
+          "commissioned"
+        ],
+        "title": "PerformanceCustomers",
+        "type": "object"
+      },
+      "PerformancePayments": {
+        "properties": {
+          "credits": {
+            "title": "Credits",
+            "type": "string"
+          },
+          "net": {
+            "title": "Net",
+            "type": "string"
+          },
+          "reversals": {
+            "title": "Reversals",
+            "type": "string"
+          }
+        },
+        "required": [
+          "credits",
+          "reversals",
+          "net"
+        ],
+        "title": "PerformancePayments",
+        "type": "object"
+      },
+      "PerformancePeriod": {
+        "properties": {
+          "date_from": {
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "title": "Date To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to"
+        ],
+        "title": "PerformancePeriod",
+        "type": "object"
+      },
+      "PerformanceResponse": {
+        "properties": {
+          "associate_id": {
+            "title": "Associate Id",
+            "type": "string"
+          },
+          "commission": {
+            "$ref": "#/components/schemas/PerformanceCommission"
+          },
+          "customers": {
+            "$ref": "#/components/schemas/PerformanceCustomers"
+          },
+          "period": {
+            "$ref": "#/components/schemas/PerformancePeriod"
+          },
+          "verified_payments": {
+            "$ref": "#/components/schemas/PerformancePayments"
+          }
+        },
+        "required": [
+          "associate_id",
+          "period",
+          "customers",
+          "verified_payments",
+          "commission"
+        ],
+        "title": "PerformanceResponse",
+        "type": "object"
+      },
       "PipelineStage": {
         "enum": [
           "new",
@@ -6746,6 +7223,66 @@
         "title": "QueryIn",
         "type": "object"
       },
+      "RateBounds": {
+        "properties": {
+          "max_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Percent"
+          },
+          "min_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Percent"
+          }
+        },
+        "required": [
+          "min_percent",
+          "max_percent"
+        ],
+        "title": "RateBounds",
+        "type": "object"
+      },
+      "RateNotice": {
+        "properties": {
+          "increase_earliest_effective_from": {
+            "title": "Increase Earliest Effective From",
+            "type": "string"
+          },
+          "increase_needs_notice": {
+            "title": "Increase Needs Notice",
+            "type": "boolean"
+          },
+          "notice_days": {
+            "title": "Notice Days",
+            "type": "integer"
+          },
+          "reduction_earliest_effective_from": {
+            "title": "Reduction Earliest Effective From",
+            "type": "string"
+          }
+        },
+        "required": [
+          "increase_earliest_effective_from",
+          "reduction_earliest_effective_from",
+          "increase_needs_notice",
+          "notice_days"
+        ],
+        "title": "RateNotice",
+        "type": "object"
+      },
       "RecordExecutionStageRequest": {
         "properties": {
           "admin_override_reason": {
@@ -7328,6 +7865,47 @@
         "title": "ScheduleMeetingResponse",
         "type": "object"
       },
+      "ScheduledChange": {
+        "properties": {
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "individual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "effective_from",
+          "rate_percent",
+          "source"
+        ],
+        "title": "ScheduledChange",
+        "type": "object"
+      },
       "SchemeStat": {
         "properties": {
           "capacity_kw": {
@@ -7409,6 +7987,61 @@
         ],
         "title": "ServiceRequestStatus",
         "type": "string"
+      },
+      "SetRateIn": {
+        "properties": {
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "rate_percent",
+          "effective_from"
+        ],
+        "title": "SetRateIn",
+        "type": "object"
+      },
+      "SetRateResponse": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/IndividualRateRow"
+          },
+          "rate": {
+            "$ref": "#/components/schemas/AssociateRateResponse"
+          }
+        },
+        "required": [
+          "change",
+          "rate"
+        ],
+        "title": "SetRateResponse",
+        "type": "object"
       },
       "ShadingCondition": {
         "enum": [
@@ -7550,6 +8183,34 @@
           "reason"
         ],
         "title": "StaffSiteLocationRequest",
+        "type": "object"
+      },
+      "StandardRate": {
+        "properties": {
+          "effective_from": {
+            "title": "Effective From",
+            "type": "string"
+          },
+          "rate_percent": {
+            "title": "Rate Percent",
+            "type": "string"
+          },
+          "schedule_id": {
+            "title": "Schedule Id",
+            "type": "integer"
+          },
+          "schedule_version": {
+            "title": "Schedule Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rate_percent",
+          "schedule_id",
+          "schedule_version",
+          "effective_from"
+        ],
+        "title": "StandardRate",
         "type": "object"
       },
       "StateStat": {
@@ -9008,6 +9669,30 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/associate/commission-rate": {
+      "get": {
+        "description": "The caller's own personal-sale rate today (standard or individual) and every\nscheduled change. Never the reason for an individual rate, never anyone else's.",
+        "operationId": "my_commission_rate_api_v1_associate_commission_rate_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyRateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Commission Rate"
+      }
+    },
     "/api/v1/associate/commissions": {
       "get": {
         "description": "The caller's own commission entries, newest first, with a summary.",
@@ -13128,6 +13813,104 @@
         "summary": "Retry Clerk Invite"
       }
     },
+    "/api/v1/dashboard/associates/{associate_id}/commission-rate": {
+      "get": {
+        "description": "Admin / Management: the Associate's personal-sale rate today — standard, individual\nand effective — every scheduled change, the full history of individual rates (with\nthe internal reason) and the earliest dates a change may take effect.",
+        "operationId": "associate_commission_rate_api_v1_dashboard_associates__associate_id__commission_rate_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "associate_id",
+            "required": true,
+            "schema": {
+              "title": "Associate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssociateRateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Associate Commission Rate"
+      },
+      "post": {
+        "description": "Admin: set the Associate's individual rate from effective_from (rate_percent null =\nback to the standard schedule). A reduction needs the notice period; an increase may\ntake effect today. A new row every time — nothing is edited. Audited; the\nAssociate is told (home feed, email) without the reason.",
+        "operationId": "set_associate_commission_rate_api_v1_dashboard_associates__associate_id__commission_rate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "associate_id",
+            "required": true,
+            "schema": {
+              "title": "Associate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetRateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Associate Commission Rate"
+      }
+    },
     "/api/v1/dashboard/associates/{associate_id}/documents/regenerate": {
       "post": {
         "description": "Render and store the ID card and welcome letter again (after a failure, or\nonce the welcome-letter text has been supplied). The associate ID never changes.",
@@ -13224,6 +14007,85 @@
           }
         ],
         "summary": "Associate Document Link"
+      }
+    },
+    "/api/v1/dashboard/associates/{associate_id}/performance": {
+      "get": {
+        "description": "Admin / Management: one Associate's customers, verified payments and commission in\na period (IST days, inclusive; default this month so far, at most 366 days) —\napp/commissions/performance.py defines each figure.",
+        "operationId": "associate_performance_api_v1_dashboard_associates__associate_id__performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "associate_id",
+            "required": true,
+            "schema": {
+              "title": "Associate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Associate Performance"
       }
     },
     "/api/v1/dashboard/associates/{associate_id}/status": {

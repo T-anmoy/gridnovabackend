@@ -28,9 +28,12 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 from app.memory.models import (
-    COMMISSION_ENTRIES_PG_FUNCTION, COMMISSION_ENTRIES_PG_TRIGGER, COMMISSION_ENTRIES_SQLITE_TRIGGERS,
-    COMMISSION_SCHEDULES_PG_FUNCTION, COMMISSION_SCHEDULES_PG_TRIGGERS, COMMISSION_SCHEDULES_SQLITE_TRIGGERS,
+    COMMISSION_ENTRIES_PG_TRIGGER, COMMISSION_SCHEDULES_PG_FUNCTION, COMMISSION_SCHEDULES_PG_TRIGGERS,
+    COMMISSION_SCHEDULES_SQLITE_TRIGGERS, ENTRY_SET_ONCE_BE4, commission_entries_guard_sql,
 )
+
+# The ledger guard as this revision created it (0054 adds individual_rate_id to it).
+COMMISSION_ENTRIES_PG_FUNCTION, COMMISSION_ENTRIES_SQLITE_TRIGGERS = commission_entries_guard_sql(ENTRY_SET_ONCE_BE4)
 
 revision = "0048_commissions"
 down_revision = "0047_be3_indexes"

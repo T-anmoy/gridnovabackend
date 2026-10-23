@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -18,12 +18,12 @@ from sqlalchemy.orm import Session
 
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedAssociate, get_current_associate
-from app.commissions import config, payouts, periods, serialize
+from app.commissions import config, payouts, periods, rates, serialize
 from app.commissions import queries as commission_queries
 from app.memory.db import get_db
 from app.memory.models import (
-    Associate, CommissionEntry, CommissionEntryKind, CommissionEntryStatus, CommissionQuery, PayoutBatch,
-    PayoutBatchStatus, PayoutLine,
+    Associate, CommissionEntry, CommissionEntryKind, CommissionEntryStatus, CommissionQuery, CommissionRole,
+    PayoutBatch, PayoutBatchStatus, PayoutLine,
 )
 
 router = APIRouter(prefix="/api/v1/associate")
@@ -130,3 +130,38 @@ def entry_queries(entry_id: int, db: Session = Depends(get_db),
     rows = db.execute(select(CommissionQuery).where(CommissionQuery.entry_id == entry_id)
                       .order_by(CommissionQuery.created_at.desc(), CommissionQuery.id.desc())).scalars()
     return {"items": [serialize.query_json(q, staff=False) for q in rows]}
+
+
+# ── My commission rate (BE-12) ───────────────────────────────────────────────────
+
+class MyEffectiveRate(BaseModel):
+    """rate_percent null = no confirmed rate yet (pending_reason placeholder_rates)."""
+    rate_percent: Optional[str]
+    source: Optional[Literal["standard", "individual"]]
+    effective_from: Optional[str]
+    pending_reason: Optional[Literal["placeholder_rates"]]
+
+
+class MyScheduledChange(BaseModel):
+    effective_from: str
+    rate_percent: Optional[str]
+    source: Optional[Literal["standard", "individual"]]
+
+
+class MyRateResponse(BaseModel):
+    rate_key: str
+    today: str
+    effective: MyEffectiveRate
+    scheduled_changes: list[MyScheduledChange]
+
+
+@router.get("/commission-rate", response_model=MyRateResponse)
+def my_commission_rate(db: Session = Depends(get_db), current: AuthenticatedAssociate = Depends(get_current_associate)):
+    """The caller's own personal-sale rate today (standard or individual) and every
+    scheduled change. Never the reason for an individual rate, never anyone else's."""
+    associate = db.get(Associate, current.associate_pk)
+    today, cache = periods.today_ist(), {}
+    return {"rate_key": rates.rate_key(CommissionRole.personal_sale, associate), "today": today.isoformat(),
+            "effective": rates.resolved_json(rates.resolve(db, associate, CommissionRole.personal_sale, today,
+                                                           cache=cache)),
+            "scheduled_changes": rates.scheduled_changes(db, associate, today, cache)}

@@ -33,6 +33,11 @@ into English, Hindi or Bengali.
                                                                      one customer, so onboarding_id/customer_name null
     commission_query_answered todo.commission_query_answered      3  (params: query_id, entry_id) — home feed only;
                                                                      onboarding_id is the entry's customer (or null)
+    commission_rate_changed   todo.commission_rate_changed        3  (params: rate_percent_from, rate_percent_to,
+                                                                     effective_from, scheduled) — BE-12, home feed
+                                                                     only: an Admin changed the associate's own rate,
+                                                                     set in the last payout.recent_days days or taking
+                                                                     effect later; never the reason
 
 Priority 1 = do now, 2 = do soon, 3 = for information. Closed customers have none.
 """
@@ -251,7 +256,8 @@ def service_request_items(db: Session, onboardings: list) -> list[dict]:
 
 def commission_items(db: Session, associate) -> list[dict]:
     """BE-4: a payout paid, or a commission query answered, in the last
-    payout.recent_days days (config/commissions.yaml). Two queries."""
+    payout.recent_days days (config/commissions.yaml). Two queries. BE-12: and a
+    change of the associate's own rate (rate_items)."""
     from app.commissions import config as commission_config
     from app.commissions.serialize import s
     from app.memory.models import (
@@ -276,4 +282,29 @@ def commission_items(db: Session, associate) -> list[dict]:
         out.append({"kind": "commission_query_answered", "message_key": "todo.commission_query_answered",
                     "onboarding_id": onboarding_id, "customer_name": None, "priority": 3,
                     "params": {"query_id": query.id, "entry_id": query.entry_id}})
+    return out + rate_items(db, associate, since)
+
+
+def rate_items(db: Session, associate, since: datetime) -> list[dict]:
+    """BE-12: each individual-rate change for this associate set since `since` or taking
+    effect after today — the last one set for its date only (a same-day correction
+    replaces the item). From/to are the rates the day before and from that date."""
+    from app.commissions import periods, rates
+    from app.commissions.serialize import pct
+    from app.memory.models import AssociateCommissionRate
+
+    today = periods.today_ist()
+    rows = list(db.execute(select(AssociateCommissionRate).where(
+        AssociateCommissionRate.associate_id == associate.id,
+        (AssociateCommissionRate.created_at >= since) | (AssociateCommissionRate.effective_from > today))
+        .order_by(AssociateCommissionRate.effective_from, AssociateCommissionRate.id)).scalars())
+    latest = {(r.rate_key, r.effective_from): r for r in rows}
+    out, cache = [], {}
+    for row in latest.values():
+        before, after = rates.change_of(db, associate, row, cache)
+        out.append({"kind": "commission_rate_changed", "message_key": "todo.commission_rate_changed",
+                    "onboarding_id": None, "customer_name": None, "priority": 3,
+                    "params": {"rate_percent_from": pct(before), "rate_percent_to": pct(after),
+                               "effective_from": row.effective_from.isoformat(),
+                               "scheduled": row.effective_from > today}})
     return out

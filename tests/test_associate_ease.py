@@ -247,7 +247,7 @@ class TestEstimatedCommission:
         publish(db_session)
         owner = make_associate(db_session)                        # sales: 5 %
         oid = accepted(client, db_session, owner)
-        expected = {"amount": "5000.00", "rate": "5.0000", "basis": "accepted_proposal",
+        expected = {"amount": "5000.00", "rate": "5.0000", "rate_source": "standard", "basis": "accepted_proposal",
                     "value_used": "108900.00", "basis_amount": "100000.00", "pending_reason": None}
         assert _detail(client, owner, oid) == expected
         assert _listed(client, owner, oid) == expected
@@ -268,7 +268,8 @@ class TestEstimatedCommission:
             publish(db_session, is_placeholder=True)
         owner = make_associate(db_session)
         oid = accepted(client, db_session, owner)
-        assert _detail(client, owner, oid) == {"amount": None, "rate": None, "basis": "accepted_proposal",
+        assert _detail(client, owner, oid) == {"amount": None, "rate": None, "rate_source": None,
+                                               "basis": "accepted_proposal",
                                                "value_used": "108900.00", "basis_amount": "100000.00",
                                                "pending_reason": "placeholder_rates"}
 
@@ -300,7 +301,7 @@ class TestEstimatedCommission:
         cheaper = min(packages.values(), key=lambda p: D(p["final"]))    # C5-EST: lowest_final
         basis = (D(cheaper["final"]) * D(cheaper["basic"]) / D(cheaper["final"])).quantize(D("0.01"))
         got = _detail(client, owner, oid)
-        assert got == {"amount": str((basis * 5 / 100).quantize(D("0.01"))), "rate": "5.0000",
+        assert got == {"amount": str((basis * 5 / 100).quantize(D("0.01"))), "rate": "5.0000", "rate_source": "standard",
                        "basis": "indicative_estimate", "value_used": cheaper["final"],
                        "basis_amount": str(basis), "pending_reason": None}
 

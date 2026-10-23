@@ -65,7 +65,11 @@ def entries_json(db: Session, entries: list[CommissionEntry], *, staff: bool) ->
             "basis_amount": s(e.basis_amount), "rate_percent": pct(e.rate_percent), "holders": e.holders,
             "amount": s(e.amount), "pending_reason": e.pending_reason,
             "pending_message_key": f"commission.pending.{e.pending_reason}" if e.pending_reason else None,
-            "schedule_version": sch.version if sch else None, "agreement_date": iso(e.agreement_date),
+            "schedule_version": sch.version if sch else None,
+            # BE-12: "individual" (the associate's own rate), "standard" (a schedule), null unrated.
+            "rate_source": "individual" if e.individual_rate_id is not None else (
+                "standard" if e.schedule_id is not None else None),
+            "agreement_date": iso(e.agreement_date),
             "reverses_entry_id": e.reverses_entry_id, "reversed_by_entry_id": counters.get(e.id),
             "reason": e.reason,
             "batch": {"batch_id": b.id, "period": b.period, "status": b.status.value} if b else None,
@@ -73,7 +77,7 @@ def entries_json(db: Session, entries: list[CommissionEntry], *, staff: bool) ->
         }
         if staff:
             row.update(created_by=e.created_by, approved_by=e.approved_by, rated_by=e.rated_by,
-                       rated_at=iso(e.rated_at))
+                       rated_at=iso(e.rated_at), individual_rate_id=e.individual_rate_id)
         else:
             closes = e.created_at + window
             row["query"] = {"open": e.id in open_queries, "window_closes_at": iso(closes)}

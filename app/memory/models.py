@@ -2031,6 +2031,32 @@ class CommissionRate(Base):
     rate_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
 
 
+class AssociateCommissionRate(Base):
+    """An individual personal-sale rate an Admin set for one Associate (BE-12), from
+    effective_from on; rate_percent NULL means "back to the standard schedule". Never
+    edited or deleted (database triggers refuse both): a change is a new row. On a
+    date, the row with the latest effective_from on or before it wins (the later row
+    when two share a date) — app/commissions/rates.py resolve()."""
+    __tablename__ = "associate_commission_rates"
+    __table_args__ = (
+        CheckConstraint("rate_percent IS NULL OR (rate_percent >= 0 AND rate_percent <= 100)",
+                        name="ck_associate_commission_rates_percent"),
+        CheckConstraint("length(trim(reason)) >= 10", name="ck_associate_commission_rates_reason"),
+        Index("ix_associate_commission_rates_lookup", "associate_id", "rate_key", "effective_from"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    associate_id: Mapped[int] = mapped_column(ForeignKey("associates.id"), nullable=False)
+    # rates.rate_key(personal_sale, associate) when it was set.
+    rate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    rate_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 4), nullable=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    # Internal: never shown to the Associate.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    set_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
 class PayoutBatch(Base):
     """One month's payout (4.5): draft (prepared) → approved (by someone else) → paid
     (bank references recorded). At most one batch per month that is not cancelled —
@@ -2138,6 +2164,10 @@ class CommissionEntry(Base):
     holders: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     schedule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commission_rate_schedules.id"), nullable=True)
+    # BE-12: the Associate's individual rate the entry was rated at (schedule_id is then
+    # NULL); NULL when rated at the standard schedule. Set once, with the amount.
+    individual_rate_id: Mapped[Optional[int]] = mapped_column(ForeignKey("associate_commission_rates.id"),
+                                                              nullable=True)
     # placeholder_rates | agreement_not_signed | basis_unavailable — NULL once rated.
     pending_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # The date the customer's agreement was signed (IST) — the rate date (4.1).
@@ -2208,33 +2238,67 @@ COMMISSION_SCHEDULES_SQLITE_TRIGGERS = tuple(
 # filled in once (rating a pending entry).
 _ENTRY_FIXED = ("associate_id", "earning_role", "kind", "payment_id", "onboarding_id", "project_id",
                 "reverses_entry_id", "created_by", "created_at", "holders")
-_ENTRY_SET_ONCE = ("amount", "rate_percent", "basis_amount", "agreement_date", "schedule_id")
-COMMISSION_ENTRIES_PG_FUNCTION = """
+# The set-once columns as migration 0048 created the guard (BE-4); BE-12 (0054) adds
+# individual_rate_id. The migrations build their guard from the tuple of their time.
+ENTRY_SET_ONCE_BE4 = ("amount", "rate_percent", "basis_amount", "agreement_date", "schedule_id")
+_ENTRY_SET_ONCE = ENTRY_SET_ONCE_BE4 + ("individual_rate_id",)
+
+
+def commission_entries_guard_sql(set_once: tuple) -> tuple[str, tuple[str, ...]]:
+    """(the PostgreSQL guard function, the SQLite triggers) for these set-once columns."""
+    pg = """
 CREATE OR REPLACE FUNCTION commission_entries_guard() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'commission_entries is append-only';
     END IF;
     IF """ + " OR ".join(f"NEW.{c} IS DISTINCT FROM OLD.{c}" for c in _ENTRY_FIXED) + " OR " + " OR ".join(
-    f"(OLD.{c} IS NOT NULL AND NEW.{c} IS DISTINCT FROM OLD.{c})" for c in _ENTRY_SET_ONCE) + """ THEN
+        f"(OLD.{c} IS NOT NULL AND NEW.{c} IS DISTINCT FROM OLD.{c})" for c in set_once) + """ THEN
         RAISE EXCEPTION 'commission_entries: a recorded amount is never changed; write a new entry';
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
 """
+    sqlite = (
+        "CREATE TRIGGER commission_entries_no_delete BEFORE DELETE ON commission_entries "
+        "BEGIN SELECT RAISE(ABORT, 'commission_entries is append-only'); END",
+        "CREATE TRIGGER commission_entries_guard BEFORE UPDATE ON commission_entries WHEN "
+        + " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in _ENTRY_FIXED) + " OR "
+        + " OR ".join(f"(OLD.{c} IS NOT NULL AND NEW.{c} IS NOT OLD.{c})" for c in set_once)
+        + " BEGIN SELECT RAISE(ABORT, 'commission_entries: a recorded amount is never changed; write a new entry'); END",
+    )
+    return pg, sqlite
+
+
+COMMISSION_ENTRIES_PG_FUNCTION, COMMISSION_ENTRIES_SQLITE_TRIGGERS = commission_entries_guard_sql(_ENTRY_SET_ONCE)
 COMMISSION_ENTRIES_PG_TRIGGER = (
     "CREATE TRIGGER commission_entries_guard BEFORE UPDATE OR DELETE ON commission_entries "
     "FOR EACH ROW EXECUTE FUNCTION commission_entries_guard()"
 )
-COMMISSION_ENTRIES_SQLITE_TRIGGERS = (
-    "CREATE TRIGGER commission_entries_no_delete BEFORE DELETE ON commission_entries "
-    "BEGIN SELECT RAISE(ABORT, 'commission_entries is append-only'); END",
-    "CREATE TRIGGER commission_entries_guard BEFORE UPDATE ON commission_entries WHEN "
-    + " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in _ENTRY_FIXED) + " OR "
-    + " OR ".join(f"(OLD.{c} IS NOT NULL AND NEW.{c} IS NOT OLD.{c})" for c in _ENTRY_SET_ONCE)
-    + " BEGIN SELECT RAISE(ABORT, 'commission_entries: a recorded amount is never changed; write a new entry'); END",
+# BE-12: individual rates are append-only the same way.
+ASSOCIATE_RATES_PG_FUNCTION = """
+CREATE OR REPLACE FUNCTION associate_commission_rates_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION USING MESSAGE = 'associate_commission_rates is append-only: set a new rate';
+END;
+$$ LANGUAGE plpgsql
+"""
+ASSOCIATE_RATES_PG_TRIGGER = (
+    "CREATE TRIGGER associate_commission_rates_append_only BEFORE UPDATE OR DELETE ON associate_commission_rates "
+    "FOR EACH ROW EXECUTE FUNCTION associate_commission_rates_append_only()"
 )
+ASSOCIATE_RATES_SQLITE_TRIGGERS = tuple(
+    f"CREATE TRIGGER associate_commission_rates_no_{op.lower()} BEFORE {op} ON associate_commission_rates "
+    f"BEGIN SELECT RAISE(ABORT, 'associate_commission_rates is append-only: set a new rate'); END"
+    for op in ("UPDATE", "DELETE")
+)
+event.listen(AssociateCommissionRate.__table__, "after_create",
+             DDL(ASSOCIATE_RATES_PG_FUNCTION).execute_if(dialect="postgresql"))
+event.listen(AssociateCommissionRate.__table__, "after_create",
+             DDL(ASSOCIATE_RATES_PG_TRIGGER).execute_if(dialect="postgresql"))
+for _sql in ASSOCIATE_RATES_SQLITE_TRIGGERS:
+    event.listen(AssociateCommissionRate.__table__, "after_create", DDL(_sql).execute_if(dialect="sqlite"))
 for _table in (CommissionRateSchedule.__table__, CommissionRate.__table__):
     event.listen(_table, "after_create", DDL(COMMISSION_SCHEDULES_PG_FUNCTION).execute_if(dialect="postgresql"))
 event.listen(CommissionRateSchedule.__table__, "after_create",

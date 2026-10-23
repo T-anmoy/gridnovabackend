@@ -34,5 +34,8 @@ def test_documented_new_paths_exist_in_openapi():
                  "/api/v1/dashboard/onboardings/{onboarding_id}/site-location",
                  "/api/v1/associate/onboardings/{onboarding_id}/survey/results",
                  "/api/v1/associate/onboardings/{onboarding_id}/survey/signatures/{party}",
-                 "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results"):
+                 "/api/v1/dashboard/onboardings/{onboarding_id}/survey/results",
+                 "/api/v1/dashboard/associates/{associate_id}/commission-rate",
+                 "/api/v1/dashboard/associates/{associate_id}/performance",
+                 "/api/v1/associate/commission-rate"):
         assert path in paths, path
