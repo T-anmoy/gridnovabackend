@@ -4,8 +4,10 @@ from decimal import Decimal
 
 import pytest
 
+from app.estimate.config import subsidy_config
 from app.pricing import price_list
-from app.pricing.subsidy import MAX_SUBSIDY_INR
+
+MAX_SUBSIDY_INR = float(subsidy_config()["central"]["residential"]["general"]["max_inr"])   # ₹78,000
 
 BASE_BODY = {
     "segment": "residential",
@@ -67,18 +69,25 @@ class TestListPrice:
         body = _post(client, monthly_units_kwh=1000).json()   # 7.5 → 8 kW single phase
         assert body["priced_kw"] == 8 and body["sizing_detail"]["phase_capped"] is False
 
-    def test_housing_society_is_list_priced_without_subsidy(self, client):
+    def test_housing_society_without_houses_needs_the_number_never_zero(self, client):
+        """BE-14: a society's CFA needs the number of houses — never ₹0, never a guess."""
         body = _post(client, is_housing_society=True).json()
-        assert body["price_status"] == "list_price" and body["subsidy_inr"] == 0
-        assert body["subsidy_conditions"] == []
-        assert body["packages"]["NOVA_ASSURED"]["net_after_subsidy"] == "312543.00"
+        assert body["price_status"] == "list_price" and body["subsidy_inr"] is None
+        assert body["subsidy_status"] == "needs_number_of_houses" and body["subsidy_conditions"] == []
+        assert body["packages"]["NOVA_ASSURED"]["net_after_subsidy"] == "312543.00"   # nothing deducted
+
+    def test_housing_society_with_houses_gets_the_society_cfa(self, client):
+        body = _post(client, is_housing_society=True, number_of_houses=2).json()   # min(5, 6, 500) = 5 kWp
+        assert body["subsidy_inr"] == 90000.0 and body["subsidy"]["society"]["eligible_kwp"] == "5"
+        assert body["packages"]["NOVA_ASSURED"]["net_after_subsidy"] == "222543.00"
 
 
 class TestSubsidy:
     def test_subsidy_shown_separately_with_conditions(self, client):
         body = _post(client).json()
         assert body["subsidy_inr"] == MAX_SUBSIDY_INR
-        assert body["subsidy_conditions"] == ["dcr_modules_required", "scheme_eligibility"]
+        assert body["subsidy_conditions"][:2] == ["dcr_modules_required", "scheme_eligibility"]
+        assert {"grid_connected", "one_subsidy_per_house"} <= set(body["subsidy_conditions"])
         assert body["packages"]["NOVA_ASSURED"]["net_after_subsidy"] == str(Decimal("312543.00") - Decimal("78000"))
         assert body["packages"]["NOVA_SIGNATURE"]["net_after_subsidy"] == str(Decimal("350048.16") - Decimal("78000"))
 

@@ -42,7 +42,7 @@ _TOKEN_RE = re.compile(r"\{([a-z_0-9]+)\}")
 _BOQ_KEYS = {"description", "quantity", "standard", "make", "makes_from", "kind", "when"}
 _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _WARRANTY_RE = re.compile(r"^(\d+) years from handover$")
-_REQUIRED_TOP = ("schema_version", "colours", "brand", "signatory", "layout_rule", "generation", "space_required",
+_REQUIRED_TOP = ("schema_version", "colours", "brand", "signatory", "layout_rule",
                  "salutations", "default_salutation", "titles", "edit_permissions", "boq_make_words",
                  "module_phrases", "common", "compact", "detailed", "uncovered_segments")
 
@@ -88,11 +88,10 @@ def _validate(data: dict) -> dict:
     except (InvalidOperation, KeyError, TypeError):
         compact_max = Decimal(0)
     need(compact_max > 0, "layout_rule.compact_max_kwp must be a positive number")
-    need(isinstance(data["generation"].get("units_per_kwp_per_month"), int)
-         and data["generation"]["units_per_kwp_per_month"] > 0, "generation.units_per_kwp_per_month must be > 0")
-    space = data["space_required"]
-    need(all(isinstance(space.get(k), (int, float)) and space[k] > 0 for k in ("sqft_per_kwp_low", "sqft_per_kwp_high"))
-         and space["sqft_per_kwp_low"] <= space["sqft_per_kwp_high"], "space_required needs 0 < low <= high")
+    # BE-14: generation per kWp and roof area per kWp are the solar estimate engine's
+    # (config/solar_estimate.yaml) — one source for proposals and the calculator.
+    for key in ("generation", "space_required"):
+        need(key not in data, f"{key} is now in config/solar_estimate.yaml (generation / roof_area); remove it here")
     need(data["default_salutation"] in data["salutations"], "default_salutation must be one of salutations")
     for section, roles in data["edit_permissions"].items():
         need(section in EDITABLE_SECTIONS, f"edit_permissions: unknown section {section!r}")

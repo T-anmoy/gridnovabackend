@@ -189,11 +189,18 @@ class TestFullBreakdown:
 
 class TestOneBillSizingRule:
     """BE-7 N6: the same bill and state give the same size through /estimate,
-    /breakdown and /instant-estimate (app/pricing/sizing.py)."""
+    /breakdown and /instant-estimate (app/estimate/engine.py, BE-14)."""
 
     @pytest.mark.parametrize("bill, state", [(5000, "West Bengal"), (4000, "Bihar"), (12000, "Odisha")])
     def test_estimate_and_instant_estimate_agree(self, client, bill, state):
-        from app.pricing import sizing
+        from decimal import ROUND_HALF_UP, Decimal
+
+        from app.estimate import engine
+
+        inp = engine.EstimateInputs(state=state, monthly_bill_inr=Decimal(bill))
+        expected = float(engine.size(inp, engine.consumption(inp)).exact_kw)
+        by_formula = float((engine.consumption_kw(engine.consumption(inp).monthly_units, state))
+                           .quantize(Decimal("0.01"), ROUND_HALF_UP))
 
         est = client.post("/api/v1/pricing/estimate",
                           json={"segment": "residential", "monthly_bill_inr": bill, "state": state,
@@ -204,8 +211,8 @@ class TestOneBillSizingRule:
         assert est.status_code == 200 and inst.status_code == 200, (est.text, inst.text)
         assert est.json()["recommended_kw_exact"] == inst.json()["recommended_kw_exact"]
         assert est.json()["priced_kw"] == inst.json()["priced_kw"]
-        assert inst.json()["sizing_detail"]["consumption_based_kw"] == round(sizing.estimate_size_from_bill(bill, state), 2)
-        assert est.json()["recommended_kw_exact"] == round(sizing.estimate_size_from_bill(bill, state), 2)
+        assert inst.json()["sizing_detail"]["consumption_based_kw"] == by_formula == expected
+        assert est.json()["recommended_kw_exact"] == expected
 
     def test_five_thousand_a_month_is_four_point_one_seven_kw(self, client):
         """₹5,000 ÷ ₹9/unit ÷ (30 × 4 kWh/kW/day) × 90% offset = 4.17 kW (was 4.57 kW

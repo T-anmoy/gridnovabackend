@@ -57,9 +57,16 @@ class SubsidySlab(BaseModel):
     amount: str
 
 
+class SubsidyStateLine(BaseModel):
+    state: str
+    amount: str
+
+
 class SubsidyFigures(BaseModel):
     applies: bool
     slabs: list[SubsidySlab]
+    # A confirmed state top-up, printed only when config/subsidies.yaml says so (BE-14).
+    state_lines: list[SubsidyStateLine] = []
     total: Optional[str] = None
     effective_cost: Optional[str] = None
 

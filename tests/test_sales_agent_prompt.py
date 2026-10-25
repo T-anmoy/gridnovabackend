@@ -247,11 +247,23 @@ class TestExpandedCompanyFacts:
                 "for other states a team member will follow up.") in COMPANY_FACTS
 
     def test_subsidy_figures_match_the_real_pricing_module_not_a_second_copy(self):
-        from app.pricing import subsidy as subsidy_module
+        from app.estimate.config import subsidy_config
 
-        assert f"₹{subsidy_module.RATE_PER_KW_FIRST_2KW:,.0f}/kW" in COMPANY_FACTS
-        assert f"₹{subsidy_module.RATE_PER_KW_THIRD_KW:,.0f}" in COMPANY_FACTS
-        assert f"₹{subsidy_module.MAX_SUBSIDY_INR:,.0f}" in COMPANY_FACTS
+        central = subsidy_config()["central"]
+        for cat in ("general", "special"):
+            (_, first), (_, third) = central["residential"][cat]["slabs"]
+            assert f"₹{int(first):,}/kW for the first 2kW, ₹{int(third):,} for the 3rd kW" in COMPANY_FACTS
+            assert f"capped at ₹{int(central['residential'][cat]['max_inr']):,}" in COMPANY_FACTS
+        assert f"₹{int(central['housing_society']['rate_per_kwp']['general']):,}/kW" in COMPANY_FACTS
+
+    def test_announced_state_support_is_never_stated_as_certain(self):
+        """BE-14: Bihar's and West Bengal's top-ups are announced, not confirmed — Nova
+        names them without amounts and says they are not guaranteed."""
+        assert "not yet confirmed by an official order, in Bihar and West Bengal" in COMPANY_FACTS
+        assert "not guaranteed" in COMPANY_FACTS
+        for amount in ("₹10,000", "₹20,000", "₹5,000", "₹15,000", "₹98,000"):
+            assert amount not in COMPANY_FACTS
+        assert "never Housing" not in COMPANY_FACTS   # a society now has its own CFA
 
     def test_head_office_now_includes_the_state(self):
         assert "Kolkata – 700107, West Bengal" in COMPANY_FACTS

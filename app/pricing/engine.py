@@ -155,22 +155,10 @@ PLACEHOLDER_DEFAULT_ACCESS_DIFFICULTY_MODIFIER = 1.00  # unspecified
 PLACEHOLDER_GST_RATE_PERCENT = 13.8
 
 
-# Back-of-envelope system sizing from a monthly electricity bill, for a
-# customer who knows their bill but not a target kW — a standard solar-sales
-# heuristic: bill -> monthly units -> annual units -> kW needed to generate
-# that much. Both are Grid Nova's figures (Raju Paul, 15 Oct 2026): tariff ₹9 per
-# unit; generation 4 units per kW per day on average. The annual yield is that daily
-# figure converted: 4 × 365 = 1460 kWh per kW per year.
-PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT = 9.0       # ₹/kWh
-PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW = 1_460.0   # kWh/kW/year (4 kWh/kW/day × 365)
-
-
-# BE-7 N6: estimate_size_kw_from_monthly_bill() (annual yield, no offset) was the
-# second bill-sizing rule, used only by /pricing/estimate and /breakdown. They now
-# size through app/pricing/sizing.py like every other caller, and the helper is gone.
-# PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW stays as Grid Nova's confirmed figure
-# (config/placeholder_registry.yaml tracks it); no code reads it any more. sizing.py
-# uses the same 4 kWh/kW/day as its own per-state generation factor.
+# BE-14: sizing, generation, the bill-to-units tariff and the subsidy live in the solar
+# estimate engine (app/estimate/, config/solar_estimate.yaml + config/subsidies.yaml).
+# The ₹9/unit and 4 units/kWp/day (1,440 a year, not 4 × 365) are read from there; this
+# layered placeholder engine only prices the staff-only /pricing/breakdown.
 
 
 def _size_band(size_kw: float) -> str:

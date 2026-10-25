@@ -1,7 +1,9 @@
 """Live survey results, computed on the saved site assessment (never stored): the size
 the roof, the connection and the usage each allow, the suggested size, Grid Nova's
 indicative list price for both packages with the subsidy (the PM-A engine — custom-quote
-reasons when the configuration is outside the price list), and warnings.
+reasons when the configuration is outside the price list), generation, savings and
+payback (the solar estimate engine, app/estimate/ — the same figures as the calculator),
+and warnings.
 
 Warnings are codes with params — the app words them. Sizes are kW (2 decimals); money
 and ₹/unit figures are decimal strings from Decimal arithmetic only.
@@ -54,19 +56,39 @@ def _w(code: str, **params) -> dict:
     return {"code": code, "params": params}
 
 
+def _number(value: Decimal):
+    """A config figure for the JSON edge, as the survey always returned it (90, 1.0)."""
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def engine_inputs(inputs: ProposalInputs, state: str):
+    """The survey's data as the solar estimate engine's inputs."""
+    from app.estimate import engine
+
+    segment, society = SEGMENT[inputs.survey_variant or SurveyVariant.individual_house]
+    return engine.EstimateInputs(
+        state=state, segment=segment, is_housing_society=society,
+        monthly_units_kwh=engine.to_decimal(inputs.avg_monthly_units_kwh or None),
+        monthly_bill_inr=engine.to_decimal(inputs.avg_monthly_bill_inr or None),
+        discom=inputs.discom,
+        sanctioned_load_kw=engine.to_decimal(inputs.sanctioned_load_kw or None),
+        number_of_houses=inputs.society_flat_count or None,
+        connection_type=inputs.connection_type.value if inputs.connection_type else None)
+
+
 def sizes(inputs: ProposalInputs, state: str) -> dict:
-    from app.pricing import sizing
+    from app.estimate import engine
+    from app.estimate.config import estimate_config
 
     cfg = config.load()
     by_area = by_load = by_usage = None
     if inputs.shadow_free_area_sqft is not None:
-        by_area = _dec(inputs.shadow_free_area_sqft) / _dec(cfg["area_sqft_per_kw"])
+        by_area = engine.area_kw(_dec(inputs.shadow_free_area_sqft))
     if inputs.sanctioned_load_kw:
         by_load = _dec(inputs.sanctioned_load_kw) * _dec(cfg["load_cap_ratio"])
-    if inputs.avg_monthly_units_kwh:
-        by_usage = _dec(sizing.estimate_size_from_units(inputs.avg_monthly_units_kwh, state))
-    elif inputs.avg_monthly_bill_inr:
-        by_usage = _dec(sizing.estimate_size_from_bill(inputs.avg_monthly_bill_inr, state))
+    cons = engine.consumption(engine_inputs(inputs, state))
+    if cons.monthly_units is not None:
+        by_usage = engine.consumption_kw(cons.monthly_units, state)
     candidates = {k: v for k, v in zip(FACTORS, (by_area, by_load, by_usage)) if v is not None}
     suggested = limiting = None
     if candidates:
@@ -74,7 +96,7 @@ def sizes(inputs: ProposalInputs, state: str) -> dict:
         suggested = int(math.floor(candidates[limiting]))
     return {"max_by_area_kw": _kw(by_area), "max_by_load_kw": _kw(by_load), "recommended_by_usage_kw": _kw(by_usage),
             "suggested_kw": suggested, "limiting_factor": limiting,
-            "target_offset_percent": sizing.DEFAULT_TARGET_OFFSET_PERCENT}
+            "target_offset_percent": float(estimate_config()["sizing"]["target_offset_percent"].value)}
 
 
 def bills(inputs: ProposalInputs) -> dict:
@@ -94,28 +116,43 @@ def bills(inputs: ProposalInputs) -> dict:
 
 def estimate(inputs: ProposalInputs, state: str, kw: Optional[int]) -> dict:
     """Indicative list price for both packages at `kw` (PM-A engine), or a custom quote
-    with reasons. Never a guessed price."""
-    from app.pricing import instant_estimate, list_pricing
-    from app.pricing.subsidy import calculate_pm_surya_ghar_subsidy
+    with reasons — never a guessed price — with the solar estimate engine's subsidy,
+    generation, savings and payback for that size."""
+    from app.estimate import engine
+    from app.pricing import instant_estimate, list_pricing, price_list
 
     if not kw:
         return {"indicative": True, "size_kw": kw, "price_status": "not_enough_to_size", "custom_quote_reasons": [],
-                "priced_kw": None, "phase": None, "packages": {}, "subsidy_inr": None, "subsidy_conditions": []}
+                "priced_kw": None, "phase": None, "packages": {}, "subsidy_inr": None, "subsidy_conditions": [],
+                "estimate_version": engine.estimate_version()}
     segment, society = SEGMENT[inputs.survey_variant or SurveyVariant.individual_house]
     lp = list_pricing.evaluate(
         state=state, segment=segment, is_housing_society=society,
         connection_type=inputs.connection_type.value if inputs.connection_type else None,
         battery_storage=bool(inputs.battery_storage),
         connection_phase=inputs.connection_phase.value if inputs.connection_phase else None, exact_kw=kw)
-    subsidy = calculate_pm_surya_ghar_subsidy(size_kw=lp.priced_kw or kw, segment=segment,
-                                              is_housing_society=society)
-    from app.pricing import price_list
+    est = engine_inputs(inputs, state)
+    cons = engine.consumption(est)
+    assured = lp.packages.get("NOVA_ASSURED")
+    fig = engine.financials(Decimal(lp.priced_kw or kw), est, cons, assured.final if assured else None)
+    sub = fig["subsidy"]
+    known = sub.status != "needs_number_of_houses"
     return {"indicative": True, "size_kw": kw, "price_status": lp.price_status,
             "custom_quote_reasons": list(lp.custom_quote_reasons), "priced_kw": lp.priced_kw, "phase": lp.phase,
-            "packages": instant_estimate.package_amounts(lp, subsidy),
-            "subsidy_inr": str(Decimal(str(subsidy)).quantize(TWO, ROUND_HALF_UP)),
-            "subsidy_conditions": list(instant_estimate.SUBSIDY_CONDITIONS) if subsidy else [],
-            "price_list_version": price_list.version()}
+            "packages": instant_estimate.package_amounts(lp, sub.confirmed_total, sub.announced_total),
+            "subsidy_inr": str(sub.confirmed_total) if known else None,
+            "subsidy_conditions": list(sub.conditions) if sub.confirmed_total > 0 else [],
+            "price_list_version": price_list.version(),
+            "estimate_version": engine.estimate_version(),
+            "subsidy": sub.public(), "subsidy_status": sub.status,
+            "announced_state_support": engine.public(fig["announced_state_support"]),
+            "net_cost": engine.public(fig["net_cost"]),
+            "net_cost_if_announced_support_received": engine.public(fig["net_cost_if_announced_support_received"]),
+            "generation": engine.public(fig["generation"]),
+            "coverage_percent": engine.public(fig["coverage_percent"]),
+            "savings": engine.public(fig["savings"]), "payback_years": engine.public(fig["payback_years"]),
+            "long_term": engine.public(fig["long_term"]),
+            "confidence": engine.confidence(cons, state)}
 
 
 def _duplicate_consumer(db: Session, onboarding: CustomerOnboarding) -> bool:
@@ -142,11 +179,12 @@ def warnings(db: Session, onboarding: CustomerOnboarding, inputs: ProposalInputs
     if needed and size["max_by_load_kw"] is not None and needed > size["max_by_load_kw"]:
         out.append(_w("load_enhancement_needed", required_kw=needed, sanctioned_load_kw=inputs.sanctioned_load_kw,
                       max_by_load_kw=size["max_by_load_kw"]))
-    tariff = cfg["implied_tariff_inr_per_kwh"]
+    from app.estimate.config import estimate_config
+    tariff = estimate_config()["tariffs"]["sanity"]
     if bill["implied_tariff_inr_per_kwh"] is not None and not (
-            _dec(tariff["min"]) <= Decimal(bill["implied_tariff_inr_per_kwh"]) <= _dec(tariff["max"])):
+            tariff["min"] <= Decimal(bill["implied_tariff_inr_per_kwh"]) <= tariff["max"]):
         out.append(_w("implied_tariff_outside_range", implied_tariff_inr_per_kwh=bill["implied_tariff_inr_per_kwh"],
-                      min=tariff["min"], max=tariff["max"]))
+                      min=_number(tariff["min"]), max=_number(tariff["max"])))
     if inputs.consumption_history:
         from_units, from_bill = averages(inputs.consumption_history)
         ratio = _dec(cfg["average_mismatch_ratio"])
@@ -186,6 +224,8 @@ def warnings(db: Session, onboarding: CustomerOnboarding, inputs: ProposalInputs
 
 def compute(db: Session, onboarding: CustomerOnboarding, *, include_prices: bool = True) -> dict:
     """GET …/survey/results. `include_prices=False` (Engineers) leaves out the estimate."""
+    from app.estimate.config import estimate_config
+
     inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)
     state = db.get(TerritoryState, onboarding.state_id).name
     size = sizes(inputs, state)
@@ -193,7 +233,8 @@ def compute(db: Session, onboarding: CustomerOnboarding, *, include_prices: bool
     cfg = config.load()
     data = {"onboarding_id": onboarding.id, "variant": (inputs.survey_variant or SurveyVariant.individual_house).value,
             **size, "requested_kw": inputs.desired_output_kw, "bills": bill,
-            "assumptions": {"area_sqft_per_kw": cfg["area_sqft_per_kw"], "load_cap_ratio": cfg["load_cap_ratio"],
+            "assumptions": {"area_sqft_per_kw": _number(estimate_config()["roof_area"]["sqft_per_kwp"].value),
+                            "load_cap_ratio": cfg["load_cap_ratio"],
                             "target_offset_percent": size.pop("target_offset_percent")},
             "warnings": warnings(db, onboarding, inputs, size, bill)}
     data.pop("target_offset_percent", None)

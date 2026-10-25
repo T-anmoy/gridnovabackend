@@ -95,6 +95,10 @@ async def lifespan(app: FastAPI):
     from app.pricing.policy import load as load_pricing_policy
     load_price_list()
     load_pricing_policy()
+    # And the solar estimate engine (config/solar_estimate.yaml, config/subsidies.yaml):
+    # generation, roof area, tariffs and subsidy rules, every value with its status.
+    from app.estimate.config import load as load_estimate_config
+    load_estimate_config()
     # And proposal validity, approver rule, booking limits, chat sessions
     # (config/sales_policy.yaml).
     from app.rules.sales_policy import load as load_sales_policy

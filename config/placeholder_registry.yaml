@@ -185,12 +185,14 @@ entries:
     probe: manual
   - id: PRO-17
     area: proposals
-    location: {file: config/proposal_document.yaml, key: space_required}
-    description: "Shadow-free roof area printed as 'Space Required', per kWp (83–100 sq ft — implied by the two samples: 3 kWp → 250 – 300, 52 kWp → 4,300). Related to SRV-4 (the survey's area per kW, 90)."
+    location: {file: config/solar_estimate.yaml, key: roof_area}
+    description: "Shadow-free roof area printed as 'Space Required', per kWp (83–100 sq ft — implied by the two samples: 3 kWp → 250 – 300, 52 kWp → 4,300)."
     dummy_value: {sqft_per_kwp_low: 83, sqft_per_kwp_high: 100}
     needed_from_grid_nova: "How much shadow-free roof area per kWp should a proposal ask the customer for?"
     blocking: tunable
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "BE-14 moved config/proposal_document.yaml space_required to config/solar_estimate.yaml roof_area (sqft_per_kwp_low 83 – sqft_per_kwp 100): the proposal prints the same range from the figure the calculator and survey size with — still open there as EST-3."
   - id: PRO-18
     area: proposals
     location: {file: config/proposal_document.yaml, key: default_salutation}
@@ -308,46 +310,50 @@ entries:
     status_note: "Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…): GST 8.9% effective (5% on 70% of the basic price, 18% on 30%), implemented in app/pricing/price_list.py. The engine constant is used only by the staff-only /pricing/breakdown."
   - id: PRC-9
     area: pricing
-    location: {file: app/pricing/engine.py, symbols: [PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT, PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW]}
+    location: {file: config/solar_estimate.yaml, key: tariffs.flat_rate_inr_per_kwh}
     description: Electricity tariff and annual yield per kW used for the savings shown to customers.
     dummy_value:
       PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT: 8.0
       PLACEHOLDER_ASSUMED_ANNUAL_YIELD_PER_KW: 1400.0
     needed_from_grid_nova: What tariff (INR per unit) and annual generation per kW should savings estimates assume?
     blocking: blocks_launch
-    probe: constant_equals
+    probe: yaml_contains_marker
+    status: resolved
+    status_note: "Grid Nova (Raju Paul, 15 Oct 2026): ₹9 per unit flat and 4 units/kWp/day. BE-14 moved both into config/solar_estimate.yaml (tariffs.flat_rate_inr_per_kwh; generation.units_per_kwp_per_month = 120/month, 1,440/year — the unused 1,460 = 4 × 365 figure was removed with the engine.py constants). DISCOM tariff tables (EST-6…9) replace the flat rate once confirmed."
   - id: PRC-10
     area: pricing
-    location: {file: app/pricing/sizing.py, symbols: [PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY, PLACEHOLDER_DEFAULT_GENERATION_FACTOR]}
+    location: {file: config/solar_estimate.yaml, key: generation.units_per_kwp_per_month.states}
     description: Daily generation per kW by state, used to size the recommended system.
     dummy_value:
-      # Sentinel, not a real figure: Grid Nova confirmed 4.0 kWh/kW/day for West Bengal, Bihar and the default (D-2,
-      # 15 Oct 2026), which equals the original dummy, so the probe now compares against -1.0 (reopens if reverted to it).
       PLACEHOLDER_REGIONAL_GENERATION_FACTOR_KWH_PER_KW_PER_DAY: {west bengal: -1.0, bihar: -1.0}
       PLACEHOLDER_DEFAULT_GENERATION_FACTOR: -1.0
     needed_from_grid_nova: How many units per kW per day does a system generate in West Bengal, Bihar, and elsewhere?
     blocking: blocks_launch
-    probe: constant_equals
+    probe: yaml_contains_marker
+    status: resolved
+    status_note: "Grid Nova (D-2, 15 Oct 2026): 4 units/kWp/day for West Bengal, Bihar and the default. BE-14: config/solar_estimate.yaml generation.units_per_kwp_per_month (120 a month, status confirmed for West Bengal and Bihar). Other states use the default with status unconfirmed — see EST-1."
   - id: PRC-11
     area: pricing
-    location: {file: app/pricing/sizing.py, symbols: [DEFAULT_TARGET_OFFSET_PERCENT]}
+    location: {file: config/solar_estimate.yaml, key: sizing.target_offset_percent}
     description: Share of monthly consumption the recommended system aims to cover.
     dummy_value:
       DEFAULT_TARGET_OFFSET_PERCENT: 90.0
     needed_from_grid_nova: What share of a customer's consumption should a recommended system cover (e.g. 90%)?
     blocking: tunable
-    probe: constant_equals
+    probe: yaml_contains_marker
+    status: superseded
+    status_note: "BE-14 moved the constant (app/pricing/sizing.py, removed) to config/solar_estimate.yaml sizing.target_offset_percent; still open there as EST-4."
   - id: PRC-12
     area: pricing
-    location: {file: app/pricing/sizing.py, symbols: [PLACEHOLDER_PHASE_CAP_KW]}
+    location: {file: config/price_list.yaml, key: phase_ranges}
     description: Maximum system size by connection phase.
     dummy_value:
       PLACEHOLDER_PHASE_CAP_KW: {single_phase: 5.0, three_phase: 10.0}
     needed_from_grid_nova: What is the largest system allowed on a single-phase and on a three-phase connection (per DISCOM if they differ)?
     blocking: tunable
-    probe: constant_equals
+    probe: yaml_contains_marker
     status: superseded
-    status_note: "For pricing, replaced by the price list's phase ranges (single phase 1–10 kW, three phase 3–10 kW, Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…)). Sanctioned-load warnings in onboarding are unchanged."
+    status_note: "For pricing, replaced by the price list's phase ranges (single phase 1–10 kW, three phase 3–10 kW, Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…)). BE-14 removed the unused PLACEHOLDER_PHASE_CAP_KW: a size above the customer's sanctioned load is now the warning above_sanctioned_load (calculator, associate estimate) or load_enhancement_needed (survey), never a silent cap."
   - id: PRC-13
     area: pricing
     location: {file: app/pricing/instant_estimate.py, symbols: [SIGNIFICANT_SHADING_RANGE_PERCENT]}
@@ -822,12 +828,14 @@ entries:
     probe: yaml_contains_marker
   - id: SRV-4
     area: onboarding
-    location: {file: config/site_survey.yaml, key: area_sqft_per_kw}
-    description: "Shadow-free roof area needed per kW when the survey works out the largest system the roof allows (Grid Nova's two sample proposals imply about 75–83)."
+    location: {file: config/solar_estimate.yaml, key: roof_area.sqft_per_kwp}
+    description: "Shadow-free roof area needed per kW when the survey works out the largest system the roof allows (Grid Nova's two sample proposals imply about 83–100)."
     dummy_value: 90
     needed_from_grid_nova: "How many square feet of shadow-free roof does Grid Nova allow per kW?"
     blocking: blocks_feature
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "BE-14: the survey's own 90 (config/site_survey.yaml area_sqft_per_kw, removed) disagreed with the calculator's 100 and the proposal's 83–100. The survey now reads config/solar_estimate.yaml roof_area.sqft_per_kwp (100), the one figure for every caller — still open there as EST-3."
   - id: SRV-5
     area: onboarding
     location: {file: config/site_survey.yaml, key: load_cap_ratio}
@@ -838,12 +846,14 @@ entries:
     probe: yaml_contains_marker
   - id: SRV-6
     area: onboarding
-    location: {file: config/site_survey.yaml, key: implied_tariff_inr_per_kwh}
+    location: {file: config/solar_estimate.yaml, key: tariffs.implied_rate_sanity_inr_per_kwh}
     description: "Bill ÷ units outside this range raises the implied_tariff_outside_range warning."
     dummy_value: {min: 3, max: 20}
     needed_from_grid_nova: "What range of rupees per unit is normal on the bills you see?"
     blocking: tunable
     probe: yaml_contains_marker
+    status: superseded
+    status_note: "BE-14 moved the range (config/site_survey.yaml implied_tariff_inr_per_kwh, removed) to config/solar_estimate.yaml tariffs.implied_rate_sanity_inr_per_kwh, read by the survey warning and the calculator alike — still open there as EST-5."
   - id: SRV-7
     area: onboarding
     location: {file: config/site_survey.yaml, key: average_mismatch_ratio}
@@ -1259,6 +1269,146 @@ entries:
     needed_from_grid_nova: How long should staff conversations with Nova Records be kept before they are deleted?
     blocking: tunable
     probe: yaml_contains_marker
+
+  # ── BE-14: solar estimate engine (config/solar_estimate.yaml) ───────────────────
+  - id: EST-1
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: generation.units_per_kwp_per_month.fallback}
+    description: "Generation assumed outside West Bengal and Bihar: Grid Nova's default 120 units/kWp/month, shown as unconfirmed for that state. No state yield is invented."
+    dummy_value: 120
+    needed_from_grid_nova: "Which states will Grid Nova sell in next, and how many units per kWp per month should the estimate assume in each?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-2
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: generation.degradation}
+    description: "Panel output loss used for the 25-year figures: 2.0 % in the first year, then 0.55 % a year (a typical datasheet warranty curve, not Grid Nova's panels')."
+    dummy_value: {first_year_percent: "2.0", annual_percent: "0.55"}
+    needed_from_grid_nova: "Please send the datasheet of the panels Grid Nova installs: what are the first-year and yearly degradation figures?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: EST-3
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: roof_area}
+    description: "Shadow-free roof area per kWp: 100 sq ft sizes a system from roof area (calculator, associate estimate, survey) and is the top of the proposal's 'Space Required' range (low end 83). MNRE guidance is about 10 m² per kW."
+    dummy_value: {sqft_per_kwp: 100, sqft_per_kwp_low: 83}
+    needed_from_grid_nova: "How many square feet of shadow-free roof does Grid Nova allow per kWp — one figure for sizing, and the range a proposal should print?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-4
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: sizing.target_offset_percent}
+    description: "Share of the customer's consumption the recommended size aims to cover (90 %). With ceil to a whole kW, a 410-unit customer gets 4 kW (117 % coverage); the 3 kW option (88 %) is shown too."
+    dummy_value: 90
+    needed_from_grid_nova: "What share of a customer's consumption should a recommended system cover (e.g. 90%)?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: EST-5
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.implied_rate_sanity_inr_per_kwh}
+    description: "A customer's bill ÷ units outside ₹3–20 per unit is treated as a typing error (warning; the tariff table or flat rate is used for savings). Read by the survey warning too."
+    dummy_value: {min: 3, max: 20}
+    needed_from_grid_nova: "What range of rupees per unit is normal on the bills you see?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: EST-6
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.discoms.WBSEDCL}
+    description: "WBSEDCL domestic tariff (slabs, fixed charge, electricity duty): not available — no WBERC tariff order or real bill was supplied, so savings use the customer's own bill ÷ units or ₹9 flat (confidence low)."
+    dummy_value: null
+    needed_from_grid_nova: "Please put a recent real WBSEDCL domestic bill (personal details blacked out) or the current WBERC tariff order in _private/estimate-samples/."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-7
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.discoms.CESC}
+    description: "CESC domestic tariff: not available (no tariff order or real bill supplied)."
+    dummy_value: null
+    needed_from_grid_nova: "Please put a recent real CESC domestic bill (personal details blacked out) or the current WBERC tariff order for CESC in _private/estimate-samples/."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-8
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.discoms.NBPDCL}
+    description: "NBPDCL domestic tariffs (rural and urban): not available (no tariff order or real bill supplied)."
+    dummy_value: null
+    needed_from_grid_nova: "Please put a recent real NBPDCL domestic bill (personal details blacked out) or the current BERC tariff order in _private/estimate-samples/."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-9
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.discoms.SBPDCL}
+    description: "SBPDCL domestic tariffs (rural and urban): not available (no tariff order or real bill supplied)."
+    dummy_value: null
+    needed_from_grid_nova: "Please put a recent real SBPDCL domestic bill (personal details blacked out) or the current BERC tariff order in _private/estimate-samples/."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-10
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: tariffs.free_units}
+    description: "Bihar's 125 free units a month for domestic consumers (from July 2025, announced): the first 125 units are charged nothing, so solar saves only on units above them, and a bill-only estimate adds them back (units = 125 + bill ÷ rate)."
+    dummy_value: {bihar: 125}
+    needed_from_grid_nova: "Is Bihar's 125 free units scheme still running, does it cover every NBPDCL and SBPDCL domestic consumer, and are the first 125 units of the month the free ones?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: EST-11
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: savings.tariff_escalation_percent_per_year}
+    description: "Tariff rise per year in the 25-year savings: 0 % (conservative — savings are never inflated)."
+    dummy_value: 0
+    needed_from_grid_nova: "Should the 25-year savings assume any yearly rise in electricity tariffs, and if so how much?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: EST-12
+    area: pricing
+    location: {file: config/solar_estimate.yaml, key: savings.export_credit}
+    description: "Credit for surplus units exported to the grid: none assumed in West Bengal, Bihar or elsewhere (conservative). Only a confirmed flat credit is ever added to savings."
+    dummy_value: none
+    needed_from_grid_nova: "Under the WBERC 2025 prosumer regulations and Bihar's net-metering rules, what does a customer get for surplus units sent to the grid?"
+    blocking: tunable
+    probe: yaml_contains_marker
+
+  # ── BE-14: subsidies (config/subsidies.yaml) ────────────────────────────────────
+  - id: SUB-1
+    area: pricing
+    location: {file: config/subsidies.yaml, key: central.cfa_capacity_basis}
+    description: "Capacity the central CFA is paid on: nominal kW (default) or the modules' rated DC capacity. A '1 kW' of 2 × 550 Wp is 1.1 kWp DC and would earn ₹33,000, not ₹30,000."
+    dummy_value: nominal
+    needed_from_grid_nova: "How many panels go into a '1 kW' system (e.g. 2 × 550 Wp = 1.1 kWp DC), and does the PM Surya Ghar portal pay the subsidy on that DC capacity?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SUB-2
+    area: pricing
+    location: {file: config/subsidies.yaml, key: state_top_ups.bihar}
+    description: "Bihar state top-up: ₹10,000 per kW, at most ₹20,000, residential PM Surya Ghar consumers, DBT, one year from the cabinet decision (reported 14 Aug 2026). Announced: shown separately, never deducted from net cost. Fractions of a kW are pro-rata (assumption)."
+    dummy_value: {status: announced, valid_until: 2027-08-13}
+    needed_from_grid_nova: "Please confirm Bihar's state top-up order: the amount per kW, the ₹20,000 cap, whether part-kW systems get a pro-rata amount, and the end date."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SUB-3
+    area: pricing
+    location: {file: config/subsidies.yaml, key: state_top_ups.west_bengal}
+    description: "West Bengal state top-up: ₹5,000 (1 kW), ₹10,000 (2 kW), ₹15,000 (3 kW and above) on top of the central CFA, as reported at the state launch on 23 Jul 2026; the government order has not been located. A size between steps gets the lower step (assumption). SC/ST support is shown as text only — a customer's caste is never asked."
+    dummy_value: {status: announced}
+    needed_from_grid_nova: "Please send West Bengal's state top-up order: the amounts, what a 1.5 or 2.5 kW system gets, any end date, and how the extra SC/ST support is claimed."
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: SUB-4
+    area: pricing
+    location: {file: config/subsidies.yaml, key: proposal.print_confirmed_state_top_up}
+    description: "Whether a proposal prints a CONFIRMED state top-up as one more subsidy line (off). Announced amounts are never printed on a proposal."
+    dummy_value: false
+    needed_from_grid_nova: "Once a state top-up is confirmed, should proposals print it as an extra subsidy line?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: SUB-5
+    area: pricing
+    location: {file: config/subsidies.yaml, key: state_top_ups}
+    description: "State top-ups exist only for Bihar and West Bengal (both announced). Press reports list others (UP, Delhi, Rajasthan, Haryana, Assam, Gujarat …) but none is verified, so no amount is configured."
+    dummy_value: null
+    needed_from_grid_nova: "Which states will Grid Nova sell in next, so their state subsidy orders can be checked and added?"
+    blocking: tunable
+    probe: manual
 
 exemptions:
   # Markers that are not dummy values — each still has to match a marker somewhere,

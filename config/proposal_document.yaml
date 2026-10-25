@@ -30,7 +30,7 @@
 #   {module_short}          the module wording for tables (see module_phrases)
 #   {dcr_label}             "DCR" / "Non-DCR"
 #   {approved_capacity_kwp} capacity approved on the PM Surya Ghar portal
-#   {subsidy_up_to}         computed PM Surya Ghar subsidy (app/pricing/subsidy.py)
+#   {subsidy_up_to}         computed PM Surya Ghar subsidy (app/estimate/subsidy.py)
 #   {standard_warranty_years} from price_list.yaml commercial_terms.standard_warranty
 #   {validity_days}         sales_policy.yaml proposal_validity_days
 #   {space_required_sqft}   computed shadow-free roof area (space_required below)
@@ -70,16 +70,11 @@ signatory:
 layout_rule:
   compact_max_kwp: 10
 
-# Design basis for estimated generation — both samples: "~120 units / kWp / month".
-generation:
-  units_per_kwp_per_month: 120
-
-# Shadow-free roof area the plant needs, per kWp. The samples imply about 83–100 sq ft
-# per kWp (3 kWp → 250 – 300; 52 kWp → 4,300). Compact prints the range rounded to 10 sq
-# ft; Detailed prints the low figure rounded to 100. See SRV-4 (survey area per kW).
-space_required:
-  sqft_per_kwp_low: 83                  # [UNCONFIRMED]
-  sqft_per_kwp_high: 100                # [UNCONFIRMED]
+# Estimated generation (~120 units / kWp / month in both samples) and the shadow-free
+# roof area per kWp (the samples imply 83–100: 3 kWp → 250 – 300; 52 kWp → 4,300) come
+# from the solar estimate engine, config/solar_estimate.yaml (generation, roof_area) —
+# the same figures as the calculator (BE-14). Compact prints the area range rounded to
+# 10 sq ft; Detailed prints the low figure rounded to 100.
 
 # Salutations staff may choose; the default is the developer's working choice (the
 # samples say "Dear Sir," — a customer's gender is never guessed from a name).
@@ -207,6 +202,9 @@ compact:
   subsidy_total_line: Total project cost (incl. GST)
   subsidy_first_slab: "Less: Subsidy for first {kw} kW @ Rs. {rate} per kW"
   subsidy_third_slab: "Less: Subsidy for 3rd kW @ Rs. {rate} per kW"
+  # Printed only for a confirmed state top-up, when config/subsidies.yaml
+  # proposal.print_confirmed_state_top_up is on.
+  subsidy_state_line: "Less: {site_state} state subsidy"
   subsidy_effective: EFFECTIVE COST AFTER SUBSIDY
   subsidy_note: "Subsidy under PM Surya Ghar: Muft Bijli Yojana, as per DISCOM policy, subject to customer eligibility and availability. The customer pays the full amount as per the payment terms; the subsidy is credited by the Government directly to the customer’s bank account after installation, net metering and DISCOM inspection."
   warranty_label: Warranty & Terms

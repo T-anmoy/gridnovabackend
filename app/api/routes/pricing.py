@@ -9,6 +9,11 @@ applied by app/pricing/list_pricing.py):
   /instant-estimate  public — the /solar-calculator flow (app/pricing/instant_estimate.py)
   /packages          public — packages, makes, technology, terms, phase ranges and
                      (when policy public_price_display is `exact`) the price table
+  /estimate-assumptions  public — the solar estimate engine's assumptions and subsidy
+                     rules with their status and source (app/estimate/, BE-14)
+
+Every size, generation, subsidy and savings figure comes from the solar estimate engine
+(app/estimate/, config/solar_estimate.yaml + config/subsidies.yaml).
 
 /breakdown is Admin/Sales only and still returns the layered placeholder engine's
 itemized PricingBreakdown (app/pricing/engine.py, PRC-1…7) for internal use — it is
@@ -20,7 +25,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -40,7 +45,7 @@ router = APIRouter(prefix="/api/v1/pricing")
 class _BaseEstimateRequest(BaseModel):
     segment: str = Field(min_length=1)
     size_kw: Optional[float] = lim.bounded(gt=0, le=lim.MAX_KW)
-    monthly_bill_inr: Optional[float] = lim.bounded(ge=0, le=lim.MAX_MONTHLY_INR)
+    monthly_bill_inr: Optional[float] = lim.bounded(ge=lim.ESTIMATE_MIN_MONTHLY_INR, le=lim.ESTIMATE_MAX_MONTHLY_INR)
     state: str = Field(min_length=1)
     roof_type: Optional[str] = None
     floors: Optional[int] = Field(default=None, ge=1, le=lim.MAX_FLOORS)
@@ -53,15 +58,21 @@ class _BaseEstimateRequest(BaseModel):
             raise ValueError("Provide either size_kw or monthly_bill_inr.")
         return self
 
-    def resolved_size_kw(self) -> float:
-        """The given size, or the size the bill implies under the ONE bill-sizing rule
-        the Solar Calculator, onboarding and the survey use (app/pricing/sizing.py,
-        state-aware) — the same bill never gets two sizes (BE-7 N6). Rounded exactly
-        as the instant estimate hands its consumption size to the price list."""
+    def sizing(self):
+        """(exact kW, sizing basis): the given size, or the size the bill implies under
+        the solar estimate engine the Solar Calculator, onboarding and the survey use
+        (app/estimate/engine.py, state-aware) — the same bill never gets two sizes
+        (BE-7 N6). To 0.01 kW, exactly as the instant estimate hands it to the price list."""
         if self.size_kw is not None:
-            return self.size_kw
-        from app.pricing import sizing
-        return round(sizing.estimate_size_from_bill(self.monthly_bill_inr, self.state), 2)
+            return self.size_kw, "requested_size"
+        from app.estimate import engine
+        est = engine.EstimateInputs(state=self.state, segment=self.segment,
+                                    monthly_bill_inr=engine.to_decimal(self.monthly_bill_inr))
+        sized = engine.size(est, engine.consumption(est))
+        return float(sized.exact_kw), sized.sizing_basis
+
+    def resolved_size_kw(self) -> float:
+        return self.sizing()[0]
 
 
 class PublicEstimateRequest(_BaseEstimateRequest):
@@ -114,9 +125,15 @@ def public_estimate(
     _check_rate_limit(request, _estimate_request_log)
     if body.segment.strip().lower() not in pricing_engine.KNOWN_SEGMENTS:
         raise HTTPException(status_code=422, detail=f"Unknown segment: {body.segment!r}.")
+    from app.estimate import engine
+
+    try:
+        exact_kw, basis = body.sizing()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     lp = list_pricing.evaluate(state=body.state, segment=body.segment, is_housing_society=body.is_housing_society,
                                connection_type=body.connection_type, battery_storage=body.battery_storage,
-                               connection_phase=body.connection_phase, exact_kw=body.resolved_size_kw())
+                               connection_phase=body.connection_phase, exact_kw=exact_kw)
     assured = lp.packages.get("NOVA_ASSURED")
     return {
         "indicative_estimate": True,
@@ -132,6 +149,8 @@ def public_estimate(
         "gst_rule": price_list.gst_rule(),
         "price_list_version": price_list.version(),
         "destination": price_list.destination(),
+        "sizing_basis": basis,
+        "estimate_version": engine.estimate_version(),
     }
 
 
@@ -204,8 +223,10 @@ class InstantEstimateRequest(BaseModel):
     segment: str = Field(min_length=1)
     state: str = Field(min_length=1)
     sizing_method: str = Field(min_length=1)  # "by_units" | "by_bill" | "by_roof_area"
-    monthly_units_kwh: Optional[float] = lim.bounded(gt=0, le=lim.MAX_MONTHLY_KWH)
-    monthly_bill_inr: Optional[float] = lim.bounded(gt=0, le=lim.MAX_MONTHLY_INR)
+    # Units and bill may be given together (both from the bill): the units size the
+    # system and the customer's own ₹/unit prices the savings.
+    monthly_units_kwh: Optional[float] = lim.bounded(ge=lim.ESTIMATE_MIN_MONTHLY_KWH, le=lim.ESTIMATE_MAX_MONTHLY_KWH)
+    monthly_bill_inr: Optional[float] = lim.bounded(ge=lim.ESTIMATE_MIN_MONTHLY_INR, le=lim.ESTIMATE_MAX_MONTHLY_INR)
     usable_roof_area_sqft: Optional[float] = lim.bounded(gt=0, le=lim.MAX_AREA_SQFT)
     connection_phase: Optional[str] = None
     roof_type: Optional[str] = None
@@ -217,6 +238,16 @@ class InstantEstimateRequest(BaseModel):
     # Grid-connected without battery unless said otherwise (the price list covers only that).
     connection_type: Optional[str] = None
     battery_storage: bool = False
+    # BE-14, all optional: the DISCOM (its tariff table, when confirmed), the tariff
+    # category where the DISCOM has several (e.g. domestic_urban), the sanctioned load
+    # (a warning above it, never a silent cap), a housing society's number of houses (its
+    # CFA), and the module rating (the CFA's DC capacity, when that basis is configured).
+    discom: Optional[str] = Field(default=None, max_length=60)
+    tariff_category: Optional[str] = Field(default=None, max_length=60)
+    sanctioned_load_kw: Optional[float] = lim.bounded(gt=0, le=lim.ESTIMATE_MAX_SANCTIONED_LOAD_KW)
+    number_of_houses: Optional[int] = Field(default=None, ge=1, le=lim.ESTIMATE_MAX_HOUSES)
+    module_wattage_wp: Optional[int] = Field(default=None, ge=lim.ESTIMATE_MIN_MODULE_WP,
+                                             le=lim.ESTIMATE_MAX_MODULE_WP)
 
     @model_validator(mode="after")
     def _at_least_one_sizing_value(self):
@@ -240,9 +271,11 @@ def instant_estimate(
 ):
     """Public, unauthenticated — the /solar-calculator flow: sizing (consumption
     and/or roof-area based), Grid Nova's list prices for both packages at the priced
-    size, and the PM Surya Ghar subsidy shown separately with its conditions. Outside
-    the price list: no price, `price_status: custom_quote` with reasons. See
-    app/pricing/instant_estimate.py for every field."""
+    size (and the whole kW below, when priceable), the PM Surya Ghar subsidy with its
+    conditions (confirmed amounts deducted, announced state support shown separately),
+    generation, savings, payback and 25-year figures with every assumption's status.
+    Outside the price list: no price, `price_status: custom_quote` with reasons. See
+    docs/api/solar_estimate.md for every field."""
     _check_instant_estimate_rate_limit(request)
 
     memory = MemoryManager(db)
@@ -265,6 +298,11 @@ def instant_estimate(
                 is_housing_society=body.is_housing_society,
                 connection_type=body.connection_type,
                 battery_storage=body.battery_storage,
+                discom=body.discom,
+                tariff_category=body.tariff_category,
+                sanctioned_load_kw=body.sanctioned_load_kw,
+                number_of_houses=body.number_of_houses,
+                module_wattage_wp=body.module_wattage_wp,
             ),
         )
     except ValueError as exc:
@@ -323,3 +361,18 @@ def _packages_body() -> dict:
             for p in price_list.PACKAGES for phase, r in data["phase_ranges"].items()
             for kw in range(r["min_kw"], r["max_kw"] + 1)]
     return body
+
+
+_assumptions_request_log = RateLimitLog(_INSTANT_ESTIMATE_RATE_WINDOW_SECONDS)
+
+
+@router.get("/estimate-assumptions")
+def estimate_assumptions(request: Request, response: Response):
+    """Public — the solar estimate engine's current assumptions and subsidy rules, each
+    with its status (confirmed / announced / unconfirmed) and source, for the website's
+    "How we calculate" panel. Nothing secret: it is the same config the calculator
+    applies. Built once per process (the config is loaded once)."""
+    _check_rate_limit(request, _assumptions_request_log)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    from app.estimate import assumptions
+    return assumptions.public_body()

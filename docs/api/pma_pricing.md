@@ -16,6 +16,11 @@ All price-list amounts are **decimal strings**.
 
 ## 1. Public calculator — `POST /api/v1/pricing/instant-estimate`
 
+> **BE-14:** sizing, generation, subsidy, savings and payback now come from the solar
+> estimate engine — new inputs and outputs, the confirmed-only subsidy rule and the changes
+> in meaning are in [solar_estimate.md](solar_estimate.md). Everything below about prices
+> is unchanged.
+
 Request (unchanged fields plus two): `segment`, `state`, `sizing_method`
 (`by_units`|`by_bill`|`by_roof_area`), `monthly_units_kwh?`, `monthly_bill_inr?`,
 `usable_roof_area_sqft?`, `connection_phase?` (`single_phase`|`three_phase`),

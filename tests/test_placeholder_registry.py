@@ -170,12 +170,13 @@ class TestProbes:
         assert registry.evaluate(entry)["resolved"] is True   # the old version keeps its marker, as history
 
     def test_constant_probe(self, monkeypatch):
-        entry = registry.load().by_id["PRC-9"]
-        assert registry.evaluate(entry)["resolved"] is True       # Grid Nova's 9 / 1460 are in
-        import app.pricing.engine as engine
-        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT", 8.0)
-        assert registry.evaluate(entry)["resolved"] is False      # every symbol must differ from the dummy
-        monkeypatch.setattr(engine, "PLACEHOLDER_ASSUMED_TARIFF_INR_PER_UNIT", 7.5)
+        import app.pricing.instant_estimate as instant
+        entry = registry.Entry(id="T", area="pricing", location={"file": "app/pricing/instant_estimate.py",
+                                                                  "symbols": ["SIGNIFICANT_SHADING_RANGE_PERCENT"]},
+                               description="d", dummy_value={"SIGNIFICANT_SHADING_RANGE_PERCENT": 15.0},
+                               needed_from_grid_nova="q?", blocking="tunable", probe="constant_equals")
+        assert registry.evaluate(entry)["resolved"] is False      # still the dummy
+        monkeypatch.setattr(instant, "SIGNIFICANT_SHADING_RANGE_PERCENT", 10.0)
         assert registry.evaluate(entry)["resolved"] is True
 
     def test_resolved_and_superseded_statuses(self):
@@ -222,12 +223,19 @@ class TestProbes:
         db_session.commit()
         assert registry.evaluate(entry, db_session)["resolved"] is True
 
-    def test_prc10_resolved_and_reopens_on_the_sentinel(self, monkeypatch):
-        entry = registry.load().by_id["PRC-10"]
-        assert registry.evaluate(entry)["resolved"] is True       # Grid Nova's 4.0 kWh/kW/day are in
-        import app.pricing.sizing as sizing
-        monkeypatch.setattr(sizing, "PLACEHOLDER_DEFAULT_GENERATION_FACTOR", -1.0)
-        assert registry.evaluate(entry)["resolved"] is False      # reverting to the placeholder reopens it
+    def test_be14_moved_entries_and_the_estimate_entries(self):
+        """BE-14: the sizing / engine constants moved to config/solar_estimate.yaml. Grid
+        Nova's ₹9 and 4 units/kWp/day stay resolved (PRC-9, PRC-10); the developer defaults
+        are superseded by open EST-* entries; announced subsidies are open SUB-* entries."""
+        reg = registry.load()
+        for eid in ("PRC-9", "PRC-10"):
+            assert reg.by_id[eid].status == "resolved" and registry.evaluate(reg.by_id[eid])["resolved"] is True
+        for eid in ("PRC-11", "PRC-12", "SRV-4", "SRV-6", "PRO-17"):
+            assert reg.by_id[eid].status == "superseded", eid
+            assert reg.by_id[eid].location["file"] in ("config/solar_estimate.yaml", "config/price_list.yaml")
+        for eid in [f"EST-{n}" for n in range(1, 13)] + [f"SUB-{n}" for n in range(1, 5)]:
+            assert reg.by_id[eid].status == "open" and registry.evaluate(reg.by_id[eid])["resolved"] is False, eid
+        assert reg.by_id["SUB-5"].probe == "manual"
 
     def test_database_probes_are_unknown_without_a_session(self):
         assert registry.evaluate(registry.load().by_id["A1"])["resolved"] is None

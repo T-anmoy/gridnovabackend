@@ -258,6 +258,7 @@ PUBLIC = {
         {"json": {"segment": "residential", "state": "West Bengal", "sizing_method": "by_units",
                   "monthly_units_kwh": 400, "connection_phase": "single_phase"}},
     ("GET", "/api/v1/pricing/packages"): {},
+    ("GET", "/api/v1/pricing/estimate-assumptions"): {},
 }
 
 # Associate routes: "own" = not tied to one customer; "read"/"write" = one customer's.

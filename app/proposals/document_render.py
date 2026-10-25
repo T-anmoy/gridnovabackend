@@ -461,6 +461,8 @@ def _compact(doc, figs, ctx, cfg, ref_text, date_text) -> str:
             template = c["subsidy_first_slab"] if i == 0 else c["subsidy_third_slab"]
             line = _Ctx(kw=slab["kw"], rate=_amount(slab["rate"], True)).fill(template)
             rows.append((line, f"(–) {_amount(slab['amount'], whole)}"))
+        for top_up in figs["subsidy"].get("state_lines") or []:
+            rows.append((ctx.fill(c["subsidy_state_line"]), f"(–) {_amount(top_up['amount'], whole)}"))
         body = "".join(f'<tr><td class="k">{_e(k)}</td><td class="r" style="width:30%">{_e(v)}</td></tr>'
                        for k, v in rows)
         body += (f'<tr class="tot"><td>{_e(c["subsidy_effective"])}</td>'

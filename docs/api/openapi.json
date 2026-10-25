@@ -1830,8 +1830,8 @@
           "monthly_bill_inr": {
             "anyOf": [
               {
-                "maximum": 100000000.0,
-                "minimum": 0.0,
+                "maximum": 5000000.0,
+                "minimum": 1.0,
                 "type": "number"
               },
               {
@@ -4178,6 +4178,18 @@
             ],
             "title": "Connection Type"
           },
+          "discom": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discom"
+          },
           "floors": {
             "anyOf": [
               {
@@ -4201,11 +4213,24 @@
             "title": "Is Remote",
             "type": "boolean"
           },
+          "module_wattage_wp": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Wattage Wp"
+          },
           "monthly_bill_inr": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000000.0,
+                "maximum": 5000000.0,
+                "minimum": 1.0,
                 "type": "number"
               },
               {
@@ -4217,8 +4242,8 @@
           "monthly_units_kwh": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000000.0,
+                "maximum": 100000.0,
+                "minimum": 1.0,
                 "type": "number"
               },
               {
@@ -4226,6 +4251,19 @@
               }
             ],
             "title": "Monthly Units Kwh"
+          },
+          "number_of_houses": {
+            "anyOf": [
+              {
+                "maximum": 5000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Of Houses"
           },
           "roof_type": {
             "anyOf": [
@@ -4237,6 +4275,19 @@
               }
             ],
             "title": "Roof Type"
+          },
+          "sanctioned_load_kw": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanctioned Load Kw"
           },
           "segment": {
             "minLength": 1,
@@ -4263,6 +4314,18 @@
             "minLength": 1,
             "title": "State",
             "type": "string"
+          },
+          "tariff_category": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tariff Category"
           },
           "usable_roof_area_sqft": {
             "anyOf": [
@@ -8322,8 +8385,8 @@
           "monthly_bill_inr": {
             "anyOf": [
               {
-                "maximum": 100000000.0,
-                "minimum": 0.0,
+                "maximum": 5000000.0,
+                "minimum": 1.0,
                 "type": "number"
               },
               {
@@ -9609,6 +9672,14 @@
             "title": "Slabs",
             "type": "array"
           },
+          "state_lines": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SubsidyStateLine"
+            },
+            "title": "State Lines",
+            "type": "array"
+          },
           "total": {
             "anyOf": [
               {
@@ -9649,6 +9720,24 @@
           "amount"
         ],
         "title": "SubsidySlab",
+        "type": "object"
+      },
+      "SubsidyStateLine": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "amount"
+        ],
+        "title": "SubsidyStateLine",
         "type": "object"
       },
       "Suggestion": {
@@ -24381,9 +24470,26 @@
         "summary": "Public Estimate"
       }
     },
+    "/api/v1/pricing/estimate-assumptions": {
+      "get": {
+        "description": "Public — the solar estimate engine's current assumptions and subsidy rules, each\nwith its status (confirmed / announced / unconfirmed) and source, for the website's\n\"How we calculate\" panel. Nothing secret: it is the same config the calculator\napplies. Built once per process (the config is loaded once).",
+        "operationId": "estimate_assumptions_api_v1_pricing_estimate_assumptions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Estimate Assumptions"
+      }
+    },
     "/api/v1/pricing/instant-estimate": {
       "post": {
-        "description": "Public, unauthenticated — the /solar-calculator flow: sizing (consumption\nand/or roof-area based), Grid Nova's list prices for both packages at the priced\nsize, and the PM Surya Ghar subsidy shown separately with its conditions. Outside\nthe price list: no price, `price_status: custom_quote` with reasons. See\napp/pricing/instant_estimate.py for every field.",
+        "description": "Public, unauthenticated — the /solar-calculator flow: sizing (consumption\nand/or roof-area based), Grid Nova's list prices for both packages at the priced\nsize (and the whole kW below, when priceable), the PM Surya Ghar subsidy with its\nconditions (confirmed amounts deducted, announced state support shown separately),\ngeneration, savings, payback and 25-year figures with every assumption's status.\nOutside the price list: no price, `price_status: custom_quote` with reasons. See\ndocs/api/solar_estimate.md for every field.",
         "operationId": "instant_estimate_api_v1_pricing_instant_estimate_post",
         "requestBody": {
           "content": {

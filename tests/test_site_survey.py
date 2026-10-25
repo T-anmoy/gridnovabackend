@@ -207,8 +207,10 @@ class TestResults:
         oid = _create(client, gna)
         complete_survey(client, gna, oid, sign=False)
         r = _results(client, gna, oid)
-        # 60 m² = 645.8 sq ft / 90 → 7.18 kW; load 5 × 1.0; usage 400 kWh → 3.0 kW (90 % offset).
-        assert (r["max_by_area_kw"], r["max_by_load_kw"], r["recommended_by_usage_kw"]) == (7.18, 5.0, 3.0)
+        # 60 m² = 645.8 sq ft / 100 (config/solar_estimate.yaml, BE-14) → 6.46 kW; load 5 × 1.0;
+        # usage 400 kWh → 3.0 kW (90 % offset).
+        assert (r["max_by_area_kw"], r["max_by_load_kw"], r["recommended_by_usage_kw"]) == (6.46, 5.0, 3.0)
+        assert r["assumptions"]["area_sqft_per_kw"] == 100
         assert (r["suggested_kw"], r["limiting_factor"], r["requested_kw"]) == (3, "usage", 3)
         assert r["bills"] == {"months_recorded": 3, "average_monthly_units_kwh": 400.0,
                               "average_monthly_bill_inr": "3200.00", "implied_tariff_inr_per_kwh": "8.00"}
@@ -217,6 +219,14 @@ class TestResults:
         assert set(est["packages"]) == {"NOVA_ASSURED", "NOVA_SIGNATURE"}
         assert isinstance(est["packages"]["NOVA_ASSURED"]["final"], str) and est["subsidy_inr"] == "78000.00"
         assert r["warnings"] == []
+        # The solar estimate engine's figures for 3 kW: 3 × 120 = 360 units a month; the bills'
+        # own ₹8.00/unit prices the saving: 3,200.00 − 40 × 8 = 2,880.00 a month, 34,560.00 a
+        # year; payback (2,01,465 − 78,000) ÷ 34,560 = 3.57 → 3.6 years.
+        assert est["generation"]["monthly_units"] == "360" and est["generation"]["annual_units"] == "4320"
+        assert (est["savings"]["monthly"], est["savings"]["annual"]) == ("2880.00", "34560.00")
+        assert est["savings"]["tariff_source"] == "customer_bill" and est["confidence"] == "medium"
+        assert est["payback_years"] == "3.6" and est["net_cost"] == "123465.00"
+        assert est["subsidy"]["central"]["category"] == "general" and est["estimate_version"]
 
     def test_custom_quote_outside_the_list(self, client, db_session, onboarding_ready):
         gna = make_associate(db_session)
@@ -425,7 +435,17 @@ class TestConfig:
         from app.survey import config
         config.load.cache_clear()
         cfg = config.load()
-        assert cfg["min_consumption_months"] == 3 and cfg["area_sqft_per_kw"] == 90
+        assert cfg["min_consumption_months"] == 3 and "area_sqft_per_kw" not in cfg
+
+    def test_the_moved_keys_are_refused_here(self):
+        """BE-14: roof area per kW and the bill-per-unit range are the solar estimate
+        engine's — a second copy in the survey config would let the two drift apart."""
+        from app.survey import config
+        for key, value in (("area_sqft_per_kw", 90), ("implied_tariff_inr_per_kwh", {"min": 3, "max": 20})):
+            data = json.loads(json.dumps(config.load()))
+            data[key] = value
+            with pytest.raises(config.SurveyConfigError, match="solar_estimate.yaml"):
+                config._validate(data)
 
     def test_unknown_field_refused(self, monkeypatch):
         from app.survey import config

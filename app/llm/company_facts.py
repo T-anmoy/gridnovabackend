@@ -20,12 +20,6 @@ specifically so the model never fills a gap on its own.
 from __future__ import annotations
 
 from app.config import settings
-from app.pricing.subsidy import (
-    MAX_SUBSIDY_INR,
-    RATE_PER_KW_FIRST_2KW,
-    RATE_PER_KW_THIRD_KW,
-    SUBSIDY_ELIGIBLE_UP_TO_KW,
-)
 
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -66,6 +60,44 @@ def _online_pricing_coverage() -> str:
     listed = states[0] if len(states) == 1 else ", ".join(states[:-1]) + " and " + states[-1]
     return (f"Online package prices and the Solar Calculator currently cover {listed}; "
             "for other states a team member will follow up.")
+
+
+def _inr(amount) -> str:
+    return f"₹{int(amount):,}"
+
+
+def _subsidy_block() -> str:
+    """The PM Surya Ghar rules from config/subsidies.yaml (BE-14) — the same rules the
+    Solar Calculator applies. Confirmed central rules only, as rules (never a particular
+    customer's outcome). State support that is only announced is named without amounts
+    and is never stated as certain."""
+    from app.estimate.config import subsidy_config
+
+    cfg = subsidy_config()
+    cen = cfg["central"]
+    lines = []
+    for cat, label in (("general", "most states"), ("special", "special-category states")):
+        (two, first_rate), (three, third_rate) = cen["residential"][cat]["slabs"]
+        lines.append(f"{label}: {_inr(first_rate)}/kW for the first {int(two)}kW, {_inr(third_rate)} for the "
+                     f"3rd kW, capped at {_inr(cen['residential'][cat]['max_inr'])} for any system of "
+                     f"{int(three)}kW or more")
+    soc = cen["housing_society"]
+    special = ", ".join(cen["special_category_states"])
+    announced = sorted({item["state"] for items in cfg["state_top_ups"].values() for item in items
+                        if item["status"] != "confirmed"})
+    text = (f"{cen['scheme']} rooftop subsidy (Central Financial Assistance), for a grid-connected individual "
+            f"house with DCR modules — {lines[0]}; {lines[1]}. Special-category states: {special}. "
+            f"A housing society or RWA (common facilities, including EV charging) gets "
+            f"{_inr(soc['rate_per_kwp']['general'])}/kW ({_inr(soc['rate_per_kwp']['special'])}/kW in "
+            f"special-category states) on up to {int(soc['kwp_per_house'])}kW per house, at most "
+            f"{int(soc['max_kwp'])}kW. No residential subsidy for commercial, industrial or government "
+            "connections, non-DCR modules or off-grid systems. Eligibility is decided under the scheme, never "
+            "by Grid Nova or by this chat.")
+    if announced:
+        text += (f" Extra state support has been announced, but not yet confirmed by an official order, in "
+                 f"{' and '.join(announced)}: it is not guaranteed — never state an amount or say a customer "
+                 "will get it.")
+    return text + " For a customer's own figures, send them to the Solar Calculator on the website."
 
 
 def _packages_block() -> str:
@@ -130,11 +162,7 @@ Service coverage: Grid Nova now serves customers across India, not a limited
 region — this supersedes any earlier West Bengal/Bihar-only guidance.
 {_online_pricing_coverage()}
 
-PM Surya Ghar residential rooftop subsidy (Central Financial Assistance):
-₹{RATE_PER_KW_FIRST_2KW:,.0f}/kW for the first 2kW, ₹{RATE_PER_KW_THIRD_KW:,.0f} for the 3rd kW,
-capped at ₹{MAX_SUBSIDY_INR:,.0f} for any system of {SUBSIDY_ELIGIBLE_UP_TO_KW:.0f}kW or more.
-Applies to genuine individual residential rooftop only — never Housing
-Society/RWA or any commercial/industrial/government segment.
+{_subsidy_block()}
 
 {_packages_block()}
 

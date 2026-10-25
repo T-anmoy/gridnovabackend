@@ -389,7 +389,9 @@ def price_parts(price: Price, capacity) -> tuple[Optional[Decimal], Optional[Dec
 def figures(doc: ProposalDocument) -> dict:
     """Every computed figure on the document, as decimal strings where money. One
     function: the PDF, the dashboard and the accept page all read this."""
-    from app.pricing import subsidy as pm_surya_ghar
+    from app.estimate import engine
+    from app.estimate import subsidy as pm_surya_ghar
+    from app.estimate.config import estimate_config, subsidy_config
     from app.pricing.amount_words import amount_in_words
     from app.rules import sales_policy
 
@@ -405,14 +407,27 @@ def figures(doc: ProposalDocument) -> dict:
             running += amount
             payments.append({"percent": kw_text(term.percent), "label": term.label, "short_label": term.short_label,
                              "amount": str(amount)})
+    # The solar estimate engine (app/estimate/): the central CFA slabs for the site's state
+    # (special-category rates where they apply), generation and roof area — the same
+    # figures as the calculator. A confirmed state top-up is printed only when
+    # config/subsidies.yaml proposal.print_confirmed_state_top_up is on; announced ones never.
+    state = doc.site.state
     applies = subsidy_applies(doc)
-    slabs = pm_surya_ghar.subsidy_slabs(float(cap), "residential") if applies else []
-    subsidy_total = money(pm_surya_ghar.calculate_pm_surya_ghar_subsidy(float(cap), "residential")) if applies \
-        else Decimal(0)
+    slabs, state_lines, subsidy_total = [], [], Decimal(0)
+    if applies:
+        capacity, _basis, _note = pm_surya_ghar.cfa_capacity(Decimal(str(cap)), None)
+        rows, central = pm_surya_ghar.residential_slabs(capacity, state)
+        slabs = [(r["kwp"], r["rate_per_kwp"], r["amount"]) for r in rows]
+        subsidy_total = money(central)
+        if subsidy_config()["proposal"]["print_confirmed_state_top_up"]:
+            state_lines = [t for t in pm_surya_ghar.state_top_ups(state, Decimal(str(cap)), engine.today_ist())
+                           if t["status"] == "confirmed"]
+            subsidy_total += sum((t["amount"] for t in state_lines), Decimal(0))
     effective = total - subsidy_total if (applies and total is not None) else None
-    per_kwp = cfg["generation"]["units_per_kwp_per_month"]
-    monthly = _round_to(Decimal(str(cap)) * per_kwp, 1) if cap else None
-    space = cfg["space_required"]
+    per_kwp = int(engine.generation_rate(state).value)
+    monthly = int(engine.monthly_generation(Decimal(str(cap)), state)) if cap else None
+    roof = estimate_config()["roof_area"]
+    space = {"sqft_per_kwp_low": roof["sqft_per_kwp_low"].value, "sqft_per_kwp_high": roof["sqft_per_kwp"].value}
     amounts = [a for a in (basic, gst, total, subsidy_total, effective) if a is not None]
     amounts += [Decimal(p["amount"]) for p in payments]
     whole = all(a == a.to_integral_value() for a in amounts)
@@ -432,6 +447,7 @@ def figures(doc: ProposalDocument) -> dict:
         "subsidy": {"applies": applies,
                     "slabs": [{"kw": kw_text(Decimal(str(k))), "rate": str(money(r)), "amount": str(money(a))}
                               for k, r, a in slabs],
+                    "state_lines": [{"state": t["state"], "amount": str(t["amount"])} for t in state_lines],
                     "total": str(subsidy_total) if applies else None,
                     "effective_cost": str(effective) if effective is not None else None},
         "generation": {"units_per_kwp_per_month": per_kwp,

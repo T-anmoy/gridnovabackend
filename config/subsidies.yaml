@@ -1,0 +1,117 @@
+# Grid Nova Energy — subsidy rules for rooftop solar (BE-14). Read by app/estimate/config.py
+# and validated at startup; applied by app/estimate/subsidy.py for the calculator, the
+# associate's estimate, the survey results and the proposal document.
+#
+# status (as in config/solar_estimate.yaml):
+#   confirmed    an official order or scheme document says so — the ONLY amounts deducted
+#                from net_cost
+#   announced    a government announced it; the order has not been seen — returned as
+#                announced_state_support, never deducted
+#   unconfirmed  a developer default — never deducted
+# Every announced / unconfirmed value carries an UNCONFIRMED marker (in square brackets) and an entry in
+# config/placeholder_registry.yaml (SUB-*).
+
+version: 1
+
+central:
+  scheme: "PM Surya Ghar: Muft Bijli Yojana"
+  status: confirmed
+  source: "MNRE, PM Surya Ghar operational guidelines for residential CFA (7 Jun 2024); PIB scheme document (Aug 2024); residential CFA unchanged in the 2025–26 amendments"
+  as_of: 2024-06-07
+
+  # a) Residential: an individual house, grid-connected, DCR modules, capex mode. Slabs
+  # are cumulative capacity (kWp); fractions are pro-rata (1.5 kWp → ₹45,000; 2.5 kWp →
+  # ₹69,000); nothing above 3 kWp. max_inr is checked against the slabs at load.
+  residential:
+    general:
+      slabs: [{up_to_kwp: 2, rate_per_kwp: 30000}, {up_to_kwp: 3, rate_per_kwp: 18000}]
+      max_inr: 78000
+    special:
+      slabs: [{up_to_kwp: 2, rate_per_kwp: 33000}, {up_to_kwp: 3, rate_per_kwp: 19800}]
+      max_inr: 85800
+
+  # b) Housing society / RWA, common facilities incl. EV charging: eligible capacity =
+  # min(installed kWp, kwp_per_house × number of houses, max_kwp). Needs the number of
+  # houses; without it the subsidy is "needs_number_of_houses", never ₹0 and never a guess.
+  housing_society:
+    rate_per_kwp: {general: 18000, special: 19800}
+    kwp_per_house: 3
+    max_kwp: 500
+
+  # Special-category states / UTs (higher rates). Matched on the state's name, ignoring
+  # case, "&" / "and" and punctuation.
+  special_category_states:
+    - Arunachal Pradesh
+    - Assam
+    - Manipur
+    - Meghalaya
+    - Mizoram
+    - Nagaland
+    - Sikkim
+    - Tripura
+    - Uttarakhand
+    - Himachal Pradesh
+    - Jammu & Kashmir
+    - Ladakh
+    - Andaman & Nicobar Islands
+    - Lakshadweep
+
+  # Residential CFA only for these segments; commercial, industrial and government
+  # connections get none. Off-grid systems get none; grid-tied with a battery or a
+  # hybrid inverter stay eligible, with CFA on module capacity only.
+  eligible_segments: [residential]
+  eligible_connection_types: [on_grid, hybrid]
+
+  # What the CFA follows. The guidelines pay on the rated DC capacity of the modules, not
+  # the inverter. nominal = the system's kW as sold; module_dc = ceil(nominal W ÷ module Wp)
+  # × module Wp (a "1 kW" of 2 × 550 Wp = 1.1 kWp DC → ₹33,000, not ₹30,000).
+  cfa_capacity_basis: {value: nominal, status: unconfirmed, source: "Developer default until Grid Nova says how many modules a nominal kW gets", as_of: 2026-10-25}   # [UNCONFIRMED]
+
+  # Shown with every subsidy figure.
+  conditions: [dcr_modules_required, scheme_eligibility, grid_connected, one_subsidy_per_house,
+               national_portal_registration, discom_inspection_and_net_metering]
+
+# c) State top-ups, per state (snake_case key). An amount rule is one of:
+#   per_kw_with_cap   {rate_per_kw, cap}            pro-rata on the system's kW, then capped
+#   capacity_steps    {steps: [{min_kw, amount}]}  the highest step whose min_kw ≤ the system's kW
+# applies_to: residential_individual (the PM Surya Ghar residential consumer). Outside
+# valid_from … valid_until (dates in IST, inclusive) a top-up is not shown.
+state_top_ups:
+  bihar:
+    - state: Bihar
+      amount_rule: {type: per_kw_with_cap, rate_per_kw: 10000, cap: 20000}
+      applies_to: residential_individual
+      eligibility_note: "Residential consumers under PM Surya Ghar; paid by DBT; for one year from the cabinet decision. With the central CFA, up to ₹98,000."
+      status: announced                  # [UNCONFIRMED]
+      source: "Bihar cabinet decision, reported 14 Aug 2026 (official order not seen)"
+      as_of: 2026-08-14
+      valid_from: 2026-08-14
+      valid_until: 2027-08-13            # [UNCONFIRMED] one year from the decision, as reported
+  west_bengal:
+    - state: West Bengal
+      amount_rule: {type: capacity_steps, steps: [{min_kw: 1, amount: 5000}, {min_kw: 2, amount: 10000}, {min_kw: 3, amount: 15000}]}
+      applies_to: residential_individual
+      # A customer's caste is never asked; the SC/ST support is shown only as this text.
+      eligibility_note: "On top of the central CFA. Additional state support may apply for SC/ST households."
+      status: announced                  # [UNCONFIRMED]
+      source: "West Bengal state launch, reported 23 Jul 2026 (government order not located)"
+      as_of: 2026-07-23
+      valid_from: 2026-07-23
+      valid_until: null
+  # Other states: no amounts until an order is seen. Example (not loaded):
+  # uttar_pradesh:
+  #   - state: Uttar Pradesh
+  #     amount_rule: {type: per_kw_with_cap, rate_per_kw: …, cap: …}
+  #     applies_to: residential_individual
+  #     eligibility_note: "…"
+  #     status: announced
+  #     source: "…"
+  #     as_of: YYYY-MM-DD
+  #     valid_from: YYYY-MM-DD
+  #     valid_until: null
+
+proposal:
+  # The proposal prints the central CFA slabs (as the samples do). When true, a CONFIRMED
+  # state top-up for the site's state is printed as one more line. Announced amounts are
+  # never printed on a proposal.
+  print_confirmed_state_top_up: false    # [UNCONFIRMED]

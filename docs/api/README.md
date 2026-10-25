@@ -23,6 +23,7 @@ these files disagree, the code wins — fix the file.
 | [attribution_lock.md](attribution_lock.md) | BE-11: the attribution lock lasts until the project is completed or closed (Associate Terms A7) — `attribution.locked` / `released_reason` replace `locked_until`, `attribution_lock_days` removed from `/options`, migration 0053, what the frontend must change |
 | [commission_rates_individual.md](commission_rates_individual.md) | BE-12: an Associate's individual commission rate (Admin sets, Management reads; reduction needs 15 days' notice, increase today), the one rate resolver used by the ledger, estimate and displays, the associate's own rate, the per-Associate performance summary, the rate-change home-feed item and email, the first real schedule taking effect today, migration 0054 |
 | [proposal_document.md](proposal_document.md) | BE-13: the proposal document — two fixed layouts (≤ 10 kWp Compact, > 10 kWp Detailed), the structured document and its computed figures, the unique reference, who may edit which section, the document / edit / preview routes and their errors, `missing_required` on approval and send, adjust-pricing `basic_price` / `rate_per_kwp`, migration 0055 |
+| [solar_estimate.md](solar_estimate.md) | BE-14: the solar estimate engine — one calculation of size, generation, PM Surya Ghar subsidy (general / special-category / housing society, state top-ups with status), DISCOM tariffs and marginal savings, payback and 25-year figures; new instant-estimate inputs and outputs, `GET /pricing/estimate-assumptions`, the other callers, backward compatibility |
 | `openapi.json` | Machine-readable schema — regenerate with `python scripts/export_openapi.py` (`--check` fails when stale) |
 
 ## Conventions (all phases)
@@ -30,7 +31,7 @@ these files disagree, the code wins — fix the file.
 **Prefixes.** Staff routes live under `/api/v1/dashboard/...` (plus `/api/v1/equipment`,
 `/api/v1/proposal-inputs`, `/api/v1/pricing/breakdown`); associate routes under
 `/api/v1/associate/...`; public routes under `/api/v1/public/...` and `/api/v1/pricing/...`
-(`estimate`, `instant-estimate`, `packages`).
+(`estimate`, `instant-estimate`, `packages`, `estimate-assumptions`).
 
 **Authentication.**
 - Production: a Clerk session token. Staff tokens resolve through `get_current_employee`,

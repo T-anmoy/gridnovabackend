@@ -141,7 +141,7 @@ with `min_consumption_months` (3) months. Variant extras: `housing_society` →
  "suggested_kw": 3, "limiting_factor": "usage", "requested_kw": 3.0,
  "bills": {"months_recorded": 3, "average_monthly_units_kwh": 400.0, "average_monthly_bill_inr": "3200.00",
            "implied_tariff_inr_per_kwh": "8.00"},
- "assumptions": {"area_sqft_per_kw": 90, "load_cap_ratio": 1.0, "target_offset_percent": 90.0},
+ "assumptions": {"area_sqft_per_kw": 100, "load_cap_ratio": 1.0, "target_offset_percent": 90.0},
  "warnings": [],
  "estimate": {"indicative": true, "size_kw": 3, "price_status": "list_price", "custom_quote_reasons": [],
               "priced_kw": 3, "phase": "SINGLE",
@@ -152,6 +152,9 @@ with `min_consumption_months` (3) months. Variant extras: `housing_society` →
               "price_list_version": 1}}
 ```
 
+- BE-14: `area_sqft_per_kw` (100) and the bill-per-unit range are the solar estimate
+  engine's (`config/solar_estimate.yaml`), and `estimate` carries the engine's subsidy,
+  generation, savings and payback fields — see [solar_estimate.md](solar_estimate.md) §5.
 - `max_by_area_kw` = `shadow_free_area_sqft` ÷ `area_sqft_per_kw`; `max_by_load_kw` =
   `sanctioned_load_kw` × `load_cap_ratio`; `recommended_by_usage_kw` = the existing sizing
   engine on the average monthly units (else the bill), at its target offset. Each is `null`

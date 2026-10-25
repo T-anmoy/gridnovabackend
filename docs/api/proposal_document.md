@@ -116,9 +116,9 @@ all read it.
 | `words.basic/gst/total` | Indian system, "Rupees Two Lakh One Thousand Four Hundred Sixty-Five Only" (crore, lakh, thousand; "and N Paise") |
 | `payments[]` | `{percent, label, short_label, amount}`: amount = total × percent, rounded; the last milestone takes the remainder so they add up to the total exactly |
 | `whole_rupees` | true when every amount is whole → the PDF prints `2,01,465`; otherwise all amounts with paise |
-| `subsidy` | `{applies, slabs[{kw, rate, amount}], total, effective_cost}` — PM Surya Ghar CFA (app/pricing/subsidy.py): residential, not a housing society, subsidy opted, DCR modules; 30,000/kW first 2 kW + 18,000 3rd kW, cap 78,000; effective cost = total − subsidy |
-| `generation` | `units_per_kwp_per_month` (120, config) × capacity per month, × 12 per year |
-| `space_required_sqft` | `{low, high, single}` = capacity × 83 / 100 sq ft (config, [UNCONFIRMED] PRO-17); compact prints low–high rounded to 10, detailed prints `single` (low rounded to 100) |
+| `subsidy` | `{applies, slabs[{kw, rate, amount}], state_lines[{state, amount}], total, effective_cost}` — PM Surya Ghar CFA (app/estimate/subsidy.py, BE-14): residential, not a housing society, subsidy opted, DCR modules; 30,000/kW first 2 kW + 18,000 3rd kW, cap 78,000 (special-category states 33,000 / 19,800, cap 85,800, by `site.state`); `state_lines` = a confirmed state top-up, only when config/subsidies.yaml `proposal.print_confirmed_state_top_up` (default false); effective cost = total − subsidy |
+| `generation` | `units_per_kwp_per_month` (120 for `site.state`, config/solar_estimate.yaml) × capacity per month, × 12 per year |
+| `space_required_sqft` | `{low, high, single}` = capacity × 83 / 100 sq ft (config/solar_estimate.yaml `roof_area`, unconfirmed EST-3); compact prints low–high rounded to 10, detailed prints `single` (low rounded to 100) |
 | `validity_days` | `sales_policy.yaml proposal_validity_days` (15) |
 
 Amounts print as the samples do: `Rs. 2,01,465` (Indian grouping).

@@ -1,0 +1,122 @@
+# Grid Nova Energy — solar estimate engine (BE-14): generation, roof area, sizing policy,
+# savings assumptions and electricity tariffs. Read by app/estimate/config.py and validated
+# at startup; the subsidy rules are in config/subsidies.yaml.
+#
+# This file is the ONLY source of these figures. The public calculator, the associate's
+# indicative estimate, the survey results, /pricing/estimate and /breakdown and the
+# proposal document all read them through app/estimate/.
+#
+# Every value is {value, unit, status, source, as_of}:
+#   status  confirmed    Grid Nova, or an official order, confirmed it
+#           announced    a government announced it; the official order has not been seen
+#           unconfirmed  the developer's working default (or "not available")
+# Every announced / unconfirmed value carries an UNCONFIRMED marker (in square brackets) and an entry in
+# config/placeholder_registry.yaml (EST-*). Confirming a value = set its status to
+# confirmed, give the source, and remove the marker on its lines.
+#
+# Numbers are written as text where they have decimals ("0.55") so no binary float ever
+# reaches a calculation.
+
+version: 1
+
+generation:
+  # Units generated per kWp per month. Grid Nova (Raju Paul, 15 Oct 2026): 4 units per
+  # kWp per day on average for West Bengal, Bihar and the default, printed as "~120 units /
+  # kWp / month" on both sample proposals. Annual = monthly × 12 = 1,440. System losses
+  # are already inside this figure: no second derate is applied. Shading is not modelled as
+  # a loss (a "significant" shading report returns a note: a site visit is needed).
+  units_per_kwp_per_month:
+    states:
+      west_bengal: {value: 120, unit: kWh/kWp/month, status: confirmed, source: "Grid Nova (Raju Paul), 15 Oct 2026: 4 units/kWp/day; sample proposals print ~120 units/kWp/month", as_of: 2026-10-15}
+      bihar: {value: 120, unit: kWh/kWp/month, status: confirmed, source: "Grid Nova (Raju Paul), 15 Oct 2026: 4 units/kWp/day; sample proposals print ~120 units/kWp/month", as_of: 2026-10-15}
+    # Any other state: Grid Nova's default, never an invented state yield. The response
+    # says the figure is not confirmed for that state.
+    fallback: {value: 120, unit: kWh/kWp/month, status: unconfirmed, source: "Grid Nova default (4 units/kWp/day), not confirmed for states other than West Bengal and Bihar", as_of: 2026-10-15}  # [UNCONFIRMED]
+
+  # Module output for the long-term figures (linear warranty curve): year 1 at 100 %,
+  # year 2 at 100 − first_year, then − annual for each later year (typical datasheet:
+  # 98 % after year 1, then −0.55 % a year). Not Grid Nova's panels' own datasheet yet.
+  degradation:
+    first_year_percent: {value: "2.0", unit: percent, status: unconfirmed, source: "Typical panel datasheet warranty curve (developer default)", as_of: 2026-10-25}   # [UNCONFIRMED]
+    annual_percent: {value: "0.55", unit: percent/year, status: unconfirmed, source: "Typical panel datasheet warranty curve (developer default)", as_of: 2026-10-25}     # [UNCONFIRMED]
+
+roof_area:
+  # Shadow-free roof area per kWp. Sizing from roof area divides by sqft_per_kwp; the
+  # proposal prints the range sqft_per_kwp_low – sqft_per_kwp (the samples: 3 kWp → 250 –
+  # 300; 52 kWp → 4,300). MNRE's PM Surya Ghar guidance is about 10 m² (≈ 100 sq ft) per kW.
+  sqft_per_kwp: {value: 100, unit: sq ft/kWp, status: unconfirmed, source: "MNRE PM Surya Ghar guidance (~10 m² per kW); upper end of Grid Nova's sample proposals (PRO-17)", as_of: 2026-10-25}          # [UNCONFIRMED]
+  sqft_per_kwp_low: {value: 83, unit: sq ft/kWp, status: unconfirmed, source: "Lower end implied by Grid Nova's two sample proposals (3 kWp → 250; 52 kWp → 4,300)", as_of: 2026-10-24}                   # [UNCONFIRMED]
+
+sizing:
+  # exact_kw = annual units × target_offset / annual generation per kWp. A system sized
+  # slightly below 100 % avoids over-generation from a small sizing error.
+  target_offset_percent: {value: 90, unit: percent, status: unconfirmed, source: "Developer default (was PRC-11)", as_of: 2026-10-25}   # [UNCONFIRMED]
+
+savings:
+  # Savings are marginal: bill(units) − bill(units − solar), fixed charges unchanged.
+  # Tariffs are held flat for the long-term figures unless this says otherwise — never
+  # inflated to make savings look better.
+  tariff_escalation_percent_per_year: {value: 0, unit: percent/year, status: unconfirmed, source: "Developer default: no escalation (conservative)", as_of: 2026-10-25}   # [UNCONFIRMED]
+
+  # Years in the long-term figures: the price list's solar panel life span.
+  long_term_years: {value: 25, unit: years, status: confirmed, source: "Grid Nova price list v1: solar panel life span 25 years", as_of: 2026-10-04}
+
+  # Credit for surplus units exported to the grid (generation above consumption).
+  # rule: none (no credit) | flat_inr_per_kwh (value = ₹ per exported unit).
+  export_credit:
+    states:
+      west_bengal: {rule: none, value: null, unit: INR/kWh, status: unconfirmed, source: "WBERC 2025 prosumer regulations not yet confirmed: no credit assumed (conservative)", as_of: 2026-10-25}   # [UNCONFIRMED]
+      bihar: {rule: none, value: null, unit: INR/kWh, status: unconfirmed, source: "Bihar (BERC) net-metering rules not yet confirmed: no credit assumed (conservative)", as_of: 2026-10-25}        # [UNCONFIRMED]
+    fallback: {rule: none, value: null, unit: INR/kWh, status: unconfirmed, source: "No credit assumed (conservative)", as_of: 2026-10-25}   # [UNCONFIRMED]
+
+  # Operation and maintenance: the first year is free (price list); later years' cost is
+  # not modelled and is never deducted from the savings.
+  o_and_m_first_year_free: {value: true, unit: flag, status: confirmed, source: "Grid Nova price list v1: O&M first year free", as_of: 2026-10-04}
+
+tariffs:
+  # Grid Nova's flat ₹ per unit, used when neither a confirmed DISCOM tariff nor the
+  # customer's own bill-per-unit is available (confidence: low).
+  flat_rate_inr_per_kwh: {value: 9, unit: INR/kWh, status: confirmed, source: "Grid Nova (Raju Paul), 15 Oct 2026: a flat average, not a DISCOM tariff", as_of: 2026-10-15}
+
+  # A bill ÷ units outside this range is treated as a typing error: warning
+  # implied_tariff_outside_range, and the tariff table (or the flat rate) is used instead.
+  # The survey's warning reads the same range.
+  implied_rate_sanity_inr_per_kwh: {min: 3, max: 20, unit: INR/kWh, status: unconfirmed, source: "Developer default (was SRV-6)", as_of: 2026-10-06}   # [UNCONFIRMED]
+
+  # Domestic tariff tables per DISCOM. Slab values come ONLY from an official tariff order
+  # or a real bill in _private/estimate-samples/ — never typed from a website. None was
+  # supplied when BE-14 was built, so every table is null (status unconfirmed) and the
+  # engine falls back to the customer's bill-per-unit or the flat rate.
+  #
+  # A table, once known:
+  #   slabs: [{up_to_units: 100, rate: "5.00"}, …, {up_to_units: null, rate: "…"}]   ascending; last open
+  #   fixed_charge: {type: flat_per_month | per_kw_per_month, value: "…"}             or null
+  #   electricity_duty: {type: percent_of_energy | percent_of_energy_and_fixed, value: "…"}  or null
+  #   effective_from: YYYY-MM-DD
+  discoms:
+    WBSEDCL:
+      state: West Bengal
+      categories:
+        domestic: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no WBERC tariff order or real WBSEDCL bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+    CESC:
+      state: West Bengal
+      categories:
+        domestic: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no WBERC tariff order or real CESC bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+    NBPDCL:
+      state: Bihar
+      categories:
+        domestic_rural: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no BERC tariff order or real NBPDCL bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+        domestic_urban: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no BERC tariff order or real NBPDCL bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+    SBPDCL:
+      state: Bihar
+      categories:
+        domestic_rural: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no BERC tariff order or real SBPDCL bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+        domestic_urban: {slabs: null, fixed_charge: null, electricity_duty: null, effective_from: null, status: unconfirmed, source: "Not available: no BERC tariff order or real SBPDCL bill supplied", as_of: 2026-10-25}   # [UNCONFIRMED]
+
+  # State free-unit schemes for domestic consumers: the first `value` units a month cost
+  # nothing, so solar only saves on units above the allowance. Applied to every bill model
+  # (tariff table, bill-per-unit, flat rate) for the listed DISCOMs, or the state when the
+  # DISCOM is not given. Applied while announced: a customer's bill already reflects it, and
+  # leaving it out would overstate what solar saves a small consumer.
+  free_units:
+    bihar: {value: 125, unit: kWh/month, state: Bihar, discoms: [NBPDCL, SBPDCL], status: announced, source: "Bihar government: 125 free units a month for domestic consumers from July 2025 (announced; order not seen)", as_of: 2025-07-01}   # [UNCONFIRMED]

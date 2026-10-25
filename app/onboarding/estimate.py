@@ -14,7 +14,10 @@ Estimates made before the price list stay readable exactly as stored.
 If the associate recorded a requested capacity (desired_output_kw), that size is priced
 — and must be a whole kW in the price list's range for the connection phase (422
 unsupported_size otherwise); it is never rounded. Otherwise the engine sizes from
-monthly units, then the bill, then roof area, and rounds up to a whole kW.
+monthly units, then the bill, then roof area, and rounds up to a whole kW. Units and bill
+together: the units size it and the customer's own ₹/unit prices the savings. The DISCOM,
+sanctioned load and a society's flat count feed the same engine (BE-14), and the snapshot
+keeps `estimate_version` so the figures can be reproduced.
 """
 from __future__ import annotations
 
@@ -83,6 +86,9 @@ def build_inputs(db: Session, onboarding: CustomerOnboarding, *, segment: Option
         requested_size_kw=inputs.desired_output_kw if method == "requested_size" else None,
         connection_type=inputs.connection_type.value if inputs.connection_type else None,
         battery_storage=bool(inputs.battery_storage),
+        discom=inputs.discom or None,
+        sanctioned_load_kw=inputs.sanctioned_load_kw or None,
+        number_of_houses=inputs.society_flat_count or None,
     )
 
 

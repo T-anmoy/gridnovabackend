@@ -44,16 +44,17 @@ def _validate(data: dict) -> dict:
 
     for key in ("survey_required_to_submit", "resign_after_edit", "review_required_for_formal_proposal"):
         need(isinstance(data.get(key), bool), f"{key} must be true/false")
-    for key in ("area_sqft_per_kw", "load_cap_ratio", "average_mismatch_ratio", "distance_max_m",
+    # BE-14: the roof area per kW and the bill-per-unit range moved to the solar estimate
+    # engine (config/solar_estimate.yaml) — one source for the survey and the calculator.
+    for key in ("area_sqft_per_kw", "implied_tariff_inr_per_kwh"):
+        need(key not in data, f"{key} is now in config/solar_estimate.yaml (roof_area / tariffs); remove it here")
+    for key in ("load_cap_ratio", "average_mismatch_ratio", "distance_max_m",
                 "signature_max_kb", "review_target_hours"):
         positive(key)
     months = [data.get(k) for k in ("min_consumption_months", "requested_consumption_months",
                                     "max_consumption_months")]
     need(all(isinstance(m, int) and m > 0 for m in months) and months[0] <= months[1] <= months[2],
          "need whole numbers min_consumption_months <= requested_consumption_months <= max_consumption_months")
-    tariff = data.get("implied_tariff_inr_per_kwh") or {}
-    need(isinstance(tariff.get("min"), (int, float)) and isinstance(tariff.get("max"), (int, float))
-         and 0 < tariff["min"] < tariff["max"], "implied_tariff_inr_per_kwh needs 0 < min < max")
     variants = {v.value for v in SurveyVariant}
     plausible = data.get("max_plausible_roof_area_sqft") or {}
     need(set(plausible) == variants and all(isinstance(v, (int, float)) and v > 0 for v in plausible.values()),

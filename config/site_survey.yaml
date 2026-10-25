@@ -16,17 +16,12 @@ requested_consumption_months: 6      # [UNCONFIRMED]
 min_consumption_months: 3            # [UNCONFIRMED]
 max_consumption_months: 12
 
-# Shadow-free roof area needed per kW. Grid Nova's two sample proposals imply roughly
-# 75–83 sq ft per kW; 90 is the working default.
-area_sqft_per_kw: 90                 # [UNCONFIRMED]
+# Shadow-free roof area per kW and the normal bill-per-unit range: the solar estimate
+# engine's (config/solar_estimate.yaml roof_area.sqft_per_kwp and
+# tariffs.implied_rate_sanity_inr_per_kwh), shared with the calculator (BE-14).
 
 # Maximum system size as a share of the sanctioned load (1.0 = up to the sanctioned load).
 load_cap_ratio: 1.0                  # [UNCONFIRMED]
-
-# Bill ÷ units outside this range (₹ per unit) raises implied_tariff_outside_range.
-implied_tariff_inr_per_kwh:          # [UNCONFIRMED]
-  min: 3
-  max: 20
 
 # An average the associate typed differs from the average of the bills by more than
 # this share → units_bill_mismatch.
