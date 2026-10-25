@@ -45,6 +45,7 @@ from app.api.routes.public_proposals import router as public_proposals_router
 from app.api.routes.public_receipts import router as public_receipts_router
 from app.config import check_production_config, settings
 from app.memory.db import Base, engine
+from app.security.error_responses import GENERIC_500, UnhandledErrorMiddleware, log_unhandled
 from app.security.upload_limit import UploadSizeLimitMiddleware
 
 
@@ -144,6 +145,11 @@ app = FastAPI(
 # so CORS stays the outer layer and the 413 still carries CORS headers to the browser.
 app.add_middleware(UploadSizeLimitMiddleware)
 
+# An unhandled exception becomes the generic 500 here, inside CORS: a 500 built by the
+# Exception handler below is sent by ServerErrorMiddleware, outside CORSMiddleware, and the
+# browser would hide it as a network failure. The handler stays as the fallback.
+app.add_middleware(UnhandledErrorMiddleware)
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -215,9 +221,5 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    import logging
-    logging.getLogger(__name__).error("Unhandled exception: %s", exc, exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "An internal error occurred."},
-    )
+    log_unhandled(exc)
+    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=GENERIC_500)
