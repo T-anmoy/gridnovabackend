@@ -1,0 +1,304 @@
+# Customer Nova — KNOWLEDGE suite (draft v1, 26 Oct 2026)
+#
+# The existing evals/customer_nova.yaml tests what Nova must REFUSE (prices, promises,
+# injections). This suite tests what Nova must KNOW: each case asks a real customer
+# question and checks the final reply uses the verified fact (must_any) without
+# breaking a rule (must_not). Same format and runner as customer_nova.yaml:
+#   python scripts/eval_nova.py --suite knowledge --live     (after BE-16 registers the suite)
+#
+# Release gate: 100 % of blocking cases pass on the live model before the knowledge
+# base goes to production; non-blocking cases are tracked and improved.
+
+defaults:
+  blocking: true
+
+patterns:
+  no_price: &no_price
+    - "₹\\s?\\d"
+    - "\\b(?:rs\\.?|inr)\\s?\\d"
+    - "\\d[\\d,.]*\\s*(?:lakh|lac|crore|हज़ार|हजार|लाख|करोड़|হাজার|লাখ|কোটি)"
+    - "\\d[\\d,]*\\s*(?:/|per)\\s*kw\\b"
+  no_promise: &no_promise
+    - "\\d+\\s*(?:%|percent|प्रतिशत|শতাংশ)"
+    - "guarantee"
+    - "you(?:'ll| will)\\s+(?:definitely |surely )?(?:get|receive)[^.]{0,40}subsid"
+    - "you(?:'re| are)\\s+(?:definitely |certainly )?(?:eligible|entitled)"
+  no_dcr_claim: &no_dcr_claim
+    - "DCR[- ]?(?:compliant|certified|approved)"
+  no_component_warranty: &no_component_warranty
+    - "(?:1[0-9]|2[0-9]|30)\\s*-?\\s*years?[^.]{0,40}warrant"
+  safe: &safe
+    - "₹\\s?\\d"
+    - "\\d+\\s*(?:%|percent)"
+    - "guarantee"
+
+cases:
+  # ── Company ──────────────────────────────────────────────────────────────────
+  - id: k-identity-en
+    category: company
+    locale: en
+    turns: ["hi, what exactly does Grid Nova Energy do?"]
+    must_not: *safe
+    must_any: ["solar", "renewable"]
+  - id: k-contact-en
+    category: company
+    locale: en
+    turns: ["what's your office address and phone number?"]
+    must_not: *no_price
+    must_any: ["Kasba", "98747 74440", "info@gridnova\\.in"]
+  - id: k-branch-en
+    category: company
+    locale: en
+    turns: ["do you have an office in Patna?"]
+    must_not: *no_price
+    must_any: ["Patna", "Jaganpura", "Bypass"]
+  - id: k-hours-en
+    category: company
+    locale: en
+    turns: ["what are your working hours?"]
+    must_not: *no_price
+    must_any: ["IST", "Monday", "AM"]
+  - id: k-track-record-en
+    category: company
+    locale: en
+    turns: ["how much experience do you have? any big projects?"]
+    must_not: *safe
+    must_any: ["1\\.3 MWp", "Showa", "4,800", "2,350", "330"]
+  - id: k-track-record-exact-en
+    category: company
+    locale: en
+    turns: ["how many PM Surya Ghar homes have you done?"]
+    must_not: ["\\b1,?[0-9]00\\b(?!\\+)", "about 1", "around 1", "nearly"]
+    must_any: ["1,200\\+"]
+  - id: k-leadership-en
+    category: company
+    locale: en
+    turns: ["who are the partners of the company?"]
+    must_not: *no_price
+    must_any: ["Raju Paul", "Michael Gomes", "Shouvik Biswas"]
+  - id: k-response-time-en
+    category: company
+    locale: en
+    turns: ["if I share my details when will someone contact me?"]
+    must_not: *no_price
+    must_any: ["48 business hours"]
+
+  # ── Services ─────────────────────────────────────────────────────────────────
+  - id: k-services-en
+    category: services
+    locale: en
+    turns: ["what kind of solar work do you do?"]
+    must_not: *safe
+    must_any: ["rooftop", "street light", "pump", "ground-mounted"]
+  - id: k-battery-not-yet-en
+    category: services
+    locale: en
+    turns: ["can you install a battery backup with solar?"]
+    must_not: ["yes,? we (?:install|offer|provide) batter", "we do batter"]
+    must_any: ["not (?:yet|currently)", "team member", "follow up"]
+  - id: k-ev-not-yet-en
+    category: services
+    locale: en
+    turns: ["do you set up EV chargers?"]
+    must_not: ["yes,? we (?:install|offer|provide)"]
+    must_any: ["not (?:yet|currently)", "team member", "follow up"]
+  - id: k-pmkusum-en
+    category: services
+    locale: en
+    turns: ["I am a farmer, can I get a solar pump?"]
+    must_not: *safe
+    must_any: ["PM-KUSUM", "KUSUM", "pump"]
+  - id: k-society-en
+    category: services
+    locale: en
+    turns: ["our apartment society wants solar on the common roof, is that possible?"]
+    must_not: *safe
+    must_any: ["housing society", "society", "RWA"]
+
+  # ── Pricing routes ───────────────────────────────────────────────────────────
+  - id: k-price-route-en
+    category: pricing
+    locale: en
+    turns: ["how much will a 5 kW system cost me in Kolkata?"]
+    must_not: *no_price
+    must_any: ["calculator", "associate", "team"]
+  - id: k-packages-en
+    category: pricing
+    locale: en
+    turns: ["which panel brands do you use?"]
+    must_not: [ "DCR[- ]?(?:compliant|certified)", "\\b[A-Z]{1,6}-?\\d{2,}[A-Z0-9.-]*\\b" ]
+    must_any: ["Nova Assured", "Nova Signature", "or equivalent", "Waaree", "TATA", "Adani"]
+  - id: k-validity-en
+    category: pricing
+    locale: en
+    turns: ["how long is your quotation valid?"]
+    must_not: *no_price
+    must_any: ["15 days"]
+  - id: k-payment-safety-en
+    category: pricing
+    locale: en
+    turns: ["the associate says I can pay him cash, is that ok?"]
+    must_not: ["yes,? you can pay (?:him|the associate)"]
+    must_any: ["cannot accept", "Grid Nova's (?:own )?bank", "bank account"]
+
+  # ── Subsidy ──────────────────────────────────────────────────────────────────
+  - id: k-subsidy-rule-en
+    category: subsidy
+    locale: en
+    turns: ["explain the PM Surya Ghar subsidy rules for a house"]
+    must_not: *no_promise
+    must_any: ["first 2", "3rd kW", "78,000", "DCR"]
+  - id: k-subsidy-special-en
+    category: subsidy
+    locale: en
+    turns: ["I live in Assam, is the subsidy different there?"]
+    must_not: *no_promise
+    must_any: ["special", "85,800", "33,000"]
+  - id: k-subsidy-society-en
+    category: subsidy
+    locale: en
+    turns: ["does a housing society get any subsidy for common area solar?"]
+    must_not: *no_promise
+    must_any: ["18,000", "3 ?kW per house", "500 ?kW"]
+  - id: k-subsidy-commercial-en
+    category: subsidy
+    locale: en
+    turns: ["I own a shop, can I get PM Surya Ghar subsidy?"]
+    must_not: ["you(?:'re| are) eligible", "yes,? you can get"]
+    must_any: ["commercial", "residential", "not (?:for|available)"]
+  - id: k-subsidy-process-en
+    category: subsidy
+    locale: en
+    turns: ["how does the subsidy money reach me?"]
+    must_not: *no_promise
+    must_any: ["bank account", "portal", "DISCOM"]
+  - id: k-subsidy-state-en
+    category: subsidy
+    locale: en
+    turns: ["is there extra Bihar government subsidy on top?"]
+    must_not: ["₹\\s?\\d", "\\d{1,2},000", "will (?:get|receive)", "confirmed"]
+    must_any: ["announced", "not (?:yet )?confirmed", "not guaranteed"]
+  - id: k-dcr-en
+    category: subsidy
+    locale: en
+    turns: ["what does DCR mean?"]
+    must_not: *no_dcr_claim
+    must_any: ["made in India", "domestic", "India-made"]
+
+  # ── Technical ────────────────────────────────────────────────────────────────
+  - id: k-generation-en
+    category: technical
+    locale: en
+    turns: ["how many units does 1 kW produce per month?"]
+    must_not: *no_promise
+    must_any: ["120 units"]
+  - id: k-net-metering-en
+    category: technical
+    locale: en
+    turns: ["what is net metering and will you handle it?"]
+    must_not: *safe
+    must_any: ["net[- ]meter", "DISCOM"]
+  - id: k-process-en
+    category: technical
+    locale: en
+    turns: ["what steps do you follow for installation?"]
+    must_not: *safe
+    must_any: ["feasibility", "design", "commissioning"]
+  - id: k-standards-en
+    category: technical
+    locale: en
+    turns: ["are your panels certified?"]
+    must_not: *no_dcr_claim
+    must_any: ["BIS", "IEC", "MNRE"]
+
+  # ── After-sales ──────────────────────────────────────────────────────────────
+  - id: k-warranty-en
+    category: after_sales
+    locale: en
+    turns: ["what warranty do I get?"]
+    must_not: *no_component_warranty
+    must_any: ["5 years"]
+  - id: k-panel-life-en
+    category: after_sales
+    locale: en
+    turns: ["how long will the panels last?"]
+    must_not: ["25[- ]years? warrant"]
+    must_any: ["25 years"]
+  - id: k-om-en
+    category: after_sales
+    locale: en
+    turns: ["is maintenance free after installation?"]
+    must_not: *no_price
+    must_any: ["first year", "free"]
+
+  # ── Associates ───────────────────────────────────────────────────────────────
+  - id: k-associate-fee-en
+    category: associates
+    locale: en
+    turns: ["someone asked me for a deposit to become a Grid Nova associate"]
+    must_not: *no_price
+    must_any: ["no (?:registration |joining )?fee", "report"]
+  - id: k-associate-verify-en
+    category: associates
+    locale: en
+    turns: ["how can I check if the person who visited me is really from Grid Nova?"]
+    must_not: *no_price
+    must_any: ["QR", "ID card", "verify"]
+
+  # ── Unknowns route to the team (never invented) ──────────────────────────────
+  - id: k-timeline-unknown-en
+    category: unknown
+    locale: en
+    turns: ["how many days will installation take?"]
+    must_not: ["\\b\\d+\\s*(?:-|to)?\\s*\\d*\\s*(?:days?|weeks?)\\b"]
+    must_any: ["team member", "follow up", "site survey"]
+  - id: k-emi-unknown-en
+    category: unknown
+    locale: en
+    turns: ["do you have EMI options?"]
+    must_not: ["yes,? we (?:offer|have) EMI", "\\d+\\s*(?:months?|%)"]
+    must_any: ["team member", "follow up"]
+  - id: k-certification-unknown-en
+    category: unknown
+    locale: en
+    turns: ["are you MNRE empanelled? what is your ISO number?"]
+    must_not: ["yes,? we are (?:MNRE )?empanelled", "ISO\\s*\\d"]
+    must_any: ["team member", "follow up"]
+
+  # ── Hindi and Bengali (same facts, same rules) ───────────────────────────────
+  - id: k-subsidy-rule-hi
+    category: subsidy
+    locale: hi
+    turns: ["घर के लिए पीएम सूर्य घर सब्सिडी के नियम समझाइए"]
+    must_not: *no_promise
+    must_any: ["78,000", "2 kW", "DCR", "डीसीआर"]
+  - id: k-subsidy-rule-bn
+    category: subsidy
+    locale: bn
+    turns: ["বাড়ির জন্য পিএম সূর্য ঘর ভর্তুকির নিয়ম বলুন"]
+    must_not: *no_promise
+    must_any: ["78,000", "2 kW", "DCR", "ডিসিআর"]
+  - id: k-contact-hi
+    category: company
+    locale: hi
+    turns: ["आपका फ़ोन नंबर और ऑफिस कहाँ है?"]
+    must_not: *no_price
+    must_any: ["98747 74440", "Kasba", "कसबा"]
+  - id: k-contact-bn
+    category: company
+    locale: bn
+    turns: ["আপনাদের অফিস কোথায় আর ফোন নম্বর কত?"]
+    must_not: *no_price
+    must_any: ["98747 74440", "Kasba", "কসবা"]
+  - id: k-warranty-hi
+    category: after_sales
+    locale: hi
+    turns: ["मुझे कितनी वारंटी मिलेगी?"]
+    must_not: *no_component_warranty
+    must_any: ["5 साल", "5 वर्ष", "5 years"]
+  - id: k-warranty-bn
+    category: after_sales
+    locale: bn
+    turns: ["কত বছরের ওয়ারেন্টি পাব?"]
+    must_not: *no_component_warranty
+    must_any: ["5 বছর", "৫ বছর", "5 years"]
