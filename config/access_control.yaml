@@ -55,6 +55,23 @@ permissions:
   pricing.adjust:
     description: Adjust a proposal's price and read the price breakdown.
     sensitive: true
+  # ── Proposal Studio (BE-18) ──────────────────────────────────────────────────
+  studio.view:
+    description: Open the Proposal Studio and your own Studio proposals.
+  studio.view_all:
+    description: See every Studio proposal, not only your own.
+  studio.edit:
+    description: Create Studio customers and proposals; edit, issue, deliver, revise, duplicate, mark accepted or lost.
+  studio.price:
+    description: Set and change a Studio proposal's price and discount.
+    sensitive: true
+  studio.approve:
+    description: Approve or reject a Studio proposal prepared by someone else.
+    sensitive: true
+  studio.library.manage:
+    description: Add, edit and retire Studio notes, scope items, BOQ presets and templates.
+  studio.convert:
+    description: Create a lead (and its proposal) from a Studio proposal.
   # ── Customers, meetings, projects ────────────────────────────────────────────
   customers.memory_query:
     description: Ask Nova about a customer's history.
@@ -212,6 +229,9 @@ roles:
       - equipment.procurement_price.view
       - placeholders.view
       - audit.view
+      - studio.view
+      - studio.view_all
+      - studio.approve
     requires_two_factor: true
     can_assign_roles: []
   network_manager:
@@ -305,6 +325,19 @@ roles:
     requires_two_factor: true
     can_assign_roles: []
 
+  proposal_desk:
+    label: Proposal Desk
+    description: Prepares, prices, issues and tracks proposals in the Proposal Studio. Nothing outside the Studio.
+    permissions:
+      - studio.view
+      - studio.view_all
+      - studio.edit
+      - studio.price
+      - studio.library.manage
+      - studio.convert
+    requires_two_factor: false
+    can_assign_roles: []
+
 # At most one of these per person. Each narrows what its holder sees per record (Sales:
 # own leads; Engineer: technical fields only; Operations: projects in execution), and
 # two of them together would leave no single answer for a record one role sees fully and
@@ -327,7 +360,8 @@ approvals:
     payouts.batch_approve: false
 
 # Staff alerts: who receives each event. Recipients are the active employees holding any
-# listed role, the lead's assigned employee when `assigned_employee: true`, and — always —
+# listed role, the lead's assigned employee when `assigned_employee: true`, the Studio
+# proposal's owner when `owner: true`, and — always —
 # the fixed addresses already configured (STAFF_NOTIFY_EMAILS, ACCOUNTS_NOTIFY_EMAILS,
 # OPERATIONS_NOTIFY_EMAILS), so shared mailboxes keep receiving. Deduplicated; a
 # deactivated employee is never emailed.
@@ -355,3 +389,9 @@ alerts:
   commission_queries_overdue: {roles: [accounts]}
   associate_application_submitted: {roles: [network_manager, admin]}
   approval_requested: {roles: []}         # sent to the eligible approvers of that request
+  studio_approval_requested: {roles: [admin, management]}   # the holders of studio.approve
+  studio_viewed: {roles: [], owner: true}
+  studio_accepted: {roles: [], owner: true}
+  studio_declined: {roles: [], owner: true}
+  studio_expiring: {roles: [], owner: true}
+  studio_not_viewed: {roles: [], owner: true}

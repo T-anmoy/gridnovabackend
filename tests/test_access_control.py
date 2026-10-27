@@ -112,10 +112,21 @@ NETWORK_MANAGER = {
     "surveys.view", "audit.view_associates", "staff.manage",
 }
 
+# BE-18: the Proposal Studio. Proposal Desk works only there; Management views and approves.
+STUDIO = {
+    "studio.view": {"admin", "management", "proposal_desk"},
+    "studio.view_all": {"admin", "management", "proposal_desk"},
+    "studio.edit": {"admin", "proposal_desk"},
+    "studio.price": {"admin", "proposal_desk"},
+    "studio.approve": {"admin", "management"},
+    "studio.library.manage": {"admin", "proposal_desk"},
+    "studio.convert": {"admin", "proposal_desk"},
+}
+
 
 def expected_matrix() -> dict[str, set[str]]:
     out = {r.value: set() for r in EmployeeRole}
-    for table in (PRE_BE17, REPLACED_CHECKS):
+    for table in (PRE_BE17, REPLACED_CHECKS, STUDIO):
         for perm, roles in table.items():
             for role in roles:
                 out[role].add(perm)

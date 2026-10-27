@@ -70,3 +70,8 @@ jobs:
     # Deletes Nova Records conversations older than config/nova_records.yaml
     # retention.days (BE-9, registry NR-3).
     schedule: "30 3 * * *"        # daily at 03:30 IST [UNCONFIRMED]
+  - name: gridnova-check-studio-reminders
+    path: /api/v1/dashboard/internal/check-studio-reminders
+    # Proposal Studio (BE-18): remind owners of proposals not opened / about to expire,
+    # expire the overdue ones (days: config/studio.yaml reminders).
+    schedule: "0 9 * * *"         # daily 09:00 IST [UNCONFIRMED]

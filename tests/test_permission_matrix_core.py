@@ -234,7 +234,7 @@ UNCOVERED = {
     ("GET", "/api/v1/health"), ("GET", "/api/v1/health/ready"),
 }
 UNCOVERED_ROUTERS = ("chat", "health", "public_intake", "public_booking", "public_proposals",
-                     "public_receipts", "public_associates", "public_handover")
+                     "public_receipts", "public_associates", "public_handover", "public_studio")
 
 
 def _all_operations() -> dict[str, set]:
@@ -250,7 +250,8 @@ def _all_operations() -> dict[str, set]:
 
 def test_every_router_is_covered_by_a_matrix_or_listed_as_uncovered():
     from tests import test_permission_matrix as original
-    covered = set(original.COVERED_ROUTERS) | set(COVERED_ROUTERS)
+    from tests import test_studio_permissions as studio
+    covered = set(original.COVERED_ROUTERS) | set(COVERED_ROUTERS) | set(studio.COVERED_ROUTERS)
     routers = set(_all_operations())
     assert routers - covered - set(UNCOVERED_ROUTERS) == set(), \
         "a router no permission matrix covers — add it to a matrix's COVERED_ROUTERS"
@@ -284,4 +285,9 @@ EXPECTED_PUBLIC_UNCOVERED = {
     ("GET", "/api/v1/public/handover/{token}"), ("GET", "/api/v1/public/handover/{token}/pdf"),
     ("GET", "/api/v1/public/handover/{token}/service-requests"),
     ("POST", "/api/v1/public/handover/{token}/service-requests"),
+    # BE-18: the Proposal Studio's customer page and QR verification (token / code gated;
+    # tests/test_proposal_studio.py TestPublic).
+    ("GET", "/api/v1/public/studio/{token}"), ("GET", "/api/v1/public/studio/{token}/pdf"),
+    ("POST", "/api/v1/public/studio/{token}/accept"), ("POST", "/api/v1/public/studio/{token}/decline"),
+    ("GET", "/api/v1/public/proposals/verify/{code}"),
 }

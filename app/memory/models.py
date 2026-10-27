@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import (
     String, Float, Boolean, Text, JSON, ForeignKey,
     Enum as SAEnum, DateTime, Date, Integer, UniqueConstraint, CheckConstraint,
-    Index, text, DDL, event, Numeric, false,
+    Index, text, DDL, event, Numeric, false, true,
 )
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship, validates
 from sqlalchemy.types import TypeDecorator
@@ -71,6 +71,9 @@ class EmployeeRole(str, enum.Enum):
     # BE-17: runs the Associate Network and invites staff below Admin
     # (config/access_control.yaml; migration 0056_access_control).
     network_manager = "network_manager"
+    # BE-18: works only in the Proposal Studio (config/access_control.yaml; migration
+    # 0057_proposal_studio).
+    proposal_desk = "proposal_desk"
 
 
 class LeadScore(str, enum.Enum):
@@ -159,6 +162,8 @@ class LeadSource(str, enum.Enum):
     cold_call = "cold_call"
     referral = "referral"
     other = "other"
+    # BE-18: converted from a Proposal Studio proposal (app/studio/convert.py).
+    proposal_studio = "proposal_studio"
 
 
 class Channel(str, enum.Enum):
@@ -2773,3 +2778,156 @@ class ApprovalRequest(Base):
     decided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+# ── Proposal Studio (BE-18, migration 0057_proposal_studio) ──────────────────────────
+
+class StudioStatus(str, enum.Enum):
+    draft = "draft"
+    pending_approval = "pending_approval"
+    ready = "ready"
+    issued = "issued"
+    viewed = "viewed"
+    accepted = "accepted"
+    declined = "declined"
+    expired = "expired"
+    superseded = "superseded"
+    converted = "converted"
+    lost = "lost"
+
+
+class StudioCustomer(Base):
+    """A Proposal Studio customer — separate from the lead pipeline's customers. Duplicates by
+    mobile or GSTIN are warned about, never blocked."""
+    __tablename__ = "studio_customers"
+    __table_args__ = (Index("ix_studio_customers_mobile", "mobile"), Index("ix_studio_customers_gstin", "gstin"),
+                      Index("ix_studio_customers_name", "name"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    customer_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    attention: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    mobile: Mapped[str] = mapped_column(String(10), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(254), nullable=True)
+    address_lines: Mapped[list] = mapped_column(JSON, nullable=False)
+    gstin: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class StudioProposal(Base):
+    """One Studio proposal: its customer, owner, type and status; the document lives in its
+    versions. `code` (SP-000123) is internal and never printed."""
+    __tablename__ = "studio_proposals"
+    __table_args__ = (Index("ix_studio_proposals_status_updated", "status", "updated_at"),
+                      Index("ix_studio_proposals_owner", "owner_id"),
+                      Index("ix_studio_proposals_customer", "customer_id"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[Optional[str]] = mapped_column(String(16), unique=True, nullable=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("studio_customers.id"), nullable=False)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    project_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[StudioStatus] = mapped_column(SAEnum(StudioStatus, native_enum=False, length=24), nullable=False,
+                                                 default=StudioStatus.draft)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    lead_id: Mapped[Optional[int]] = mapped_column(ForeignKey("leads.id"), nullable=True, unique=True)
+    lost_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class StudioProposalVersion(Base):
+    """One version of a Studio proposal. Editable while a draft; locked once issued (a
+    revision is a new version). The reference, PDF hash, verification code and access token
+    are set once and never reused."""
+    __tablename__ = "studio_proposal_versions"
+    __table_args__ = (UniqueConstraint("proposal_id", "version", name="uq_studio_versions_proposal_version"),
+                      Index("uq_studio_versions_reference", "document_reference", unique=True),
+                      Index("ix_studio_versions_status_valid", "status", "valid_until"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("studio_proposals.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[StudioStatus] = mapped_column(SAEnum(StudioStatus, native_enum=False, length=24), nullable=False,
+                                                 default=StudioStatus.draft)
+    document: Mapped[dict] = mapped_column(JSON, nullable=False)
+    total: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    figures: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)            # snapshot at issue
+    document_reference: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    document_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    verification_code: Mapped[str] = mapped_column(String(16), unique=True, nullable=False)
+    token_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)     # Fernet; the link is re-sent
+    pdf_storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pdf_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    pdf_filename: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    submitted_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    approval_revision: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    approval_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    issued_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issued_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    valid_until: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    supersedes_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    change_summary: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    acknowledged: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)       # warning fingerprints
+    spell_ignore: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    first_viewed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    accepted_via: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    accepted_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    accepted_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    accepted_user_agent: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    accepted_pdf_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    signed_copy_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    signed_copy_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    declined_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    decline_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reminders_sent: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class StudioEvent(Base):
+    """The proposal's timeline and analytics source: every staff action, customer view,
+    download, acceptance and job step."""
+    __tablename__ = "studio_events"
+    __table_args__ = (Index("ix_studio_events_proposal_at", "proposal_id", "at"),
+                      Index("ix_studio_events_type_at", "type", "at"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("studio_proposals.id"), nullable=False)
+    version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor_type: Mapped[str] = mapped_column(String(16), nullable=False)        # employee | customer | system
+    actor: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class StudioLibraryItem(Base):
+    """Saved notes, customer-scope items, BOQ presets and whole-document templates (no
+    customer data) for the Studio."""
+    __tablename__ = "studio_library_items"
+    __table_args__ = (Index("ix_studio_library_kind_active", "kind", "active"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    project_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)

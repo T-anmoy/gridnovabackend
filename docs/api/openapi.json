@@ -1,6 +1,52 @@
 {
   "components": {
     "schemas": {
+      "AcceptIn": {
+        "properties": {
+          "accept_terms": {
+            "title": "Accept Terms",
+            "type": "boolean"
+          },
+          "full_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "mobile_last4": {
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^\\d{4}$",
+            "title": "Mobile Last4",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "mobile_last4",
+          "accept_terms"
+        ],
+        "title": "AcceptIn",
+        "type": "object"
+      },
+      "Acknowledge": {
+        "properties": {
+          "fingerprints": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Fingerprints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fingerprints"
+        ],
+        "title": "Acknowledge",
+        "type": "object"
+      },
       "Addressee": {
         "additionalProperties": false,
         "properties": {
@@ -956,6 +1002,40 @@
           "file"
         ],
         "title": "Body_import_projects_api_v1_dashboard_archive_imports_post",
+        "type": "object"
+      },
+      "Body_import_sheet_api_v1_dashboard_studio_import_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_sheet_api_v1_dashboard_studio_import_post",
+        "type": "object"
+      },
+      "Body_mark_accepted_api_v1_dashboard_studio_proposals__proposal_id__mark_accepted_post": {
+        "properties": {
+          "accepted_on": {
+            "format": "date",
+            "title": "Accepted On",
+            "type": "string"
+          },
+          "signed_copy": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Signed Copy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accepted_on",
+          "signed_copy"
+        ],
+        "title": "Body_mark_accepted_api_v1_dashboard_studio_proposals__proposal_id__mark_accepted_post",
         "type": "object"
       },
       "Body_raise_request_api_v1_public_handover__token__service_requests_post": {
@@ -2534,6 +2614,86 @@
         "title": "CorrectionRequest",
         "type": "object"
       },
+      "CustomerIn": {
+        "properties": {
+          "address_lines": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Address Lines",
+            "type": "array"
+          },
+          "attention": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          },
+          "customer_type": {
+            "default": "individual",
+            "title": "Customer Type",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "gstin": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gstin"
+          },
+          "mobile": {
+            "maxLength": 20,
+            "title": "Mobile",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "name",
+          "mobile"
+        ],
+        "title": "CustomerIn",
+        "type": "object"
+      },
       "CustomerMemoryItem": {
         "properties": {
           "created_by": {
@@ -2715,6 +2875,109 @@
         "title": "CustomerMemoryResponse",
         "type": "object"
       },
+      "CustomerPatch": {
+        "properties": {
+          "address_lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Lines"
+          },
+          "attention": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          },
+          "customer_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Type"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "gstin": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gstin"
+          },
+          "mobile": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mobile"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CustomerPatch",
+        "type": "object"
+      },
       "CustomerTimeline": {
         "description": "When the customer says they want the system — as the associate recorded it.",
         "enum": [
@@ -2735,6 +2998,24 @@
         "title": "CustomerType",
         "type": "string"
       },
+      "Decision": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "Decision",
+        "type": "object"
+      },
       "DecisionIn": {
         "properties": {
           "note": {
@@ -2751,6 +3032,24 @@
           }
         },
         "title": "DecisionIn",
+        "type": "object"
+      },
+      "DeclineIn": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "DeclineIn",
         "type": "object"
       },
       "DiscomConsumerCategory": {
@@ -3339,6 +3638,35 @@
         "title": "DraftRequest",
         "type": "object"
       },
+      "DuplicateIn": {
+        "properties": {
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "title": "DuplicateIn",
+        "type": "object"
+      },
       "EffectiveRate": {
         "description": "The rate that applies on a date. rate_percent null = no confirmed rate\n(pending_reason placeholder_rates).",
         "properties": {
@@ -3401,6 +3729,24 @@
         "title": "EffectiveRate",
         "type": "object"
       },
+      "EmailIn": {
+        "properties": {
+          "to": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "title": "EmailIn",
+        "type": "object"
+      },
       "EmployeeRole": {
         "enum": [
           "admin",
@@ -3409,7 +3755,8 @@
           "engineer",
           "operations",
           "accounts",
-          "network_manager"
+          "network_manager",
+          "proposal_desk"
         ],
         "title": "EmployeeRole",
         "type": "string"
@@ -3823,6 +4170,21 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IgnoreWord": {
+        "properties": {
+          "word": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "word"
+        ],
+        "title": "IgnoreWord",
         "type": "object"
       },
       "ImportIssue": {
@@ -4980,7 +5342,8 @@
           "instagram",
           "cold_call",
           "referral",
-          "other"
+          "other",
+          "proposal_studio"
         ],
         "title": "LeadSource",
         "type": "string"
@@ -5069,6 +5432,83 @@
         "title": "LeadTimelineEntry",
         "type": "object"
       },
+      "LibraryIn": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "object"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          },
+          "project_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Type"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "body"
+        ],
+        "title": "LibraryIn",
+        "type": "object"
+      },
+      "LibraryPatch": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "LibraryPatch",
+        "type": "object"
+      },
       "LinkRequest": {
         "properties": {
           "send_email": {
@@ -5078,6 +5518,21 @@
           }
         },
         "title": "LinkRequest",
+        "type": "object"
+      },
+      "LostIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "LostIn",
         "type": "object"
       },
       "ManualLeadCreate": {
@@ -5661,6 +6116,21 @@
           "note"
         ],
         "title": "NoteRequest",
+        "type": "object"
+      },
+      "NotesIn": {
+        "properties": {
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "NotesIn",
         "type": "object"
       },
       "OnboardingCreate": {
@@ -7895,6 +8365,36 @@
         "title": "ProposalDocument",
         "type": "object"
       },
+      "ProposalIn": {
+        "properties": {
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "project_type": {
+            "maxLength": 32,
+            "title": "Project Type",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          }
+        },
+        "required": [
+          "customer_id",
+          "project_type"
+        ],
+        "title": "ProposalIn",
+        "type": "object"
+      },
       "ProposalInputsCreate": {
         "properties": {
           "additional_requirements": {
@@ -9305,6 +9805,49 @@
         "title": "SeatReleaseRequest",
         "type": "object"
       },
+      "SectionEdit": {
+        "description": "Replace one section. `value` is the section's object or list (see the contract).",
+        "properties": {
+          "base_revision": {
+            "minimum": 0.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "section": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Section",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "base_revision",
+          "section"
+        ],
+        "title": "SectionEdit",
+        "type": "object"
+      },
       "ServiceRequestCategory": {
         "enum": [
           "no_generation",
@@ -10122,6 +10665,21 @@
           "dcr"
         ],
         "title": "TechnicalPlant",
+        "type": "object"
+      },
+      "TemplateIn": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TemplateIn",
         "type": "object"
       },
       "TerritoryLevel": {
@@ -18229,6 +18787,28 @@
         "summary": "Run Check Stale Leads"
       }
     },
+    "/api/v1/dashboard/internal/check-studio-reminders": {
+      "post": {
+        "description": "Admin or INTERNAL_API_KEY (Cloud Scheduler, gridnova-jobs). Reminds owners of proposals\nnot opened and about to expire, expires the overdue ones. Idempotent.",
+        "operationId": "run_check_studio_reminders_api_v1_dashboard_internal_check_studio_reminders_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Check Studio Reminders"
+      }
+    },
     "/api/v1/dashboard/internal/check-survey-reviews": {
       "post": {
         "description": "Admin or INTERNAL_API_KEY. Emails staff once about each survey that has waited\nlonger than review_target_hours for its review (not again for the same wait).\nIdempotent, also when two runs overlap.",
@@ -24206,6 +24786,1775 @@
         "summary": "Resend Invitation"
       }
     },
+    "/api/v1/dashboard/studio/customers": {
+      "get": {
+        "description": "Search by name, mobile (last digits) or GSTIN.",
+        "operationId": "list_customers_api_v1_dashboard_studio_customers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Customers"
+      },
+      "post": {
+        "description": "A new Studio customer. Same mobile or GSTIN as an existing one is a warning\n(`duplicates`), never a refusal.",
+        "operationId": "create_customer_api_v1_dashboard_studio_customers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Customer"
+      }
+    },
+    "/api/v1/dashboard/studio/customers/{customer_id}": {
+      "get": {
+        "operationId": "get_customer_api_v1_dashboard_studio_customers__customer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Customer"
+      },
+      "patch": {
+        "description": "Changes the customer record only; a proposal's printed addressee changes through its\n`addressee` section.",
+        "operationId": "update_customer_api_v1_dashboard_studio_customers__customer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Customer"
+      }
+    },
+    "/api/v1/dashboard/studio/import": {
+      "post": {
+        "description": "One draft per filled 'Proposal…' sheet, all or nothing. 422 {code: import_failed,\nerrors: [{sheet, cell, field, message}]}.",
+        "operationId": "import_sheet_api_v1_dashboard_studio_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_sheet_api_v1_dashboard_studio_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Sheet"
+      }
+    },
+    "/api/v1/dashboard/studio/import-template.xlsx": {
+      "get": {
+        "operationId": "import_template_api_v1_dashboard_studio_import_template_xlsx_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            },
+            "description": "The workbook"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Template"
+      }
+    },
+    "/api/v1/dashboard/studio/library": {
+      "get": {
+        "operationId": "list_library_api_v1_dashboard_studio_library_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_retired",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Retired",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Library"
+      },
+      "post": {
+        "operationId": "create_library_item_api_v1_dashboard_studio_library_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Library Item"
+      }
+    },
+    "/api/v1/dashboard/studio/library/{item_id}": {
+      "patch": {
+        "description": "Rename, replace the body, or retire (active=false) — never deleted.",
+        "operationId": "update_library_item_api_v1_dashboard_studio_library__item_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Library Item"
+      }
+    },
+    "/api/v1/dashboard/studio/options": {
+      "get": {
+        "description": "Everything the wizard's drop-downs need: project types, packages, phases, categories,\nDISCOMs, titles, technologies, item units and categories, sections and limits.",
+        "operationId": "studio_options_api_v1_dashboard_studio_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Studio Options"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals": {
+      "get": {
+        "description": "Filters: status, project type, owner, created date range, search on customer name /\nmobile / reference / code. Without studio.view_all only your own proposals.",
+        "operationId": "list_proposals_api_v1_dashboard_studio_proposals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Proposals"
+      },
+      "post": {
+        "description": "A draft for a customer and project type, the defaults generated (or from a template).",
+        "operationId": "create_proposal_api_v1_dashboard_studio_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Proposal"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}": {
+      "get": {
+        "description": "The proposal with one version (default the current): document, figures, proof-check\n(`checks`, errors block, warnings need acknowledging), approval rule and what you may do.",
+        "operationId": "get_proposal_api_v1_dashboard_studio_proposals__proposal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Proposal"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/acknowledge-warnings": {
+      "post": {
+        "description": "\"I have checked this\" for current warnings (by fingerprint); recorded in the event log.",
+        "operationId": "acknowledge_warnings_api_v1_dashboard_studio_proposals__proposal_id__acknowledge_warnings_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Acknowledge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge Warnings"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/approve": {
+      "post": {
+        "description": "By a holder of studio.approve who did not prepare this version (403 maker_checker).",
+        "operationId": "approve_api_v1_dashboard_studio_proposals__proposal_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/convert": {
+      "post": {
+        "description": "Create the lead (and its proposal with the same document, reference, PDF and status).\nIdempotent: a second call returns the same lead with created=false.",
+        "operationId": "convert_api_v1_dashboard_studio_proposals__proposal_id__convert_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Convert"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/document": {
+      "patch": {
+        "description": "One section of the current draft. `price` needs studio.price. 409 proposal_locked /\nstale_version, 422 invalid_value / payment_terms_total / make_not_in_catalogue /\nreason_required. Returns the view plus `changes` and `regenerated_sections`.",
+        "operationId": "edit_document_api_v1_dashboard_studio_proposals__proposal_id__document_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SectionEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit Document"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/duplicate": {
+      "post": {
+        "description": "A new proposal from any version — for the same customer or another (customer_id).",
+        "operationId": "duplicate_api_v1_dashboard_studio_proposals__proposal_id__duplicate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Duplicate"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/email": {
+      "post": {
+        "description": "Email the customer the PDF and the online link (Resend, from NOTIFY_FROM_EMAIL,\nreply-to the owner). 422 no_customer_email; 503 email_not_configured.",
+        "operationId": "email_api_v1_dashboard_studio_proposals__proposal_id__email_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Email"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/events": {
+      "get": {
+        "description": "The timeline: every staff action, customer view / download / accept / decline, reminder.",
+        "operationId": "proposal_events_api_v1_dashboard_studio_proposals__proposal_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proposal Events"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/issue": {
+      "post": {
+        "description": "Allocate the reference and date, render and store the PDF/A-3b (SHA-256 recorded),\nlock the version and create the customer's online link (returned once here as\n`public_url`; later from whatsapp-link / email). 409 approval_required /\nproof_check_failed / warnings_unacknowledged / content_not_ready; 503 storage_unavailable.",
+        "operationId": "issue_api_v1_dashboard_studio_proposals__proposal_id__issue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/mark-accepted": {
+      "post": {
+        "description": "Accepted in person: the date and the signed copy (PDF, JPEG or PNG, ≤ 10 MB; stored and\nhashed). Offers conversion to a lead (`convert_offered`).",
+        "operationId": "mark_accepted_api_v1_dashboard_studio_proposals__proposal_id__mark_accepted_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_mark_accepted_api_v1_dashboard_studio_proposals__proposal_id__mark_accepted_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Accepted"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/mark-lost": {
+      "post": {
+        "operationId": "mark_lost_api_v1_dashboard_studio_proposals__proposal_id__mark_lost_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LostIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Lost"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/pdf": {
+      "get": {
+        "description": "The issued PDF: a redirect to a short-lived signed link (recorded as a staff download).",
+        "operationId": "issued_pdf_api_v1_dashboard_studio_proposals__proposal_id__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issued Pdf"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/preview.pdf": {
+      "get": {
+        "description": "The version rendered now, never stored: stamped \"DRAFT — NOT FOR CUSTOMER\" until issued.\nAn issued version: use /pdf for the stored file.",
+        "operationId": "preview_api_v1_dashboard_studio_proposals__proposal_id__preview_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "The PDF"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/reject": {
+      "post": {
+        "operationId": "reject_api_v1_dashboard_studio_proposals__proposal_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/revise": {
+      "post": {
+        "description": "The next version, everything carried over; issued as <reference>-R1, -R2 …",
+        "operationId": "revise_api_v1_dashboard_studio_proposals__proposal_id__revise_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revise"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/save-as-template": {
+      "post": {
+        "description": "The current version's document minus customer data, into the library.",
+        "operationId": "save_as_template_api_v1_dashboard_studio_proposals__proposal_id__save_as_template_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save As Template"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/spelling/ignore": {
+      "post": {
+        "operationId": "ignore_word_api_v1_dashboard_studio_proposals__proposal_id__spelling_ignore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IgnoreWord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ignore Word"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/submit": {
+      "post": {
+        "description": "draft → pending_approval (approvers alerted) or → ready. 409 proof_check_failed /\nwarnings_unacknowledged / content_not_ready.",
+        "operationId": "submit_api_v1_dashboard_studio_proposals__proposal_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/suggest-from-notes": {
+      "post": {
+        "description": "Optional and off by default (409 assistant_disabled, no model call). Suggestions for\ncustomer / site / connection fields only, unsaved, each marked \"check\".",
+        "operationId": "suggest_from_notes_api_v1_dashboard_studio_proposals__proposal_id__suggest_from_notes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Suggest From Notes"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/versions/{a}/diff/{b}": {
+      "get": {
+        "description": "Field-level changes from version a to version b.",
+        "operationId": "version_diff_api_v1_dashboard_studio_proposals__proposal_id__versions__a__diff__b__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "title": "A",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "b",
+            "required": true,
+            "schema": {
+              "title": "B",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Version Diff"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/whatsapp-link": {
+      "post": {
+        "description": "A wa.me link with the prefilled message and the online link (no WhatsApp API, no cost).",
+        "operationId": "whatsapp_link_api_v1_dashboard_studio_proposals__proposal_id__whatsapp_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Whatsapp Link"
+      }
+    },
+    "/api/v1/dashboard/studio/summary": {
+      "get": {
+        "description": "Drafts, awaiting approval, issued this month (count, value), viewed-not-accepted,\naccepted (count, value), 90-day win rate, expiring in 7 days, median days to accept.",
+        "operationId": "summary_api_v1_dashboard_studio_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Summary"
+      }
+    },
     "/api/v1/dashboard/survey-corrections": {
       "get": {
         "description": "Correction requests, newest first. Sales sees its own or unassigned leads only.",
@@ -26147,6 +28496,44 @@
         "summary": "Seat Availability"
       }
     },
+    "/api/v1/public/proposals/verify/{code}": {
+      "get": {
+        "description": "Status: valid | superseded | expired | accepted | declined. The customer's name is\nmasked (first name and an initial).",
+        "operationId": "verify_api_v1_public_proposals_verify__code__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify"
+      }
+    },
     "/api/v1/public/proposals/{token}/pdf": {
       "get": {
         "description": "The customer's PDF download. Gated by the accept token exactly as the public\nview is (any valid token); 404 for every unknown token, never saying why. Answers\nwith a redirect to a short-lived signed link — never a stored storage URL.",
@@ -26220,6 +28607,175 @@
           }
         },
         "summary": "Download Receipt"
+      }
+    },
+    "/api/v1/public/studio/{token}": {
+      "get": {
+        "operationId": "view_api_v1_public_studio__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "View"
+      }
+    },
+    "/api/v1/public/studio/{token}/accept": {
+      "post": {
+        "description": "409 proposal_expired / proposal_superseded / proposal_declined; 422 mobile_mismatch /\nterms_not_accepted. Accepting twice is a no-op success.",
+        "operationId": "accept_api_v1_public_studio__token__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept"
+      }
+    },
+    "/api/v1/public/studio/{token}/decline": {
+      "post": {
+        "operationId": "decline_api_v1_public_studio__token__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decline"
+      }
+    },
+    "/api/v1/public/studio/{token}/pdf": {
+      "get": {
+        "operationId": "pdf_api_v1_public_studio__token__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pdf"
       }
     },
     "/api/v1/public/territories/districts/{district_lgd_code}/blocks": {

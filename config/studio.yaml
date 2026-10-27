@@ -1,0 +1,332 @@
+# Grid Nova Energy — Proposal Studio (BE-18).
+#
+# Read by app/studio/config.py and validated at startup (a malformed file stops the boot).
+# The Studio renders through the BE-13 engine (app/proposals/document.py, document_render.py,
+# config/proposal_document.yaml): header, footer, watermark, QR, letterhead, signatory,
+# company paragraphs, quality policy, warranty rows and the GST rule live there and are never
+# editable from the Studio. This file holds only what is Studio-specific.
+#
+# Numbers with decimals are quoted text (read as Decimal, never as a float).
+
+schema_version: 1
+
+# ── Project types ────────────────────────────────────────────────────────────────
+# layout: compact_or_detailed (≤ layout_rule.compact_max_kwp → compact) | detailed | itemised
+# segment / coverage: what the BE-13 engine reads (coverage = an uncovered segment whose scope
+# text in config/proposal_content.yaml is still a registry placeholder: drafting and preview
+# work, approval and issue answer 409 content_not_ready naming the registry ids).
+# mount: rooftop | ground_mounted. housing_society: PM Surya Ghar GHS/RWA CFA (needs houses).
+# category: the consumer category printed by default.
+project_types:
+  residential_rooftop:
+    label: Residential rooftop
+    layout: compact_or_detailed
+    segment: residential
+    coverage: null
+    mount: rooftop
+    category: Residential
+  housing_society:
+    label: Housing society / RWA
+    layout: detailed
+    segment: residential
+    coverage: null
+    mount: rooftop
+    housing_society: true
+    category: Residential
+  commercial_rooftop:
+    label: Commercial rooftop
+    layout: compact_or_detailed
+    segment: commercial
+    coverage: null
+    mount: rooftop
+    category: Commercial
+  industrial_rooftop:
+    label: Industrial rooftop
+    layout: compact_or_detailed
+    segment: industrial
+    coverage: null
+    mount: rooftop
+    category: Industrial
+  ground_mounted:
+    label: Ground-mounted
+    layout: detailed
+    segment: commercial
+    coverage: utility
+    mount: ground_mounted
+    category: Commercial
+  government_institutional:
+    label: Government / institutional
+    layout: detailed
+    segment: government
+    coverage: government
+    mount: rooftop
+    category: Government
+  pm_kusum:
+    label: PM-KUSUM (agricultural)
+    layout: detailed
+    segment: agricultural
+    coverage: agricultural
+    mount: ground_mounted
+    category: Agricultural
+  street_lighting:
+    label: Street lighting and other itemised supply
+    layout: itemised
+    segment: null
+    coverage: null
+    mount: null
+    category: null
+  generic:
+    label: Other solar project
+    layout: detailed
+    segment: null
+    coverage: fallback
+    mount: rooftop
+    category: null
+
+# ── Workflow ─────────────────────────────────────────────────────────────────────
+workflow:
+  # A version is issued without approval only when the proof-check has no errors, the price
+  # is not below the price master and the total incl. GST is at most the PROPOSAL_VALUE_
+  # MANAGER_APPROVAL_THRESHOLD setting (₹5,00,000 today). Otherwise a holder of studio.approve
+  # who is not the preparer approves it.
+  approval_when_below_price_master: true
+  validity_days: 15                    # Grid Nova, 15 Oct 2026 (config/sales_policy.yaml)
+
+# Payment terms a new document starts with (staff can change them). A plant up to 10 kW starts
+# with the price list's 20 / 60 / 20 (config/price_list.yaml commercial_terms), above 10 kW with
+# the 52 kWp sample's 25 / 60 / 15 (config/proposal_document.yaml detailed.payment_terms).
+payment_terms:
+  itemised:                            # [UNCONFIRMED] 25/60/15 as a plant above 10 kW (STU-9)
+    - {percent: "25", label: Advance along with the order, short_label: advance with order}
+    - {percent: "60", label: Against delivery of materials, short_label: against delivery of materials}
+    - {percent: "15", label: On completion of installation, short_label: on completion}
+
+# Messages staff send (never printed on the PDF). {name}, {reference}, {title}, {link}, {valid_until}.
+messages:
+  whatsapp: "Dear {name}, please find Grid Nova Energy's proposal {reference} ({title}) here: {link} — valid until {valid_until}."
+  email_subject: "Your proposal from Grid Nova Energy — {reference}"
+  email_lines:
+    - "Dear {name},"
+    - "Thank you for considering Grid Nova Energy. Please find our proposal {reference} ({title}) attached."
+    - "You can also read it, download it and accept it online until {valid_until} using the link below."
+  accepted_subject: "Proposal {reference} accepted — Grid Nova Energy"
+  accepted_lines:
+    - "Dear {name},"
+    - "Thank you. We have recorded your acceptance of proposal {reference} ({title})."
+    - "Our team will contact you about the next steps."
+  expiry_subject: "Your proposal {reference} from Grid Nova Energy expires soon"
+  expiry_lines:
+    - "Dear {name},"
+    - "Our proposal {reference} ({title}) is valid until {valid_until}."
+    - "You can read it and accept it online using the link below."
+
+# Wording printed where a proposal names how to pay (owner's decision 5).
+payment_methods: "Payments by cheque, NEFT, RTGS or IMPS only."
+
+# ── Reminders (daily job, POST /api/v1/dashboard/internal/check-studio-reminders) ────
+reminders:
+  not_viewed_after_days: 3
+  expiring_within_days: 3
+  customer_expiry_reminder: false      # true: also email the customer before expiry
+  summary_expiring_within_days: 7
+
+# ── Proof-check thresholds ─────────────────────────────────────────────────────────
+warn_single_phase_above_kw: "7"
+# Price per kWp (basic, ₹) outside this band raises a warning. null = no band supplied by Grid
+# Nova, so no warning (STU-5). Per project type: {low: "…", high: "…"}.
+price_per_kwp_band:                    # [UNCONFIRMED]
+  residential_rooftop: null
+  housing_society: null
+  commercial_rooftop: null
+  industrial_rooftop: null
+  ground_mounted: null
+  government_institutional: null
+  pm_kusum: null
+  generic: null
+# States Grid Nova sells in today; any other state raises a warning.
+service_states: [West Bengal, Bihar]
+# Page count each layout must render to (a page count outside the range is an error).
+page_ranges:
+  compact: [3, 4]
+  detailed: [8, 10]
+  itemised: [2, 4]
+
+# Offline spell-check of staff-typed text (pyspellchecker). Words here are never flagged
+# (compared ignoring case). Staff can also "ignore" a word on one proposal.
+spell_allow:
+  - Grid
+  - Nova
+  - GridNova
+  - Surya
+  - Ghar
+  - Muft
+  - Bijli
+  - Yojana
+  - KUSUM
+  - DISCOM
+  - DISCOMs
+  - WBSEDCL
+  - CESC
+  - NBPDCL
+  - SBPDCL
+  - DCR
+  - PERC
+  - TOPCon
+  - MNRE
+  - CEIG
+  - ACDB
+  - DCDB
+  - SPD
+  - MPPT
+  - BOQ
+  - BOS
+  - GHS
+  - RWA
+  - kWp
+  - kW
+  - Wp
+  - sqmm
+  - sq
+  - ft
+  - Sova
+  - HR
+  - V-Sole
+  - Novasys
+  - Deye
+  - Microtek
+  - Micro
+  - Sungrow
+  - Growatt
+  - Delta
+  - TATA
+  - Waaree
+  - Adani
+  - Vikram
+  - Polycab
+  - Mescab
+  - Finolex
+  - KEI
+  - Kabel
+  - Havells
+  - Supreme
+  - Kolkata
+  - Howrah
+  - Habra
+  - Patna
+  - Bihar
+  - Bengal
+  - Amta
+  - Ashoknagar
+  - Parganas
+  - Mouza
+  - Pvt
+  - Ltd
+  - GSTIN
+  - NEFT
+  - RTGS
+  - IMPS
+  - LED
+  - LiFePO4
+  - lumens
+  - approx
+  - actuals
+  - Aadhaar
+  - inverter
+  - inverters
+  - DISCOM's
+  - Mr
+  - Mrs
+  - Ms
+  - Dr
+
+# ── Savings page (only from figures staff enter from the customer's own bill) ─────────
+savings:
+  # Generation basis: config/solar_estimate.yaml generation (units / kWp / month for the site's
+  # state) — the same figure the proposal and the calculator print.
+  # Module degradation by technology (mono_perc = Mono PERC, topcon = TOPCon). Researched assumptions (typical datasheet linear
+  # warranty curves), not Grid Nova's panels' datasheets: STU-1 (Mono PERC), STU-2 (TOPCon).
+  degradation:
+    mono_perc: {first_year: "0.02", annual_after: "0.0055"}    # [UNCONFIRMED]
+    topcon: {first_year: "0.01", annual_after: "0.004"}        # [UNCONFIRMED]
+  # Tariff escalation a year: 0 (conservative; STU-3). Staff cannot raise it on a proposal.
+  tariff_escalation: "0"               # [UNCONFIRMED]
+  # Export credit ₹/unit: 0 — only self-consumed units are valued unless staff enter an export
+  # rate on the proposal (STU-4).
+  export_rate_default: "0"             # [UNCONFIRMED]
+  years_shown: [1, 5, 10, 15, 20, 25]
+  note: "Indicative estimate based on the tariff and consumption you shared; actual savings depend on generation, consumption pattern, tariff revisions and DISCOM settlement rules."
+  # Optional line, off by default; never a tax claim.
+  depreciation_line_enabled: false
+  depreciation_line: "Businesses may be eligible for depreciation benefits — please consult your tax adviser."
+
+# ── Itemised supply (street lighting and other line items) ────────────────────────
+# GST per item category. A rate Grid Nova has not confirmed carries a registry id: drafting and
+# preview use it, issuing a proposal with a line of that category is blocked (content_not_ready).
+itemised:
+  units: [Nos, Sets, Mtrs, Lot, Job]
+  categories:
+    solar_street_light:
+      label: Solar street light
+      # GST 2.0 (w.e.f. 22 Sep 2025): solar power based devices at 5 % (researched; STU-6).
+      gst_rate: "0.05"                 # [UNCONFIRMED]
+      registry: STU-6
+      warranty_rows: null              # [PLACEHOLDER] not supplied by Grid Nova (STU-8)
+      warranty_registry: STU-8
+    installation_service:
+      label: Installation and services
+      # Works contract / installation services at 18 % (researched; STU-7).
+      gst_rate: "0.18"                 # [UNCONFIRMED]
+      registry: STU-7
+      warranty_rows: []
+      warranty_registry: null
+  # Fixed text of the itemised layout (same frame as the plant proposals). The first letter
+  # sentence is the samples'; the rest is drafted for this layout (STU-10).
+  text:                                # [UNCONFIRMED]
+    title: "PROPOSAL FOR SUPPLY & INSTALLATION"
+    footer_title: "Supply & Installation Proposal"
+    project_label: "SUPPLY & INSTALLATION"
+    site_card_title: Project Site
+    highlights: {items: LINE ITEMS, total: TOTAL INCL. GST, validity: OFFER VALIDITY}
+    subtotal_line: Subtotal (before GST)
+    scope_label: Customer Scope
+    subject: "Proposal for Supply & Installation as per the Bill of Quantity below."
+    letter:
+      - "We take this opportunity to introduce Grid Nova Energy, a professionally managed solar energy company engaged in the design, engineering, procurement, installation and maintenance of solar power systems across India."
+      - "Based on our discussions, we are pleased to submit our proposal for the supply and installation of the items listed in the Bill of Quantity with prices below."
+    boq_title: BILL OF QUANTITY WITH PRICES
+    boq_sub: Items, quantities, rates and GST as quoted.
+    terms_title: PAYMENT TERMS, SCOPE & NOTES
+    terms_sub: Payment schedule, customer scope and notes.
+
+# ── Optional assistant (STUDIO_AI_FILL_ENABLED, off by default) ─────────────────────
+# The only fields a suggestion may fill. Never price, BOQ, items, terms or any figure.
+assistant_fields:
+  addressee: [customer_type, title, name, attention, address_lines, mobile]
+  site: [address_lines, town, state]
+  connection: [discom, consumer_number, sub_division, sanctioned_load_kw, category, phase]
+
+# ── Fixed wording the Studio adds to the BE-13 layouts (never editable from the Studio) ──
+render:
+  verify_url_base: https://www.gridnova.in/verify/p/
+  # The customer's online proposal page: FRONTEND_BASE_URL + this path + the access token.
+  public_page_path: /proposal/
+  basic_before_discount_line: "Basic price"
+  discount_line: "Less: Special discount"
+  offered_line: "Offered basic price"
+  special_notes_label: Special Notes
+  payment_methods_label: "Mode of payment:"
+  comparison_label: Package Comparison
+  comparison_headers: [Package, Solar Panels (makes), Inverter (makes), Basic (Rs.), GST @ 8.9% (Rs.), Total (Rs.)]
+  comparison_note: "Both packages are priced from Grid Nova's price list for the same capacity and phase. This proposal quotes the {package_name} package."
+  savings_title: CUSTOMER SAVINGS ESTIMATE
+  savings_sub: "Indicative, from the tariff and consumption you shared."
+  savings_inputs_label: Basis
+  savings_headers: [Year, Generation (units), Savings (Rs.), Cumulative Savings (Rs.)]
+  savings_payback_label: "Simple payback on the effective cost"
+  savings_basis_labels: {consumption: Average monthly consumption, tariff: Tariff (from your bill), generation: "Estimated generation, year 1", savings: "Estimated savings, year 1"}
+  savings_assumptions: "Assumptions: module output 100 % in year 1, {first} % lower in year 2 and a further {annual} % lower each year after ({technology}); tariff escalation {escalation} % a year; exported units valued at Rs. {export} per unit."
+  society_subsidy_label: "PM Surya Ghar CFA for Group Housing Society / RWA (Indicative)"
+  society_total_line: Total project cost (incl. GST)
+  society_subsidy_line: "Less: CFA on {kw} kW eligible capacity @ Rs. {rate} per kW"
+  society_effective: EFFECTIVE COST AFTER CFA
+  society_subsidy_note: "Central financial assistance under PM Surya Ghar: Muft Bijli Yojana for Group Housing Societies / Resident Welfare Associations is calculated on the eligible capacity (the lower of the installed capacity, {kw_per_house} kW per house for {houses} houses, and {max_kw} kW), as per scheme guidelines, subject to eligibility and availability."

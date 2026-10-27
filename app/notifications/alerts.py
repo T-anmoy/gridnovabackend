@@ -3,7 +3,8 @@
 Recipients of a staff email = the fixed addresses the notifier already had for the event
 (STAFF_NOTIFY_EMAILS / ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS — shared
 mailboxes keep receiving) + every active employee holding one of the event's roles + the
-lead's assigned employee when the event says so. Deduplicated, case-insensitively. A
+lead's assigned employee when the event says so, the Studio proposal's owner when the
+event says so (BE-18). Deduplicated, case-insensitively. A
 deactivated employee's address is never used, even when it is also a fixed address. When
 an event reaches nobody, a warning is logged once per event type.
 """
@@ -47,6 +48,10 @@ def _people(db, event_type: str, payload: dict) -> tuple[list[str], set[str]]:
                 emp = db.get(Employee, lead.assigned_employee_id)
                 if emp is not None and emp.is_active and _usable(emp.email):
                     out.append(emp.email)
+        if spec.get("owner") and payload.get("owner_id"):
+            emp = db.get(Employee, str(payload["owner_id"]))
+            if emp is not None and emp.is_active and _usable(emp.email):
+                out.append(emp.email)
     inactive = {e.lower() for e in db.execute(select(Employee.email).where(Employee.is_active.is_(False))).scalars()
                 if e}
     return out, inactive
@@ -95,7 +100,9 @@ def describe(db) -> list[dict]:
         holders = {r: len([e for e in memory.holders_of_role(r) if _usable(e.email)]) for r in sorted(spec["roles"])}
         fixed = fixed_recipient_count(event)
         out.append({"event": event, "roles": sorted(spec["roles"], key=access.ROLE_IDS.index),
-                    "assigned_employee": spec["assigned_employee"], "active_holders": holders,
+                    "assigned_employee": spec["assigned_employee"], "owner": spec.get("owner", False),
+                    "active_holders": holders,
                     "fixed_addresses": fixed,
-                    "reaches_someone": bool(fixed or any(holders.values()) or event == "approval_requested")})
+                    "reaches_someone": bool(fixed or any(holders.values()) or event == "approval_requested"
+                                               or spec.get("owner", False))})
     return out

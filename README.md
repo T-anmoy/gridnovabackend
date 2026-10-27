@@ -126,6 +126,7 @@ staging/production without it; "warns" = it starts and logs a warning.
 | `IDENTITY_HMAC_KEY` | yes | Signs associate identity claims (duplicate-registration guard); its own secret |
 | `LLM_API_KEY` | production (warns on staging) | OpenAI-compatible key; empty = mock replies |
 | `LLM_BASE_URL / LLM_MODEL` | — | Model endpoint and id |
+| `STUDIO_AI_FILL_ENABLED` | — | `true` switches on the Proposal Studio's optional suggest-from-notes assistant (default `false`; BE-18) |
 | `LLM_REQUEST_TIMEOUT_SECONDS / LLM_MAX_RETRIES` | — | Per-call timeout and transport retries |
 | `AGENT_SLOW_RUN_MS / AGENT_DAILY_ACTION_LIMIT_PER_LEAD / DISABLED_AGENTS` | — | Agent harness and governance (kill switch) |
 | `NEMO_GUARDRAILS_ENABLED / NEMO_GUARDRAILS_TIMEOUT_SECONDS / NEMO_GUARDRAILS_FAIL_CLOSED / NEMO_GUARDRAILS_MAX_WORKERS` | — | Optional semantic output rail (needs `requirements-nemo.txt`, not in the image) |

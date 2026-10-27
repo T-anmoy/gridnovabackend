@@ -1,0 +1,183 @@
+3 kWp Grid-Tied Rooftop Solar Proposal
+GRID NOVA ENERGY
+| 3 kWp Grid-Tied Rooftop Solar Proposal | Page
+of
+TECHNICAL & COMMERCIAL PROPOSAL
+3 KWP GRID-TIED ROOFTOP SOLAR POWER PLANT
+NOVA ASSURED PACKAGE · MONO PERC DCR MODULES · PM SURYA GHAR SUBSIDY ELIGIBLE*
+DATE
+23.10.2026
+REFERENCE
+GN/23/10/2026/01
+PROJECT
+3 KWP DCR ROOFTOP
+CUSTOMER
+MR. TEST CUSTOMER
+TO
+Mr. Test Customer
+Habra, North 24 Parganas,
+West Bengal – 743263
+Mobile:
++91 98300 00001
+Aadhaar:
+XXXX XXXX 3832
+ELECTRICITY CONNECTION
+DISCOM:
+WBSEDCL
+Consumer No.:
+100000001
+Sub-division:
+Habra / Ashoknagar CCC
+Sanctioned Load:
+3.52 kW
+Category:
+Residential
+Subject: Proposal for Supply, Installation & Commissioning of a 3 kWp Grid-Tied Rooftop Solar Power Plant.
+Dear Sir,
+Thank you for choosing rooftop solar. Grid Nova Energy is a professionally managed solar company engaged in the design, engineering, procurement, installation and maintenance of solar power systems across India, following MNRE guidelines and applicable state policies.
+We are pleased to submit our proposal for a 3 kWp grid-tied, single-phase rooftop solar power plant at your residence in Habra under our Nova Assured package, using Mono PERC DCR (Domestic Content Requirement) solar modules. Your application on the PM Surya Ghar portal is registered with an approved capacity of 3 kWp (With DCR), making the plant eligible for central financial assistance of up to Rs. 78,000, as per DISCOM policy, subject to customer eligibility and availability.
+The plant is backed by a 5-year standard warranty from handover and free operation & maintenance for the first year. We look forward to powering your home with clean and sustainable solar energy.
+For Grid Nova Energy,
+RAJU PAUL
+Authorised Signatory
+PM SURYA GHAR APPLICATION STATUS
+Registered
+PORTAL APPLICATION
+3 kWp
+APPROVED CAPACITY
+With DCR
+DCR CATEGORY
+Opted
+SUBSIDY
+KEY HIGHLIGHTS
+3 kWp
+DCR SOLAR PLANT
+Rs. 2,01,465
+TOTAL INCL. GST
+Rs. 78,000
+SUBSIDY* (UP TO)
+Rs. 1,23,465
+EFFECTIVE COST*
+*Subsidy under PM Surya Ghar: Muft Bijli Yojana, as per DISCOM policy, subject to customer eligibility and availability. It is credited by the Government directly to the customer’s bank account; effective cost is indicative.
+01 |
+SYSTEM DESIGN & TECHNICAL CONFIGURATION
+Proposed system, estimated generation and site requirements.
+System Type
+Grid-tied (on-grid) rooftop solar PV with net metering, single phase
+Plant Capacity
+3 kWp – as approved on the PM Surya Ghar portal
+Solar Modules
+Mono PERC | DCR (Domestic Content Requirement)
+Inverter
+3 kW single-phase grid-tied inverter
+Mounting Structure
+Rooftop module mounting structure, designed for the roof type
+Grid Integration
+Net metering through WBSEDCL, Habra / Ashoknagar CCC
+Space Required
+Approx. 250 – 300 sq. ft. of shadow-free roof area (to be confirmed during site survey)
+Estimated Energy Generation
+~120 units
+PER kWp PER MONTH (DESIGN BASIS)
+~360 units
+PER MONTH
+~4,320 units
+PER YEAR
+Actual generation depends on solar irradiation, weather, shading, orientation, tilt and module cleanliness at site.
+02 |
+BILL OF QUANTITY
+Scope of supply and services for the 3 kWp Nova Assured system.
+S. No.
+Description
+Quantity
+Make / Brand
+1
+Solar PV Modules – Mono PERC, DCR
+3 kWp
+Sova Solar / HR Solar / V-Sole / Equivalent
+2
+Single-phase grid-tied inverter – 3 kW
+1 No.
+Deye / V-Sole / Micro Tech / Power One / Equivalent
+3
+Module mounting structure
+1 Set
+–
+4
+DC & AC cable – 4 sq. mm copper
+As per site
+Polycab / Mescab / Finolex / KEI / RR Kabel
+5
+Earthing cable – 6 sq. mm copper
+As per site
+Polycab / Mescab / Finolex / KEI / RR Kabel
+6
+Conduit pipe (water SDP) & flex pipe (inside)
+As per site
+Supreme / Branded
+7
+Installation, testing & commissioning
+Lumpsum
+–
+8
+PM Surya Ghar portal & net-metering support
+Lumpsum
+–
+03 |
+CUSTOMER SCOPE
+Customer-side provisions for smooth installation, net metering and subsidy release.
+Provide shadow-free roof area, safe roof access and covered wall space for the inverter near the main electrical board.
+Provide a safe place to store materials on delivery, and water and electricity during installation.
+Submit subsidy bank details on the PM Surya Ghar portal and provide the electricity bill, Aadhaar card and bank details.
+Net-meter and DISCOM application charges, if applicable, as per WBSEDCL norms.
+Any structural modification or civil work, if required, shall be in the customer’s scope.
+04 |
+COMMERCIAL OFFER & SUBSIDY
+Pricing as per the Grid Nova price master (3 kW, Single Phase, Nova Assured).
+S. No.
+Description
+Capacity
+Amount (Rs.)
+1
+Supply, installation, testing & commissioning of a 3 kWp single-phase grid-tied rooftop solar plant with Mono PERC DCR modules – Nova Assured
+3 kWp
+1,85,000
+GST @ 8.9% (5% on 70% + 18% on 30% of basic price)
+16,465
+TOTAL AMOUNT (INCL. GST)
+2,01,465
+In words:
+Rupees Two Lakh One Thousand Four Hundred Sixty-Five Only.
+Payment Terms
+20% – Rs. 40,293
+ON ORDER
+60% – Rs. 1,20,879
+AGAINST MATERIAL BILL
+20% – Rs. 40,293
+BEFORE COMMISSIONING
+PM Surya Ghar Subsidy & Effective Cost (Indicative)
+Total project cost (incl. GST)
+2,01,465
+Less: Subsidy for first 2 kW @ Rs. 30,000 per kW
+(–) 60,000
+Less: Subsidy for 3rd kW @ Rs. 18,000 per kW
+(–) 18,000
+EFFECTIVE COST AFTER SUBSIDY
+Rs. 1,23,465
+Subsidy under PM Surya Ghar: Muft Bijli Yojana, as per DISCOM policy, subject to customer eligibility and availability. The customer pays the full amount as per the payment terms; the subsidy is credited by the Government directly to the customer’s bank account after installation, net metering and DISCOM inspection.
+Warranty & Terms
+Standard Warranty
+5 years from handover
+O&M
+First year free
+Panel Life Span
+25 years
+Destination
+Within West Bengal
+GST
+Effective 8.9%
+Price
+Subject to change with market conditions
+For Grid Nova Energy
+RAJU PAUL
+| Authorised Signatory

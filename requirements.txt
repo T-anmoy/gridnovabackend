@@ -28,6 +28,11 @@ boto3==1.35.84
 weasyprint==70.0
 # QR code on associate ID cards (app/associates/documents.py). Pure Python, no dependencies.
 segno==1.6.6
+# BE-18 Proposal Studio: the proof-check reads the rendered PDF (pypdf), the Excel import /
+# template (openpyxl) and the offline spell-check of staff-typed text (pyspellchecker).
+pypdf==6.21.3
+openpyxl==3.1.5
+pyspellchecker==0.8.4
 sentry-sdk[fastapi]==2.19.2
 PyYAML==6.0.2
 httpx==0.27.2

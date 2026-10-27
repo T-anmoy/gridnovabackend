@@ -3,6 +3,9 @@
     GN/23/10/2026/01       the first proposal issued on 23 Oct 2026 (IST), per-day sequence
     GN/23/10/2026/01-R1    a later approved version of the same lead's proposal
 
+The Proposal Studio (BE-18, app/studio/service.py) draws from the same counter, so a
+reference is never issued twice across the two systems.
+
 Grid Nova's samples print GN/DD/MM/YYYY, which repeats when two proposals go out on one
 day; the per-day sequence keeps the look and makes it unique. It is allocated when a
 version is approved — the moment the customer document is produced — inside the
@@ -52,7 +55,11 @@ def assign(db: Session, proposal: Proposal, now: Optional[datetime] = None) -> s
             Proposal.document_reference.is_not(None))
         .order_by(Proposal.version)).scalars())
     if earlier:
-        reference = f"{earlier[0].split('-R')[0]}-R{len(earlier)}"
+        # The next -R after the highest so far: the same as counting for a lead's own
+        # versions, and still unique on a lead converted from the Proposal Studio, whose
+        # first proposal may already carry -R1 (BE-18).
+        highest = max(int(r.rsplit("-R", 1)[1]) if "-R" in r else 0 for r in earlier)
+        reference = f"{earlier[0].split('-R')[0]}-R{highest + 1}"
     else:
         reference = format_reference(day, next_sequence(db, day))
     proposal.document_reference = reference

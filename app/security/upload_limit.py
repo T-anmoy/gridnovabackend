@@ -28,7 +28,12 @@ _SERVICE_REQUEST_PATH = re.compile(
     r"^/api/v1/(associate/onboardings/\d+/service-requests|dashboard/onboardings/\d+/service-requests"
     r"|public/handover/[^/]+/service-requests)/?$")
 _ARCHIVE_IMPORT_PATH = re.compile(r"^/api/v1/dashboard/archive/imports/?$")
+# BE-18: the Proposal Studio's signed copy and Excel import.
+_STUDIO_SIGNED_COPY_PATH = re.compile(r"^/api/v1/dashboard/studio/proposals/\d+/mark-accepted$")
+_STUDIO_IMPORT_PATH = re.compile(r"^/api/v1/dashboard/studio/import$")
 _FILE_ROUTES = (
+    (_STUDIO_SIGNED_COPY_PATH, "app.api.routes.studio", "MAX_SIGNED_COPY"),
+    (_STUDIO_IMPORT_PATH, "app.studio.importer", "MAX_BYTES"),
     (_ONBOARDING_FILE_PATH, "app.api.routes.associate_onboarding", "MAX_FILE_BYTES"),
     (_EXECUTION_FILE_PATH, "app.execution.files", "MAX_FILE_BYTES"),
     (_PAYMENT_PROOF_PATH, "app.api.routes.associate_payments", "MAX_PROOF_BYTES"),

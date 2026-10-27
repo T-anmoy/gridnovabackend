@@ -19,7 +19,7 @@ refusals (scope, floor, approval) are structured.
   `config/access_control.yaml` is the single source; it is validated at startup.
 - **One person may hold several roles.** Their permissions are the **union**. `role` is
   kept everywhere as the *primary* role (the first held role in the order admin,
-  management, network_manager, sales, engineer, operations, accounts).
+  management, network_manager, sales, engineer, operations, accounts, proposal_desk).
 - **Exclusive roles.** At most one of **Sales, Engineer, Operations** per person: each
   narrows what its holder sees per record (own leads / technical fields / projects in
   execution), and two together would conflict on the same record. Any of them may be
@@ -45,6 +45,7 @@ refusals (scope, floor, approval) are structured.
 | `engineer` | no | — | every lead's technical fields; survey review |
 | `operations` | no | — | execution and service from agreement signed; never money |
 | `accounts` | yes | — | payments, commissions, payouts, the bank file |
+| `proposal_desk` | no | — | **BE-18:** the Proposal Studio only — prepares, prices, issues and tracks Studio proposals |
 
 **Network Manager** holds: `leads.view_all` and `leads.view_commercial` (opens any
 proposal — detail, document, preview and PDF — with its prices; this also lists every
@@ -57,6 +58,26 @@ payments, commission rates, company settings, or Admin/Management/Accounts grant
 
 Note: the network summary it reads contains **aggregate** revenue and commission totals
 (the brief lists it among the Network Manager's views).
+
+**Proposal Desk** (BE-18) holds only the Studio's permissions: `studio.view`,
+`studio.view_all`, `studio.edit`, `studio.price` (sensitive — but Proposal Desk does not
+require two-step, so it is never blocked for this role), `studio.library.manage`,
+`studio.convert`. It is **not** exclusive: it may be combined with any role (e.g. Sales). A
+person holding only Proposal Desk sees the Studio and "Who can do what"
+(`GET /access/matrix`), nothing else: no leads, proposals, payments, projects, Nova Records
+project data (`live_project_rule` = none) or archive fields.
+
+| Studio permission | Proposal Desk | Admin | Management |
+|---|---|---|---|
+| `studio.view` (open the Studio, own proposals) | ✓ | ✓ | ✓ |
+| `studio.view_all` | ✓ | ✓ | ✓ |
+| `studio.edit` (customers, documents, issue, deliver, revise, duplicate, mark accepted/lost) | ✓ | ✓ | — |
+| `studio.price` — sensitive | ✓ | ✓ | — |
+| `studio.approve` — sensitive (never the preparer) | — | ✓ | ✓ |
+| `studio.library.manage` | ✓ | ✓ | — |
+| `studio.convert` (create a lead) | ✓ | ✓ | — |
+
+No other role gained or lost anything. Contract: `docs/api/proposal_studio.md`.
 
 ### Gate → permission
 
@@ -277,7 +298,7 @@ pending. A role change whose target's roles moved on since the request: 409 `app
 
 `GET /access/alerts` — any staff:
 ```json
-{"events": [{"event": "payment_recorded", "roles": ["accounts"], "assigned_employee": false,
+{"events": [{"event": "payment_recorded", "roles": ["accounts"], "assigned_employee": false, "owner": false,
              "active_holders": {"accounts": 1}, "fixed_addresses": 1, "reaches_someone": true}]}
 ```
 Recipients of a staff email = the fixed addresses configured before (`STAFF_NOTIFY_EMAILS`,
@@ -287,6 +308,11 @@ assigned employee where `assigned_employee: true`. Deduplicated; a deactivated e
 never emailed (even when their address is also a fixed one). An event that reaches nobody
 logs one warning per event type. New event: `associate_application_submitted` (Network
 Manager, Admin).
+
+BE-18 adds `owner: true` — the Studio proposal's owner receives the event, and no shared
+mailbox does: `studio_viewed`, `studio_accepted`, `studio_declined`, `studio_expiring`,
+`studio_not_viewed`. `studio_approval_requested` goes to Admin and Management (the holders of
+`studio.approve`) and the staff mailbox.
 
 ---
 

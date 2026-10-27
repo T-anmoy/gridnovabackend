@@ -91,6 +91,15 @@ class Notifier(ABC):
         self.notify(event_type, {"to": to, "subject": subject})
         return False
 
+    def send_studio_email(self, *, to: str, subject: str, lines: list[str], link_label: Optional[str],
+                          link_url: Optional[str], reply_to: Optional[str], attachment: Optional[tuple[str, str]],
+                          event_type: str) -> tuple[bool, Optional[str]]:
+        """A Proposal Studio email to a customer: plain lines, an optional link, an optional
+        PDF attachment (filename, base64 content), reply-to the proposal's owner. Only the
+        email notifier can; every other notifier reports why it did not."""
+        self.notify(event_type, {"to": to, "subject": subject})
+        return False, "email_not_configured"
+
     def send_proposal_to_customer(
         self,
         proposal_id: int,
@@ -160,7 +169,12 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "catalogue_unmatched",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
                       "commission_queries_overdue", "handover_blocked", "service_request_raised",
-                      "service_requests_overdue", "associate_application_submitted")
+                      "service_requests_overdue", "associate_application_submitted",
+                      "studio_approval_requested", "studio_viewed", "studio_accepted", "studio_declined",
+                      "studio_expiring", "studio_not_viewed")
+# Proposal Studio events for the proposal's owner only (config/access_control.yaml `owner: true`):
+# no shared mailbox receives them.
+OWNER_ONLY_EVENTS = ("studio_viewed", "studio_accepted", "studio_declined", "studio_expiring", "studio_not_viewed")
 # Events for one team rather than all staff: sent to that team's own recipients
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
@@ -305,6 +319,8 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"{payload.get('name')} applied to join the network as a {kind} ({payload.get('state')}).",
                  f"Application #{payload.get('application_id')} is waiting for review."],
                 "Open applications", f"{base_url}/dashboard/associate-applications")
+    if event_type.startswith("studio_"):
+        return _studio_message(event_type, payload, base_url)
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
     if event_type == "manager_signoff_required":
         value = payload.get("total_value")
@@ -318,6 +334,42 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"{_name(payload)} accepted proposal v{payload.get('version')} online.",
                  f"Proposal #{payload.get('proposal_id')}, lead #{payload.get('lead_id')}."],
                 "Open the proposal", proposal_url)
+    return None
+
+
+def _studio_message(event_type: str, payload: dict, base_url: str) -> Optional[tuple[str, list[str], str, str]]:
+    url = f"{base_url}/dashboard/studio/proposals/{payload.get('proposal_id')}"
+    what = f"{payload.get('code')} — {payload.get('title')}"
+    ref = payload.get("reference") or "(not yet issued)"
+    if event_type == "studio_approval_requested":
+        reasons = {"price_below_price_master": "the price is below the price master",
+                   "total_above_threshold": "the total is above the approval threshold"}
+        why = "; ".join(reasons.get(r, r) for r in payload.get("reasons") or [])
+        return (f"Approval needed: {what}",
+                [f"{payload.get('requested_by')} submitted Studio proposal {what} for approval ({why}).",
+                 f"Total incl. GST: Rs. {payload.get('total')}.",
+                 "Someone other than the preparer must approve or reject it."], "Open the proposal", url)
+    if event_type == "studio_viewed":
+        return (f"Customer opened {ref}", [f"The customer opened proposal {ref} ({what}) for the first time."],
+                "Open the proposal", url)
+    if event_type == "studio_accepted":
+        how = "online" if payload.get("via") == "online" else "in person"
+        return (f"Accepted: {ref}", [f"Proposal {ref} ({what}) was accepted {how}.",
+                                     "Create the lead from it so payments and the project can start."],
+                "Open the proposal", url)
+    if event_type == "studio_declined":
+        lines = [f"The customer declined proposal {ref} ({what})."]
+        if payload.get("reason"):
+            lines.append(f"Reason given: {payload['reason']}")
+        return (f"Declined: {ref}", lines, "Open the proposal", url)
+    if event_type == "studio_expiring":
+        return (f"Expires {payload.get('valid_until')}: {ref}",
+                [f"Proposal {ref} ({what}) is valid until {payload.get('valid_until')} and has not been accepted."],
+                "Open the proposal", url)
+    if event_type == "studio_not_viewed":
+        return (f"Not opened yet: {ref}",
+                [f"Proposal {ref} ({what}) was issued {payload.get('days')} days ago and the customer has not opened "
+                 "it.", "Consider a call or re-sending the link."], "Open the proposal", url)
     return None
 
 
@@ -455,6 +507,8 @@ class EmailNotifier(Notifier):
 
     def _fixed(self, event_type: str) -> list[str]:
         """The configured addresses (shared mailboxes) for an event."""
+        if event_type in OWNER_ONLY_EVENTS:
+            return []
         audience = EVENT_AUDIENCE.get(event_type)
         if not audience:
             return list(self._staff)
@@ -604,12 +658,26 @@ class EmailNotifier(Notifier):
                           html_body, text_body, "proposal_sent_customer_email")
         return (True, None) if sent else (False, "send_failed")
 
-    def _send(self, to: list[str], subject: str, html_body: str, text_body: str, event_type: str) -> bool:
+    def send_studio_email(self, *, to, subject, lines, link_label, link_url, reply_to, attachment,
+                          event_type) -> tuple[bool, Optional[str]]:
+        self._inner.notify(event_type, {"to": to, "subject": subject})
+        html_body, text_body = _render(lines, link_label, link_url)
+        extra: dict = {}
+        if reply_to:
+            extra["reply_to"] = reply_to
+        if attachment:
+            extra["attachments"] = [{"filename": attachment[0], "content": attachment[1]}]
+        sent = self._send([to], subject, html_body, text_body, event_type, extra=extra)
+        return (True, None) if sent else (False, "send_failed")
+
+    def _send(self, to: list[str], subject: str, html_body: str, text_body: str, event_type: str,
+              extra: Optional[dict] = None) -> bool:
         try:
             response = http_client().post(
                 RESEND_API_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"from": self._from, "to": to, "subject": subject, "html": html_body, "text": text_body},
+                json={"from": self._from, "to": to, "subject": subject, "html": html_body, "text": text_body,
+                      **(extra or {})},
                 timeout=RESEND_TIMEOUT_SECONDS,
             )
         except Exception as exc:
@@ -633,7 +701,7 @@ def fixed_recipient_count(event_type: str) -> int:
     staff = settings.staff_notify_email_list
     teams = {"accounts": _own_list(settings.accounts_notify_emails),
              "operations": _own_list(settings.operations_notify_emails)}
-    if event_type in ("approval_requested",):
+    if event_type in ("approval_requested",) or event_type in OWNER_ONLY_EVENTS:
         return 0
     audience = EVENT_AUDIENCE.get(event_type)
     if not audience:

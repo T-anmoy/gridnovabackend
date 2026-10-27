@@ -56,6 +56,20 @@ def _qr_uri(url: str) -> str:
     return "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+@lru_cache(maxsize=16)
+def _qr_png_uri(url: str) -> str:
+    """The Studio's verification QR as a PNG (an image the proof-check can find on the page)."""
+    import segno
+    buf = io.BytesIO()
+    segno.make(url, error="m").save(buf, kind="png", scale=10, border=0)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def qr_png_size(url: str) -> tuple[int, int]:
+    import segno
+    return segno.make(url, error="m").symbol_size(scale=10, border=0)
+
+
 # ── Text context ─────────────────────────────────────────────────────────────────
 
 class _Ctx(dict):
@@ -72,8 +86,8 @@ def _rs(value, whole: bool) -> str:
     return f"{document_config.load()['common']['amount_label']} {_amount(value, whole)}"
 
 
-def context(doc: d.ProposalDocument, figs: dict) -> _Ctx:
-    cfg = document_config.load()
+def context(doc: d.ProposalDocument, figs: dict, cfg: Optional[dict] = None) -> _Ctx:
+    cfg = cfg or document_config.load()
     from app.pricing import price_list
     phase = doc.connection.phase
     whole = figs["whole_rupees"]
@@ -114,7 +128,7 @@ def context(doc: d.ProposalDocument, figs: dict) -> _Ctx:
         ctx.update(subsidy=_rs(figs["subsidy"]["total"], whole), subsidy_up_to=_amount(figs["subsidy"]["total"], True),
                    effective_cost=_rs(figs["subsidy"]["effective_cost"], whole))
     common = cfg["common"]
-    residence = doc.segment == "residential"
+    residence = doc.segment == "residential" and not doc.housing_society
     ctx["location"] = ctx.fill(common["location_residence" if residence else "location_site"])
     ctx["package_clause"] = ctx.fill(cfg["compact"]["package_clause"]) if doc.plant.package else ""
     ctx["package_suffix"] = ctx.fill(cfg["compact"]["package_suffix"]) if doc.plant.package else ""
@@ -136,13 +150,13 @@ def context(doc: d.ProposalDocument, figs: dict) -> _Ctx:
 
 # ── Pieces ───────────────────────────────────────────────────────────────────────
 
-def _css(cfg: dict, layout: str, pages: int, draft: bool) -> str:
+def _css(cfg: dict, layout: str, pages: int, draft: bool, qr_url: Optional[str] = None, studio: bool = False) -> str:
     c = cfg["colours"]
     brand = cfg["brand"]
     header = _data_uri(str(document_config.asset_path("header_image")), "image/jpeg")
     watermark = _data_uri(str(document_config.asset_path("watermark_image")), "image/jpeg")
     letterhead = _data_uri(str(document_config.asset_path("letterhead_image")), "image/jpeg")
-    qr = _qr_uri(brand["qr_url"])
+    qr = _qr_uri(brand["qr_url"]) if qr_url is None else _qr_png_uri(qr_url)
     # @page backgrounds are positioned from the page area, so offsets subtract the margins.
     hx, hy = -MARGIN_SIDE, -MARGIN_TOP
     wx, wy = 147.9 - MARGIN_SIDE, 283.6 - MARGIN_TOP
@@ -150,7 +164,7 @@ def _css(cfg: dict, layout: str, pages: int, draft: bool) -> str:
     wm_bg = f"url('{watermark}') no-repeat {wx}pt {wy}pt / 279.35pt 288.55pt"
     qr_bg = f"url('{qr}') no-repeat {513.5 - MARGIN_SIDE}pt {641.3 - MARGIN_TOP}pt / 53.4pt 53.4pt"
     lh_bg = f"url('{letterhead}') no-repeat {hx}pt {721.4 - MARGIN_TOP}pt / {PT_PAGE_W}pt 120.45pt"
-    big = layout == "detailed"
+    big = layout in ("detailed", "itemised")
     s = {  # type sizes (pt), measured from the samples
         "kicker": 10.5 if big else 9.5, "title": 17 if big else 16, "strip_label": 7.5 if big else 7,
         "strip_value": 9.5 if big else 9, "card_label": 8 if big else 7.5, "card": 9.5 if big else 9,
@@ -261,8 +275,14 @@ li::before {{ content: "•"; color: {c['orange']}; font-weight: bold; position:
 .signoff .s span {{ color: {c['muted']}; font-size: 8.5pt; }}
 .avoid {{ break-inside: avoid; }}
 .lastspace {{ height: {LAST_PAGE_RESERVE:.1f}pt; }}
-{stamp}
+{stamp}{_STUDIO_CSS if studio else ""}
 """
+
+
+# Studio documents only: the commercial page carries more (discount, payment methods, the
+# housing-society CFA), so its spacing is a little tighter to keep it on one page.
+_STUDIO_CSS = """.v2c .wordbox { margin: 10pt 0 6pt; padding: 6pt 10pt; line-height: 1.45; }
+.v2c h3 { margin: 6pt 0 4pt; }"""
 
 
 def _section_head(no: Optional[str], title: str, sub: Optional[str], first: bool = False, brk: bool = False) -> str:
@@ -375,13 +395,22 @@ def _price_table(doc, ctx, figs, cfg, layout: str) -> str:
     lay = cfg[layout]
     desc = ctx.fill(lay["price_description"])
     gst_label = common["gst_line_detail"] if layout == "compact" else common["gst_line"]
+    first_amount = figs["basic"]
+    discount_rows = ""
+    if isinstance(doc, d.StudioDocument) and doc.display.show_discount_line and figs.get("discount"):
+        r = _studio_render_cfg()
+        first_amount = figs["discount"]["price_before_discount"]
+        discount_rows = (f'<tr class="gst"><td colspan="3">{_e(r["discount_line"])}</td>'
+                         f'<td>(–) {_e(_amount(figs["discount"]["amount"], whole))}</td></tr>'
+                         f'<tr class="gst"><td colspan="3">{_e(r["offered_line"])}</td>'
+                         f'<td>{_e(_amount(figs["basic"], whole))}</td></tr>')
     return (
         '<table class="grid">'
         f'<tr><th class="c" style="width:{8.5 if layout == "detailed" else 7}%">S. No.</th><th>Description</th>'
         '<th class="c" style="width:16%">Capacity'
         '</th><th class="r" style="width:16.6%">Amount (Rs.)</th></tr>'
         f'<tr><td class="c">1</td><td>{_e(desc)}</td><td class="c">{_e(ctx["capacity_kwp"])} kWp</td>'
-        f'<td class="r">{_e(_amount(figs["basic"], whole))}</td></tr>'
+        f'<td class="r">{_e(_amount(first_amount, whole))}</td></tr>{discount_rows}'
         f'<tr class="gst"><td colspan="3">{_e(gst_label)}</td><td>{_e(_amount(figs["gst"], whole))}</td></tr>'
         f'<tr class="tot"><td colspan="3">{_e(common["total_line"])}</td>'
         f'<td class="amt">{_e(_amount(figs["total"], whole))}</td></tr></table>')
@@ -406,6 +435,9 @@ def _compact(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     parts.append(ctx.fill(c["modules_part"]).upper())
     if pmsg:
         parts.append(c["pm_surya_ghar_eligible"])
+    v2 = isinstance(doc, d.StudioDocument)
+    if v2 and doc.cover_highlight:
+        parts = [doc.cover_highlight.upper()]
     out = [f'<div class="kicker">{_e(common["kicker"])}</div>', f'<div class="title">{_e(ctx.fill(common["title"]))}</div>',
            '<div class="subline">' + "&nbsp;&nbsp;·&nbsp;&nbsp;".join(_e(p) for p in parts) + "</div>",
            _strip(doc, ctx, ref_text, date_text, cfg),
@@ -455,6 +487,8 @@ def _compact(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     out.append(f'<h3>{_e(c["payment_label"])}</h3>')
     out.append(_stats([(f"{p['percent']}%  –  {_rs(p['amount'], whole)}", p["label"].upper())
                        for p in figs["payments"]]))
+    if v2:
+        out.append(_payment_methods())
     if pmsg:
         rows = [(c["subsidy_total_line"], _amount(figs["total"], whole))]
         for i, slab in enumerate(figs["subsidy"]["slabs"]):
@@ -475,8 +509,14 @@ def _compact(doc, figs, ctx, cfg, ref_text, date_text) -> str:
         body += "<tr>" + "".join(f'<td class="k">{_e(cell["label"])}</td><td class="v">{_e(ctx.fill(cell["value"]))}'
                                  "</td>" for cell in pair) + "</tr>"
     out.append(f'<table class="kv w4">{body}</table>')
+    if v2 and doc.display.show_package_comparison and figs.get("package_comparison"):
+        out.append(_package_comparison(doc, ctx, figs))
     if doc.notes:
         out.append(f'<h3>{_e(c["notes_label"])}</h3>' + _bullets([ctx.fill(n) for n in doc.notes]))
+    if v2:
+        out.append(_special_notes(doc, ctx))
+    if v2 and doc.display.show_savings and figs.get("savings"):
+        out.append("</div>" + _savings_page(figs, whole) + "<div>")
     out.append(_signoff(cfg) + "</div>")
     return "\n".join(out)
 
@@ -487,8 +527,11 @@ def _detailed(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     t, common = cfg["detailed"], cfg["common"]
     whole = figs["whole_rupees"]
     a = doc.addressee
-    out = [f'<div class="kicker">{_e(common["kicker"])}</div>', f'<div class="title">{_e(ctx.fill(common["title"]))}</div>',
-           _strip(doc, ctx, ref_text, date_text, cfg),
+    v2 = isinstance(doc, d.StudioDocument)
+    out = [f'<div class="kicker">{_e(common["kicker"])}</div>', f'<div class="title">{_e(ctx.fill(common["title"]))}</div>']
+    if v2 and doc.cover_highlight:
+        out.append(f'<div class="subline">{_e(doc.cover_highlight.upper())}</div>')
+    out += [_strip(doc, ctx, ref_text, date_text, cfg),
            f'<div class="cards"><div>{_to_card(doc, cfg)}</div><div>{_site_card(doc, cfg)}</div></div>',
            _subject_and_salutation(doc, ctx, cfg)]
     out += [f"<p>{_e(ctx.fill(p))}</p>" for p in t["letter"]]
@@ -552,7 +595,8 @@ def _detailed(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     out.append(_section_head("03", t["s3_title"], t["s3_sub"], first=True, brk=True) + _boq(doc, ctx, True))
     out.append(f'<div class="note"><b>{_e(t["quality_note_label"])}</b> {_e(t["quality_note"])}</div></div>')
     # Page 6 — 04 commercial.
-    out.append(_section_head("04", t["s4_title"], t["s4_sub"], first=True, brk=True))
+    head = _section_head("04", t["s4_title"], t["s4_sub"], first=True, brk=True)
+    out.append(head.replace('class="sec first brk"', 'class="sec first brk v2c"') if v2 else head)
     out.append(f'<h3>{_e(t["pricing_label"])}</h3>' + _price_table(doc, ctx, figs, cfg, "detailed"))
     w = t["words_labels"]
     out.append(f'<div class="wordbox"><div><b>{_e(w["basic"])}</b> {_e(figs["words"]["basic"])}.</div>'
@@ -566,10 +610,18 @@ def _detailed(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     out.append(f'<h3>{_e(t["payment_label"])}</h3><table class="grid"><tr><th class="c" style="width:8.5%">{_e(h[0])}'
                f'</th><th>{_e(h[1])}</th><th class="c" style="width:16%">{_e(h[2])}</th><th class="r" '
                f'style="width:20.5%">{_e(h[3])}</th></tr>{rows}</table>')
-    out.append(f'<div class="fine m">{_e(t["payment_note"])}</div>')
+    if not v2:
+        out.append(f'<div class="fine m">{_e(t["payment_note"])}</div>')
+    else:
+        out.append(_payment_methods(t["payment_note"]))
+        if figs["subsidy"].get("kind") == "housing_society":
+            out.append(_society_subsidy(figs, whole))
     out.append(f'<h3>{_e(t["warranty_label"])}</h3>' + _kv([(r["label"], r["value"]) for r in t["warranty_rows"]]))
     notes = [ctx.fill(n) for n in t["commercial_notes"]] + [ctx.fill(n) for n in doc.notes]
-    out.append(f'<h3>{_e(t["notes_label"])}</h3>' + _bullets(notes) + "</div>")
+    out.append(f'<h3>{_e(t["notes_label"])}</h3>' + _bullets(notes) + (_special_notes(doc, ctx) if v2 else "")
+               + "</div>")
+    if v2 and doc.display.show_savings and figs.get("savings"):
+        out.append(_savings_page(figs, whole))
     # Page 7 — 05 customer scope.
     out.append(_section_head("05", t["s5_title"], t["s5_sub"], first=True, brk=True)
                + _bullets([ctx.fill(b) for b in doc.customer_scope]))
@@ -587,6 +639,198 @@ def _detailed(doc, figs, ctx, cfg, ref_text, date_text) -> str:
     return "\n".join(out)
 
 
+# ── Proposal Studio blocks (schema 2, BE-18) ─────────────────────────────────────
+
+def _studio_render_cfg() -> dict:
+    from app.studio import config as studio_config
+    return studio_config.load()["render"]
+
+
+def _payment_methods(lead_in: Optional[str] = None) -> str:
+    """The payment-methods line (cheque, NEFT, RTGS, IMPS), after `lead_in` on the same line."""
+    from app.studio import config as studio_config
+    r = _studio_render_cfg()
+    first = f"{_e(lead_in)} " if lead_in else ""
+    return (f'<div class="fine m">{first}<b>{_e(r["payment_methods_label"])}</b> '
+            f'{_e(studio_config.load()["payment_methods"])}</div>')
+
+
+def _special_notes(doc, ctx) -> str:
+    if not doc.notes_free:
+        return ""
+    return f'<h3>{_e(_studio_render_cfg()["special_notes_label"])}</h3>' + _bullets([ctx.fill(n) for n in doc.notes_free])
+
+
+def _package_comparison(doc, ctx, figs) -> str:
+    r = _studio_render_cfg()
+    heads = r["comparison_headers"]
+    whole = all(Decimal(p[k]) == Decimal(p[k]).to_integral_value() for p in figs["package_comparison"]
+                for k in ("basic", "gst", "total"))
+    rows = "".join(
+        f'<tr><td class="k">{_e(p["name"])}{" ✓" if p["chosen"] else ""}</td><td>{_e(p["panels"])}</td>'
+        f'<td>{_e(p["inverters"])}</td><td class="r">{_e(_amount(p["basic"], whole))}</td>'
+        f'<td class="r">{_e(_amount(p["gst"], whole))}</td><td class="r">{_e(_amount(p["total"], whole))}</td></tr>'
+        for p in figs["package_comparison"])
+    head = "".join(('<th class="r">' if i >= 3 else "<th>") + f"{_e(h)}</th>" for i, h in enumerate(heads))
+    return (f'<h3>{_e(r["comparison_label"])}</h3><table class="grid sub avoid"><tr>{head}</tr>{rows}</table>'
+            f'<div class="fine m">{_e(ctx.fill(r["comparison_note"]))}</div>')
+
+
+def _society_subsidy(figs, whole: bool) -> str:
+    r = _studio_render_cfg()
+    sub = figs["subsidy"]
+    slab = sub["slabs"][0]
+    line = _Ctx(kw=slab["kw"], rate=_amount(slab["rate"], True)).fill(r["society_subsidy_line"])
+    body = (f'<tr><td class="k">{_e(r["society_total_line"])}</td><td class="r" style="width:30%">'
+            f'{_e(_amount(figs["total"], whole))}</td></tr>'
+            f'<tr><td class="k">{_e(line)}</td><td class="r">(–) {_e(_amount(sub["total"], whole))}</td></tr>'
+            f'<tr class="tot"><td>{_e(r["society_effective"])}</td>'
+            f'<td class="amt">{_e(_rs(sub["effective_cost"], whole))}</td></tr>')
+    note = _Ctx(kw_per_house=sub["kw_per_house"], houses=sub["houses"], max_kw=sub["max_kw"]).fill(
+        r["society_subsidy_note"])
+    return (f'<h3>{_e(r["society_subsidy_label"])}</h3><table class="grid sub avoid">{body}</table>'
+            f'<div class="fine m">{_e(note)}</div>')
+
+
+def _savings_page(figs, whole: bool) -> str:
+    r = _studio_render_cfg()
+    sav = figs["savings"]
+    lb = r["savings_basis_labels"]
+    basis = [(lb["consumption"], f'{_amount(sav["monthly_consumption_units"], True)} units'),
+             (lb["tariff"], f'Rs. {sav["tariff_per_unit"]} per unit'),
+             (lb["generation"], f'~{_amount(sav["year1_generation_units"], True)} units'),
+             (lb["savings"], f'Rs. {_amount(sav["year1_savings"], True)} '
+                             f'(about Rs. {_amount(sav["year1_monthly_savings"], True)} a month)')]
+    if sav["payback_years"] is not None:
+        basis.append((r["savings_payback_label"], f'~{sav["payback_years"]} years on Rs. '
+                                                   f'{_amount(sav["effective_cost"], whole)}'))
+    heads = r["savings_headers"]
+    rows = "".join(f'<tr><td class="c">{row["year"]}</td><td class="r">{_e(_amount(row["generation_units"], True))}</td>'
+                   f'<td class="r">{_e(_amount(row["savings"], True))}</td>'
+                   f'<td class="r">{_e(_amount(row["cumulative"], True))}</td></tr>' for row in sav["table"])
+    a = sav["assumptions"]
+    pct = lambda key: d.kw_text(Decimal(a[key]) * 100) or "0"  # noqa: E731
+    assumptions = _Ctx(first=pct("degradation_first_year"), annual=pct("degradation_annual_after"),
+                       technology=a["module_technology"], escalation=pct("tariff_escalation"),
+                       export=d.kw_text(Decimal(a["export_rate"])) or "0").fill(r["savings_assumptions"])
+    out = [_section_head(None, r["savings_title"], r["savings_sub"], first=True, brk=True),
+           f'<h3>{_e(r["savings_inputs_label"])}</h3>' + _kv(basis),
+           f'<table class="grid avoid" style="margin-top:10pt"><tr><th class="c" style="width:12%">{_e(heads[0])}</th>'
+           + "".join(f'<th class="r">{_e(h)}</th>' for h in heads[1:]) + f"</tr>{rows}</table>",
+           f'<div class="note">{_e(sav["note"])}</div>', f'<div class="fine m">{_e(assumptions)}</div>']
+    if sav.get("depreciation_line"):
+        out.append(f'<div class="fine m">{_e(sav["depreciation_line"])}</div>')
+    return "\n".join(out) + "</div>"
+
+
+def _itemised(doc, figs, ctx, cfg, ref_text, date_text) -> str:
+    """Street lighting and other supply: the same frame, a BOQ with prices instead of plant pages."""
+    from app.studio import config as studio_config
+    t = studio_config.load()["itemised"]["text"]
+    cats = studio_config.load()["itemised"]["categories"]
+    common, whole = cfg["common"], figs["whole_rupees"]
+    labels = common["strip_labels"]
+    a = doc.addressee
+    who = (a.name or "") if a.customer_type == "organisation" else " ".join(p for p in (a.title, a.name) if p)
+    cells = [(labels["date"], date_text, 19.6), (labels["reference"], ref_text, 22.3),
+             (labels["project"], t["project_label"], 23.8), (labels["customer"], who.upper(), 34.3)]
+    strip = '<table class="strip"><tr>' + "".join(
+        f'<td style="width:{w}%"><div class="l">{_e(label)}</div><div class="v">{_e(v)}</div></td>'
+        for label, v, w in cells) + "</tr></table>"
+    out = [f'<div class="kicker">{_e(common["kicker"])}</div>', f'<div class="title">{_e(t["title"])}</div>']
+    if doc.cover_highlight:
+        out.append(f'<div class="subline">{_e(doc.cover_highlight.upper())}</div>')
+    site = _site_card(doc, cfg) if doc.site.address_lines else ""
+    out += [strip, f'<div class="cards"><div>{_to_card(doc, cfg)}</div><div>{site}</div></div>',
+            f'<div class="subject">Subject: {_e(t["subject"])}</div>', f'<div class="salute">{_e(a.salutation)}</div>']
+    out += [f"<p>{_e(p)}</p>" for p in t["letter"]]
+    out.append(_signature_letter(cfg))
+    out.append(f'<div class="caps">{_e(common["highlights_label"])}</div>')
+    h = t["highlights"]
+    out.append(_stats([(str(len(doc.items)), h["items"]), (_rs(figs["total"], whole), h["total"]),
+                       (f'{figs["validity_days"]} Days', h["validity"])], "stats hl"))
+    # Page 2 — BOQ with prices, totals, words.
+    out.append(_section_head("01", t["boq_title"], t["boq_sub"], first=True, brk=True))
+    head = ('<tr><th class="c" style="width:5.5%">S. No.</th><th>Description</th><th>Specification</th><th>Make</th>'
+            '<th class="r" style="width:8%">Qty</th><th class="c" style="width:7%">Unit</th>'
+            '<th class="r" style="width:11%">Unit Rate</th><th class="c" style="width:7%">GST</th>'
+            '<th class="r" style="width:13%">Amount (Rs.)</th></tr>')
+    rows = "".join(
+        f'<tr><td class="c">{line["no"]}</td><td>{_e(item.description)}</td><td>{_e(item.specification or "–")}</td>'
+        f'<td>{_e(item.make)}</td><td class="r">{_e(d.kw_text(item.quantity))}</td><td class="c">{_e(item.unit)}</td>'
+        f'<td class="r">{_e(_amount(item.unit_rate, whole))}</td><td class="c">{_e(line["gst_percent"])}%</td>'
+        f'<td class="r">{_e(_amount(line["amount"], whole))}</td></tr>'
+        for item, line in zip(doc.items, figs["items"]))
+    rows += (f'<tr class="gst"><td colspan="8">{_e(t["subtotal_line"])}</td>'
+             f'<td>{_e(_amount(figs["basic"], whole))}</td></tr>')
+    for g in figs["gst_groups"]:
+        rows += (f'<tr class="gst"><td colspan="8">GST @ {_e(g["percent"])}% on Rs. {_e(_amount(g["taxable"], whole))}'
+                 f'</td><td>{_e(_amount(g["gst"], whole))}</td></tr>')
+    rows += (f'<tr class="tot"><td colspan="8">{_e(common["total_line"])}</td>'
+             f'<td class="amt">{_e(_amount(figs["total"], whole))}</td></tr>')
+    out.append(f'<table class="grid" style="font-size:8pt">{head}{rows}</table>')
+    out.append(f'<div class="wordbox"><div><b>{_e(cfg["detailed"]["words_labels"]["total"])}</b> '
+               f'{_e(figs["words"]["total"])}.</div></div></div>')
+    # Page 3 — payment terms, customer scope, notes, warranty, sign-off.
+    out.append(_section_head("02", t["terms_title"], t["terms_sub"], first=True, brk=True))
+    rows = "".join(f'<tr><td class="c">{i}</td><td>{_e(p["label"])}</td><td class="c">{_e(p["percent"])}%</td>'
+                   f'<td class="r">{_e(_amount(p["amount"], whole))}</td></tr>' for i, p in enumerate(figs["payments"], 1))
+    rows += (f'<tr class="gst"><td colspan="2">TOTAL</td><td class="c">100%</td>'
+             f'<td>{_e(_amount(figs["total"], whole))}</td></tr>')
+    ph = cfg["detailed"]["payment_headers"]
+    out.append(f'<h3 style="margin-top:6pt">{_e(cfg["detailed"]["payment_label"])}</h3><table class="grid"><tr>'
+               f'<th class="c" style="width:8.5%">{_e(ph[0])}</th><th>{_e(ph[1])}</th><th class="c" style="width:16%">'
+               f'{_e(ph[2])}</th><th class="r" style="width:20.5%">{_e(ph[3])}</th></tr>{rows}</table>')
+    out.append(_payment_methods())
+    out.append(f'<h3>{_e(t["scope_label"])}</h3>' + _bullets([ctx.fill(b) for b in doc.customer_scope]))
+    warranty = []
+    for cat in dict.fromkeys(item.category for item in doc.items):
+        for row in cats[cat].get("warranty_rows") or []:
+            warranty.append((row["label"], row["value"]))
+    if warranty:
+        out.append(f'<h3>{_e(cfg["detailed"]["warranty_label"])}</h3>' + _kv(warranty))
+    notes = [ctx.fill(n) for n in cfg["detailed"]["commercial_notes"] if "{validity_days}" in n]
+    out.append(f'<h3>{_e(cfg["compact"]["notes_label"])}</h3>' + _bullets(notes + [ctx.fill(n) for n in doc.notes])
+               + _special_notes(doc, ctx))
+    out.append(_signoff(cfg) + "</div>")
+    return "\n".join(out)
+
+
+def studio_cfg_view(doc) -> dict:
+    """The layout config a Studio document renders with: proposal_document.yaml as is, with
+    "Rooftop" read as "Ground-Mounted" for a ground-mounted plant, and the itemised layout's
+    title, footer and subject from config/studio.yaml."""
+    import copy
+
+    cfg = copy.deepcopy(document_config.load())
+    if not isinstance(doc, d.StudioDocument):
+        return cfg
+    if doc.mount_type == "ground_mounted":
+        # Only the sentences that describe THIS plant; the company paragraphs, quality policy
+        # and the rest of the fixed text stay exactly as Grid Nova wrote them.
+        swap = (("ROOFTOP", "GROUND-MOUNTED"), ("Rooftop", "Ground-Mounted"), ("rooftop", "ground-mounted"))
+
+        def plant(text: str) -> str:
+            for a, b in swap:
+                text = text.replace(a, b)
+            return text
+        for key in ("title", "footer_title", "project_label", "project_label_dcr", "subject", "site_card_title"):
+            cfg["common"][key] = plant(cfg["common"][key])
+        det = cfg["detailed"]
+        det["letter"][2] = plant(det["letter"][2])
+        for key in ("glance_plant", "mount_type", "summary", "price_description", "closure"):
+            det[key] = plant(det[key])
+        for rows in (det["proposed_system"], det["config_rows"]):
+            rows[0] = {**rows[0], "value": plant(rows[0]["value"])}
+    if d.layout(doc) == "itemised":
+        from app.studio import config as studio_config
+        t = studio_config.load()["itemised"]["text"]
+        cfg["common"] = {**cfg["common"], "title": t["title"], "footer_title": t["footer_title"],
+                         "subject": t["subject"], "site_card_title": t["site_card_title"]}
+        cfg["itemised"] = cfg["detailed"]
+    return cfg
+
+
 # ── Rendering ────────────────────────────────────────────────────────────────────
 
 def format_date(day: date) -> str:
@@ -594,19 +838,32 @@ def format_date(day: date) -> str:
 
 
 def build_html(doc: d.ProposalDocument, *, reference: Optional[str], doc_date: date, draft: bool,
-               pages: int = 1, figs: Optional[dict] = None) -> str:
-    cfg = document_config.load()
+               pages: int = 1, figs: Optional[dict] = None, verify_url: Optional[str] = None) -> str:
+    """The document as HTML. A Studio (schema 2) document may pass `verify_url`: its
+    last-page QR then points there (a PNG) instead of the website."""
+    v2 = isinstance(doc, d.StudioDocument)
+    cfg = studio_cfg_view(doc) if v2 else document_config.load()
     figs = figs or d.figures(doc)
     if figs["total"] is None:
         raise DocumentRenderError("The document has no price; it cannot be rendered.")
-    ctx = context(doc, figs)
+    ctx = context(doc, figs, cfg)
     ref_text = reference or "Allocated on approval"
-    body_fn = _compact if figs["layout"] == "compact" else _detailed
+    body_fn = {"compact": _compact, "detailed": _detailed, "itemised": _itemised}[figs["layout"]]
     body = body_fn(doc, figs, ctx, cfg, ref_text, format_date(doc_date))
     stamp = '<div class="draft-stamp">DRAFT — NOT FOR CUSTOMER</div>' if draft else ""
     title = _e(ctx.fill(cfg["common"]["footer_title"]))
-    page = (f'<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>{title}</title>'
-            f"<style>{_css(cfg, figs['layout'], pages, draft)}</style></head><body>"
+    meta = ""
+    if v2:
+        # PDF document information (WeasyPrint reads these into the PDF / XMP metadata).
+        subject = ctx.fill(cfg["common"]["subject"]).rstrip(".")
+        keywords = ", ".join(k for k in ("Grid Nova Energy", "solar proposal", reference or "",
+                                         figs.get("project_type", "").replace("_", " ")) if k)
+        meta = (f'<meta name="author" content="{_e(document_config.load()["signatory"]["for_line"][4:])}">'
+                f'<meta name="description" content="{_e(subject)}"><meta name="keywords" content="{_e(keywords)}">'
+                '<meta name="generator" content="Grid Nova Proposal Studio">')
+    page = (f'<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>{title}</title>{meta}'
+            f"<style>{_css(cfg, figs['layout'], pages, draft, verify_url if v2 else None, studio=v2)}</style>"
+            "</head><body>"
             f"{_footer(cfg, ctx)}{stamp}{body}</body></html>")
     leftover = _LEFTOVER.search(re.sub(r"<style>.*?</style>", "", page, flags=re.S))
     if leftover:
@@ -614,19 +871,22 @@ def build_html(doc: d.ProposalDocument, *, reference: Optional[str], doc_date: d
     return page
 
 
-def render(doc: d.ProposalDocument, *, reference: Optional[str], doc_date: date, draft: bool) -> bytes:
+def render(doc: d.ProposalDocument, *, reference: Optional[str], doc_date: date, draft: bool,
+           verify_url: Optional[str] = None, pdf_a: bool = False) -> bytes:
     """PDF bytes. Rendered until the page count settles, so the letterhead and QR land on
-    the real last page (@page :nth(N)) and nowhere else."""
+    the real last page (@page :nth(N)) and nowhere else. `pdf_a`: an archival PDF/A-3b
+    (the Studio's issued documents)."""
     from weasyprint import HTML
 
     from app.pdf.fetcher import safe_url_fetcher
 
     figs = d.figures(doc)
-    pages = 3 if figs["layout"] == "compact" else 8
+    pages = {"compact": 3, "detailed": 8, "itemised": 3}[figs["layout"]]
     for _ in range(4):
-        html_doc = build_html(doc, reference=reference, doc_date=doc_date, draft=draft, pages=pages, figs=figs)
+        html_doc = build_html(doc, reference=reference, doc_date=doc_date, draft=draft, pages=pages, figs=figs,
+                              verify_url=verify_url)
         rendered = HTML(string=html_doc, base_url=None, url_fetcher=safe_url_fetcher()).render()
         if len(rendered.pages) == pages:
-            return rendered.write_pdf()
+            return rendered.write_pdf(pdf_variant="pdf/a-3b") if pdf_a else rendered.write_pdf()
         pages = len(rendered.pages)
     raise DocumentRenderError("The page count did not settle; the document cannot be rendered.")

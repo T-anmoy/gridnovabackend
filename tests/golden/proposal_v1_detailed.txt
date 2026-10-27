@@ -1,0 +1,349 @@
+52 kWp Grid-Tied Rooftop Solar Proposal
+GRID NOVA ENERGY
+| 52 kWp Grid-Tied Rooftop Solar Proposal | Page
+of
+TECHNICAL & COMMERCIAL PROPOSAL
+52 KWP GRID-TIED ROOFTOP SOLAR POWER PLANT
+DATE
+23.10.2026
+REFERENCE
+GN/23/10/2026/01
+PROJECT
+52 KWP ROOFTOP
+CUSTOMER
+EXAMPLE METAL WORKS
+TO
+M/s Example Metal Works
+1, Example Road,
+Kolkata – 700006, West Bengal
+Kind Attn:
+Mr. Test Director (Director)
+PROJECT SITE
+Rooftop Solar Plant Site
+Example Mouza, Example Village,
+P.O. – Example, Amta,
+Dist. – Howrah – 711401, West Bengal
+Subject: Proposal for Supply, Installation & Commissioning of a 52 kWp Grid-Tied Rooftop Solar Power Plant.
+Dear Sir,
+We take this opportunity to introduce Grid Nova Energy, a professionally managed solar energy company engaged in the design, engineering, procurement, installation and maintenance of solar power systems across India. The company is committed to supporting India’s renewable energy transition by delivering reliable, cost-effective and sustainable solar solutions.
+Grid Nova Energy has experience in executing rooftop and ground-mounted solar projects for residential, commercial, institutional and industrial consumers, with a strong focus on quality, safety and regulatory compliance. Our technical team follows MNRE guidelines and applicable state policies to ensure efficient system performance and long-term value.
+Based on our discussions, we are pleased to submit our techno-commercial proposal for a 52 kWp grid-tied, three-phase rooftop solar power plant at your project site in Amta, Howrah. The plant is designed with Non-DCR Mono PERC solar modules and string inverters from reputed manufacturers, to deliver dependable generation and lasting savings on your electricity costs.
+Thank you for your time and consideration. We look forward to the opportunity of working with Example Metal Works on this initiative towards clean and sustainable energy.
+For Grid Nova Energy,
+RAJU PAUL
+Authorised Signatory
+KEY HIGHLIGHTS
+52 kWp
+PLANT CAPACITY
+~74,880 units
+EST. ANNUAL GENERATION
+Rs. 31,14,540
+TOTAL INCL. GST
+15 Days
+OFFER VALIDITY
+PROPOSAL AT A GLANCE
+A one-page summary of the proposed plant and the commercial offer.
+Customer
+M/s Example Metal Works
+Project Site
+Example Mouza, Example Village, P.O. – Example, Amta, Dist. – Howrah – 711401, West Bengal
+Proposed Plant
+52 kWp Grid-Tied Rooftop Solar Power Plant
+Category & Supply
+Commercial | Three-Phase
+Solar Modules
+Mono PERC | Non-DCR
+Inverter
+Three-phase grid-tied string inverter
+Estimated Generation
+~6,240 units per month; ~74,880 units per annum (approx.)
+Base Project Price
+Rs. 28,60,000
+GST @ 8.9%
+Rs. 2,54,540
+Total Amount incl. GST
+Rs. 31,14,540
+Payment Terms
+25% advance with order | 60% against delivery of active materials | 15% on execution
+Offer Validity
+15 days from the date of this proposal
+01 |
+PROJECT OVERVIEW
+Customer, site, proposed system and infrastructure requirements.
+Customer & Site Details
+Customer
+M/s Example Metal Works
+Attention
+Mr. Test Director (Director)
+Office Address
+1, Example Road, Kolkata – 700006, West Bengal
+Project Site
+Example Mouza, Example Village, P.O. – Example, Amta, Dist. – Howrah – 711401, West Bengal
+Mount Type
+Rooftop
+Proposed System
+System Type
+Grid-Tied (On-Grid) Rooftop Solar PV with Net Metering
+Plant Capacity
+52 kWp
+Consumer Category
+Commercial
+Electrical Supply
+Three-Phase
+Module Technology
+Mono PERC | Non-DCR
+Inverter Type
+Three-phase grid-tied string inverter with remote monitoring
+Executive Summary
+Grid Nova Energy proposes a 52 kWp grid-connected rooftop solar PV power plant for Example Metal Works at its Amta, Howrah site. The plant is designed to significantly reduce electricity costs, stabilise long-term energy expenses and lower the carbon footprint of the premises. With net metering, surplus solar energy is exported to the grid and adjusted against the energy drawn from the grid.
+Solar Resource Assessment & Estimated Generation
+Average solar generation potential
+3.8 – 4.0 units / kWp / day
+Design basis
+~120 units / kWp / month (conservative)
+Plant capacity
+52 kWp
+Estimated monthly generation
+~6,240 units
+Estimated annual generation
+~74,880 units
+Note: Actual generation depends on solar irradiation, weather, shading, orientation, tilt and module cleanliness at site.
+Infrastructure Requirements
+Space Requirement
+Approx. 4,300 sq. ft. of shadow-free roof area (to be confirmed during site survey)
+Load Bearing Capacity
+Roof suitable for solar plant installation
+Roof Access
+Safe and permanent access to the roof – client scope
+Internet Connection
+For remote monitoring (GSM / LAN) – client scope
+LT Panel / Spare Feeder
+Required for grid interconnection
+Installation & Commissioning
+Water and electricity during installation – client scope
+Key Advantages of Installing a Solar Power Plant
+Significant reduction in monthly electricity expenses.
+Hedge against future electricity tariff increases.
+Zero fuel cost for 25+ years, with low maintenance and high reliability.
+Improved ESG and sustainability profile for the business.
+Project Execution Stages
+S. No.
+Stage
+Key Activities
+1
+Site Survey & Detailed Engineering
+Roof survey, shadow analysis, layout and electrical design finalisation
+2
+Procurement & Delivery
+Supply of solar modules, inverters, mounting structure and balance of system to site
+3
+Installation
+Structure erection, module mounting, DC / AC cabling, earthing and lightning protection
+4
+Testing & Commissioning
+Pre-commissioning checks, inverter start-up and performance verification
+5
+Net Metering & Handover
+DISCOM liaison for net metering, documentation and handover to the client team
+02 |
+TECHNICAL CONFIGURATION
+Core system configuration, preferred makes and component details.
+System Configuration
+System Type
+Grid-connected rooftop solar PV system, three-phase
+Solar Modules
+Mono PERC, Non-DCR (module wattage as per detailed design)
+Inverter
+Three-phase grid-tied string inverter(s), rated to match the 52 kWp array
+Mounting Structure
+Rooftop module mounting structure, designed for the roof type
+Protection
+DCDB and ACDB with Surge Protection Devices (SPD)
+Grid Integration
+Net metering through the local DISCOM
+Performance Monitoring
+Web and mobile based remote monitoring
+Preferred Makes
+Solar Panels (Non-DCR, Mono PERC)
+HR Solar / Sova Solar / Novasys / Equivalent
+String Inverter
+Power One / Deye / Microtek / V-Sole / Equivalent
+Wires & Cables
+Havells / Finolex / RR Cables / Mescab / Equivalent
+Solar PV Modules
+High-efficiency Mono PERC half-cut solar cells.
+High-transparency, low-iron tempered glass for better light transmission, stiffness and impact resistance.
+Integrated bypass diodes to protect the cell circuit from hot spots during partial shading.
+Strong low-light performance; certified to IEC 61215 and IEC 61730.
+String Inverter
+Three-phase grid-tied string inverters with multiple MPPT inputs convert the DC power from the solar array into grid-synchronised AC power with precise voltage and stable frequency. The inverters include protection against overload, short circuit and islanding, and support remote monitoring of plant generation through web and mobile platforms.
+Module Mounting Structure
+Correct mounting maximises power production and protects the investment from wind loads. The mounting structure provides stability and the proper orientation and tilt for the solar array, and will be finalised during detailed engineering based on the roof type and site conditions.
+Cables
+All cables are selected to minimise losses and to perform reliably at high temperatures. Solar-grade DC cables are UV-resistant and weatherproof for outdoor runs; AC cables are sized for the inverter output and the interconnection point. Final cable sizes and routing will be confirmed during detailed engineering.
+Earthing & Lightning Protection
+The module mounting structure and all metallic parts of the plant will be properly earthed using an adequate number of earthing kits, to ensure the safety of the power plant. The system is protected by surge protection devices in the DCDB and ACDB, along with a lightning arrester.
+03 |
+BILL OF QUANTITY
+Scope of supply and services included in the quoted price.
+S. No.
+Description
+Quantity
+Standard
+Make / Brand
+1
+Solar PV Modules – Mono PERC, Non-DCR
+52 kWp
+IEC 61215 / IEC 61730
+HR Solar / Sova Solar / Novasys / Equivalent
+2
+Three-phase grid-tied string inverter with remote monitoring
+As per design
+IEC 61683 / IEC 62109
+Power One / Deye / Microtek / V-Sole / Equivalent
+3
+Module mounting structure
+1 Set
+As per design
+–
+4
+DC Distribution Box (DCDB) with SPD
+As per design
+IEC 60947
+–
+5
+AC Distribution Box (ACDB) with SPD
+As per design
+IEC 60947
+–
+6
+DC solar cables (UV-resistant)
+As per site conditions
+EN 50618
+Havells / Finolex / RR Cables / Mescab / Equivalent
+7
+AC cables
+As per site conditions
+IS 694 / IS 7098
+Havells / Finolex / RR Cables / Mescab / Equivalent
+8
+Earthing system
+As per design
+IEC 62561
+–
+9
+Lightning arrester
+1 Set
+IEC 62305
+–
+10
+Accessories (MC4 connectors, lugs, conduits, cable ties, fasteners)
+Lumpsum
+–
+–
+11
+Installation, testing & commissioning
+Lumpsum
+–
+–
+12
+Net-metering support & documentation
+Lumpsum
+–
+Liaison with DISCOM
+Quality & Standards:
+All major equipment is sourced from the preferred makes listed in this proposal and conforms to the applicable IEC / IS standards. Final quantities, ratings and cable sizes will be confirmed during detailed engineering.
+04 |
+COMMERCIAL PROPOSAL
+Pricing, GST, payment terms and warranty.
+Pricing
+S. No.
+Description
+Capacity
+Amount (Rs.)
+1
+Supply, installation, testing & commissioning of a 52 kWp grid-tied rooftop solar power plant (Non-DCR Mono PERC modules, string inverter, BOS as per BOQ)
+52 kWp
+28,60,000
+GST @ 8.9%
+2,54,540
+TOTAL AMOUNT (INCL. GST)
+31,14,540
+Base Price:
+Rupees Twenty-Eight Lakh Sixty Thousand Only.
+GST @ 8.9%:
+Rupees Two Lakh Fifty-Four Thousand Five Hundred Forty Only.
+Total Amount: Rupees Thirty-One Lakh Fourteen Thousand Five Hundred Forty Only.
+Payment Terms
+S. No.
+Milestone
+Payment
+Amount (Rs.)
+1
+Advance along with the order
+25%
+7,78,635
+2
+Against delivery of active materials (solar modules & inverter)
+60%
+18,68,724
+3
+On execution (completion of installation)
+15%
+4,67,181
+TOTAL
+100%
+31,14,540
+Milestone amounts are calculated on the total amount including GST.
+Warranty
+Overall Power Plant
+12 months breakdown warranty from the date of commissioning
+Solar Panels
+27 years linear performance warranty (90% of rated output for the first 10 years and 85% for the balance period), as per manufacturer
+Inverter
+8 years from the date of commissioning, as per manufacturer
+Mounting Structure
+10 years from the date of commissioning
+Commercial Notes
+The price covers the scope of supply and services listed in the Bill of Quantity.
+GST is applicable at 8.9%, as shown above.
+Any work beyond the stated scope will be quoted and billed separately.
+This offer is valid for 15 days from the date of this proposal.
+05 |
+CUSTOMER SCOPE OF WORK
+Client-side provisions required for smooth installation and commissioning.
+Provide approx. 4,300 sq. ft. of shadow-free roof area, clear of obstructions such as trees, water tanks, equipment or dummy pillars.
+Provide suitable space for installation of the inverters and electrical panels.
+Provide a safe and secure storage area for project materials on receipt at site. After delivery, the customer shall be responsible for the safety and security of the material until it is taken over by Grid Nova Energy’s team for installation.
+Provide safe and permanent access to the roof for installation and future maintenance.
+Provide a spare feeder / connection point in the existing LT panel or ACDB for interconnection of the solar system.
+Provide internet connectivity to the inverter for remote monitoring of energy generation.
+Provide power and water required during installation and commissioning.
+Provide all applications and documents required for net metering and statutory approvals.
+Transformer or contracted-load enhancement, if required as per net-metering regulations, shall be at the customer’s cost.
+Any structural modification or civil work, if required, shall be in the customer’s scope.
+Statutory inspection (CEIG / DISCOM) fees, if applicable, shall be paid by the customer at actuals.
+Storage Area & Inverter Location
+The customer is required to provide safe storage space for the material on receipt at site. Inverters are generally IP65 rated and can be installed outdoors; the inverter location will be decided after detailed engineering and site study, preferably on the terrace with adequate space, access and ventilation.
+Electrical Works
+Cabling between the solar panels, DCDB and inverters will be mostly outdoor and done using UV-resistant solar-grade cables. AC cabling from the inverter to the ACDB and the interconnection point will be done with suitable copper / aluminium cables, routed through existing cable trays or conduits or securely anchored to walls. The exact cable routing will be finalised during detailed engineering.
+Validity
+This offer is valid for 15 days from the date on the title page of this document.
+06 |
+GRID NOVA ENERGY – COMPANY & CLOSING
+Our commitment to quality and long-term value.
+Why Grid Nova Energy?
+Proven expertise in C&I and residential solar projects.
+Strong understanding of DISCOM compliance and net-metering processes.
+End-to-end project execution – design to commissioning.
+Performance-driven system design.
+Dedicated after-sales and O&M support.
+Quality Policy
+We are committed to consistently meeting our customers’ aspirations and delivering products and services of the highest possible standards, to satisfy our customers’ needs, quality expectations and reliability. Our team works continuously to assure quality through the right choice of design, use of the right technologies, the highest quality components, qualified vendors, adherence to established processes and extensive testing.
+Value Offering
+We provide a complete team that delivers the project from the planning stage through commissioning, with a focus on quality and discipline, followed by trained personnel for operations and maintenance.
+PROJECT CLOSURE
+Thank you for considering Grid Nova Energy for the 52 kWp grid-tied rooftop solar power plant for Example Metal Works.
+For Grid Nova Energy
+RAJU PAUL
+| Authorised Signatory

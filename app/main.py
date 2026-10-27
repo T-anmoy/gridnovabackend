@@ -44,6 +44,8 @@ from app.api.routes.public_booking import router as public_booking_router
 from app.api.routes.public_intake import router as public_intake_router
 from app.api.routes.public_proposals import router as public_proposals_router
 from app.api.routes.public_receipts import router as public_receipts_router
+from app.api.routes.public_studio import router as public_studio_router
+from app.api.routes.studio import router as studio_router
 from app.config import check_production_config, settings
 from app.memory.db import Base, engine
 from app.security.error_responses import GENERIC_500, UnhandledErrorMiddleware, log_unhandled
@@ -108,6 +110,9 @@ async def lifespan(app: FastAPI):
     # (config/sales_policy.yaml).
     from app.rules.sales_policy import load as load_sales_policy
     load_sales_policy()
+    # And the Proposal Studio (config/studio.yaml, BE-18).
+    from app.studio.config import load as load_studio_config
+    load_studio_config()
     # And the placeholder registry (config/placeholder_registry.yaml).
     from app.placeholders.registry import load as load_placeholder_registry
     load_placeholder_registry()
@@ -204,6 +209,8 @@ app.include_router(nova_records_router)
 app.include_router(access_admin_router)
 app.include_router(associate_handover_router)
 app.include_router(public_handover_router)
+app.include_router(studio_router)
+app.include_router(public_studio_router)
 
 
 def _json_safe(value):

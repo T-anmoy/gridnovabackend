@@ -51,7 +51,7 @@ class AccessConfig:
     min_active_admins: int
     approval_expiry_hours: int
     second_approval: dict      # action → bool
-    alerts: dict               # event → {"roles": frozenset, "assigned_employee": bool}
+    alerts: dict               # event → {"roles": frozenset, "assigned_employee": bool, "owner": bool}
 
 
 def _positive_int(value) -> bool:
@@ -120,7 +120,9 @@ def _build(data: dict) -> AccessConfig:
         need(isinstance(spec, dict) and isinstance(spec.get("roles"), list), f"alerts.{event} needs a roles list")
         need(set(spec["roles"]) <= set(ROLE_IDS), f"alerts.{event} names an unknown role")
         need(isinstance(spec.get("assigned_employee", False), bool), f"alerts.{event}.assigned_employee is true/false")
-        alerts[event] = {"roles": frozenset(spec["roles"]), "assigned_employee": bool(spec.get("assigned_employee"))}
+        need(isinstance(spec.get("owner", False), bool), f"alerts.{event}.owner is true/false")
+        alerts[event] = {"roles": frozenset(spec["roles"]), "assigned_employee": bool(spec.get("assigned_employee")),
+                         "owner": bool(spec.get("owner"))}
 
     return AccessConfig(permissions=permissions, roles=roles, exclusive_roles=frozenset(exclusive),
                         invitation_expiry_days=staff["invitation_expiry_days"],
@@ -255,8 +257,9 @@ def viewer_holds(viewer, permission: str) -> bool:
 
 # The record-level narrowing a role applies to live projects (app/projects/view.py,
 # Nova Records): Sales its own or unassigned leads, Operations projects in execution,
-# a Network Manager none; every other role all. Several roles: the widest wins.
-_LIVE_RULES = {"sales": "assigned", "operations": "execution", "network_manager": "none"}
+# a Network Manager and the Proposal Desk none; every other role all. Several roles: the
+# widest wins.
+_LIVE_RULES = {"sales": "assigned", "operations": "execution", "network_manager": "none", "proposal_desk": "none"}
 
 
 def live_project_rule(viewer) -> str:

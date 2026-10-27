@@ -202,6 +202,88 @@ entries:
     blocking: tunable
     probe: yaml_contains_marker
 
+  # ── Proposal Studio (BE-18) ────────────────────────────────────────────────────
+  - id: STU-1
+    area: proposals
+    location: {file: config/studio.yaml, key: savings.degradation.mono_perc}
+    description: "Mono PERC module degradation on the Studio savings page: 2 % in the first year, then 0.55 % a year — a researched typical datasheet curve, not Grid Nova's panels'."
+    dummy_value: {first_year: "0.02", annual_after: "0.0055"}
+    needed_from_grid_nova: "What first-year and annual degradation do the Mono PERC panels Grid Nova installs guarantee (datasheet)?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-2
+    area: proposals
+    location: {file: config/studio.yaml, key: savings.degradation.topcon}
+    description: "TOPCon module degradation on the Studio savings page: 1 % in the first year, then 0.4 % a year — a researched typical datasheet curve, not Grid Nova's panels'."
+    dummy_value: {first_year: "0.01", annual_after: "0.004"}
+    needed_from_grid_nova: "What first-year and annual degradation do the TOPCon panels Grid Nova installs guarantee (datasheet)?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-3
+    area: proposals
+    location: {file: config/studio.yaml, key: savings.tariff_escalation}
+    description: "Tariff escalation a year on the Studio savings page: 0 (conservative)."
+    dummy_value: "0"
+    needed_from_grid_nova: "Should the savings page assume electricity tariffs rise each year, and by how much?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-4
+    area: proposals
+    location: {file: config/studio.yaml, key: savings.export_rate_default}
+    description: "Credit per exported unit on the Studio savings page when staff enter none: 0 — only self-consumed units are valued."
+    dummy_value: "0"
+    needed_from_grid_nova: "What credit per exported unit should the savings page assume by default (per DISCOM)?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-5
+    area: proposals
+    location: {file: config/studio.yaml, key: price_per_kwp_band}
+    description: "Expected basic price per kWp for each Studio project type: none supplied, so the proof-check raises no price-band warning."
+    dummy_value: "null for every project type"
+    needed_from_grid_nova: "What price per kWp range (low – high) is normal for each project type, so the Studio can warn on an unusual price?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-6
+    area: proposals
+    location: {file: config/studio.yaml, key: itemised.categories.solar_street_light.gst_rate}
+    description: "GST on solar street lights in itemised Studio proposals: 5 % (researched: GST 2.0, solar power based devices, w.e.f. 22 Sep 2025). Previews use it; issuing a proposal with such a line is blocked until confirmed."
+    dummy_value: "0.05"
+    needed_from_grid_nova: "Which GST rate does Grid Nova charge on solar street lights (and poles supplied with them)?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: STU-7
+    area: proposals
+    location: {file: config/studio.yaml, key: itemised.categories.installation_service.gst_rate}
+    description: "GST on installation and services billed as separate lines in itemised Studio proposals: 18 % (researched). Previews use it; issuing is blocked until confirmed."
+    dummy_value: "0.18"
+    needed_from_grid_nova: "Which GST rate applies to installation and services billed as separate lines?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: STU-8
+    area: proposals
+    location: {file: config/studio.yaml, key: itemised.categories.solar_street_light.warranty_rows}
+    description: "Warranty rows printed on a street-lighting proposal: not supplied. Issuing a proposal with a street-light line is blocked until they are."
+    dummy_value: null
+    needed_from_grid_nova: "What warranty does Grid Nova give on solar street lights (light, battery, panel, pole)?"
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: STU-9
+    area: proposals
+    location: {file: config/studio.yaml, key: payment_terms.itemised}
+    description: "Default payment terms of an itemised (supply) proposal: 25 / 60 / 15, as a plant above 10 kW; staff can change them per proposal."
+    dummy_value: "25 / 60 / 15"
+    needed_from_grid_nova: "What payment terms should a supply-only (e.g. street lighting) proposal start with?"
+    blocking: tunable
+    probe: yaml_contains_marker
+  - id: STU-10
+    area: proposals
+    location: {file: config/studio.yaml, key: itemised.text}
+    description: "Fixed wording of the itemised layout (title, subject, the letter's second sentence, section titles) — drafted for BE-18; the first letter sentence is the samples'."
+    dummy_value: "PROPOSAL FOR SUPPLY & INSTALLATION …"
+    needed_from_grid_nova: "Please review the wording of the supply (itemised) proposal's cover letter and headings."
+    blocking: tunable
+    probe: yaml_contains_marker
+
   # ── Pricing engine (instant estimate / Solar Calculator) ───────────────────────
   # These live in Python, not config: resolving one is a code edit until they move
   # to config (a follow-up recorded in the Phase 4A report).
@@ -1421,6 +1503,7 @@ exemptions:
   - {file: app/pdf/generator.py, anchor: _render_body_sections, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
   - {file: app/proposals/document.py, anchor: _MARKERS, reason: detector — refuses placeholder markers in text staff type and finds open segment text}
   - {file: app/proposals/document_render.py, anchor: _LEFTOVER, reason: detector — refuses to render a customer document that still contains a marker}
+  - {file: app/studio/checks.py, anchor: LEFTOVER, reason: "detector — the Studio proof-check finds a leftover token or marker in the rendered PDF text"}
   - {file: app/pdf/generator.py, anchor: _build_html, reason: "fallback text when a field is missing: shows the gap instead of inventing content"}
   - {file: app/memory/memory_manager.py, anchor: PLACEHOLDER_EMAIL_DOMAIN, reason: internal domain for customers with no email yet — a mechanism, not a dummy value}
   - {file: app/config.py, anchor: production_config_problems, reason: boot warnings that name the marker}

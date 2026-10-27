@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
+    # BE-18: the Proposal Studio's optional "suggest from notes" assistant (customer, site and
+    # connection fields only — never a price or anything printed as a figure). Off by default.
+    studio_ai_fill_enabled: bool = False
 
     # Agent harness (app/agents/harness.py). A run slower than this is logged as
     # slow; it is a warning, not a cut-off — see the harness docstring for why it

@@ -327,9 +327,10 @@ def dump(doc: ProposalDocument) -> dict:
 
 
 def stored(content: Optional[dict]) -> Optional[ProposalDocument]:
-    """The proposal's document, or None for a proposal drafted before BE-13."""
+    """The proposal's document, or None for a proposal drafted before BE-13. A lead
+    converted from the Proposal Studio carries a schema-2 document."""
     raw = (content or {}).get("document")
-    return parse(raw) if isinstance(raw, dict) else None
+    return parse_any(raw) if isinstance(raw, dict) else None
 
 
 # ── Numbers ──────────────────────────────────────────────────────────────────────
@@ -358,6 +359,10 @@ def _round_to(value: Decimal, step: int) -> int:
 
 
 def layout(doc: ProposalDocument) -> str:
+    if isinstance(doc, StudioDocument):
+        rule = studio_project(doc)["layout"]
+        if rule != "compact_or_detailed":
+            return rule
     return document_config.layout_for(doc.plant.capacity_kwp)
 
 
@@ -367,28 +372,44 @@ def subsidy_applies(doc: ProposalDocument) -> bool:
             and doc.plant.dcr and doc.plant.capacity_kwp is not None)
 
 
+def basic_before_discount(price: Price, capacity) -> Optional[Decimal]:
+    """The basic price the price mode gives, before any Studio discount."""
+    basic = price.basic
+    if price.mode == "staff_basic" and price.rate_per_kwp and capacity:
+        basic = money(Decimal(str(price.rate_per_kwp)) * Decimal(str(capacity)))
+    return money(basic) if basic else None
+
+
 def price_parts(price: Price, capacity) -> tuple[Optional[Decimal], Optional[Decimal], Optional[Decimal]]:
     """(basic, gst, total). GST is 8.9% of the basic price (5% on 70% + 18% on 30%) and
     the total is basic + GST — except a total staff set as a whole (adjust-pricing's
-    `new_value`), which stays exactly as set: basic = total / 1.089, GST = the rest."""
+    `new_value`), which stays exactly as set: basic = total / 1.089, GST = the rest.
+    A Studio discount (schema 2) comes off the basic price before GST."""
     from app.pricing.price_list import gst_of
     if price.mode == "staff_total" and price.total:
         total = money(price.total)
         basic = money(total / (1 + GST_RATE))
         return basic, total - basic, total
-    basic = price.basic
-    if price.mode == "staff_basic" and price.rate_per_kwp and capacity:
-        basic = money(Decimal(str(price.rate_per_kwp)) * Decimal(str(capacity)))
-    if not basic:
+    basic = basic_before_discount(price, capacity)
+    discount = getattr(price, "discount", None)
+    if basic is not None and discount is not None:
+        basic = money(basic - discount.amount)
+    if not basic or basic <= 0:
         return None, None, None
-    basic = money(basic)
     gst = gst_of(basic)
     return basic, gst, basic + gst
 
 
 def figures(doc: ProposalDocument) -> dict:
     """Every computed figure on the document, as decimal strings where money. One
-    function: the PDF, the dashboard and the accept page all read this."""
+    function: the PDF, the dashboard, the accept page and the Proposal Studio all read
+    this. A schema-2 (Studio) document adds its sections' figures (studio_figures)."""
+    if isinstance(doc, StudioDocument):
+        return studio_figures(doc)
+    return _plant_figures(doc)
+
+
+def _plant_figures(doc: ProposalDocument) -> dict:
     from app.estimate import engine
     from app.estimate import subsidy as pm_surya_ghar
     from app.estimate.config import estimate_config, subsidy_config
@@ -556,6 +577,8 @@ def _mobile(*candidates) -> Optional[str]:
 
 
 def defaults_key(doc: ProposalDocument, section: str) -> str:
+    if isinstance(doc, StudioDocument):
+        return _studio_defaults_key(doc, section)
     lay = layout(doc)
     if section == "payment_terms":
         return lay
@@ -588,6 +611,8 @@ def makes_text(package: Optional[str], component: str) -> str:
 
 
 def default_section(doc: ProposalDocument, section: str) -> list:
+    if isinstance(doc, StudioDocument):
+        return _studio_default_section(doc, section)
     cfg = document_config.load()
     lay = cfg[layout(doc)]
     if section == "payment_terms":
@@ -626,6 +651,9 @@ def refresh_defaults(doc: ProposalDocument) -> list[str]:
 def requote(doc: ProposalDocument) -> None:
     """A price-list price follows the plant: same package, the document's phase and
     capacity. A size the list does not price leaves no price (staff set one)."""
+    if isinstance(doc, StudioDocument):
+        _studio_requote(doc)
+        return
     if doc.price.mode != "price_list":
         return
     from app.pricing import price_list
@@ -823,7 +851,7 @@ def apply_edit(db, doc: ProposalDocument, section: str, value: Any) -> tuple[Pro
                                     field="customer_scope")
         elif section == "notes":
             new.notes = _bullets(list(value or []), "notes")
-        new = ProposalDocument.model_validate(dump(new))
+        new = type(doc).model_validate(dump(new))
     except DocumentError:
         raise
     except ValueError as exc:
@@ -871,4 +899,414 @@ def with_document(content: Optional[dict], doc: ProposalDocument) -> dict:
     """A copy of proposal content carrying `doc`."""
     out = copy.deepcopy(content or {})
     out["document"] = dump(doc)
+    return out
+
+
+# ── Schema 2: Proposal Studio documents (BE-18) ─────────────────────────────────
+#
+# A Studio document is a version-1 document plus optional sections. It is a subclass, so
+# a version-1 (lead) document is parsed, computed and rendered exactly as before; every
+# schema-2 branch above is an `isinstance(doc, StudioDocument)` test.
+
+STUDIO_SCHEMA_VERSION = 2
+UNIT_RE = re.compile(r"^[A-Za-z. ]{1,12}$")
+
+
+def _studio_cfg() -> dict:
+    from app.studio import config as studio_config
+    return studio_config.load()
+
+
+class StudioProject(_Section):
+    project_type: str
+    houses: Optional[int] = Field(default=None, ge=1, le=100000)   # housing society: number of houses
+    roof_area_sqft: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("10000000"))  # shadow-free, as surveyed
+
+    @field_validator("project_type")
+    @classmethod
+    def _type(cls, v):
+        from app.studio.config import PROJECT_TYPES
+        if v not in PROJECT_TYPES:
+            raise ValueError(f"project_type must be one of {list(PROJECT_TYPES)}")
+        return v
+
+
+class SavingsInputs(_Section):
+    """From the customer's own bill, typed by staff. Tariff is required for the page, and
+    either the average monthly units or the average monthly bill."""
+    monthly_units: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("10000000"))
+    monthly_bill: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("100000000"))
+    tariff_per_unit: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("100"), decimal_places=2)
+    fixed_charges: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("10000000"))
+    export_rate: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("100"), decimal_places=2)
+
+
+class ItemRow(_Section):
+    """One line of an itemised (street lighting / supply) proposal: quantity × unit rate."""
+    description: str = Field(min_length=1, max_length=160)
+    specification: Optional[str] = Field(default=None, max_length=200)
+    make: str = Field(min_length=1, max_length=160)
+    quantity: Decimal = Field(gt=0, le=Decimal("1000000"), decimal_places=3)
+    unit: str
+    unit_rate: Decimal = Field(gt=0, le=Decimal("100000000"), decimal_places=2)
+    category: str
+
+    @field_validator("description", "specification", "make")
+    @classmethod
+    def _plain(cls, v):
+        return _text_ok(_clean(v), "an item cell") if v is not None and _clean(v) else v
+
+    @field_validator("unit")
+    @classmethod
+    def _unit(cls, v):
+        units = _studio_cfg()["itemised"]["units"]
+        if v not in units:
+            raise ValueError(f"unit must be one of {units}")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, v):
+        cats = _studio_cfg()["itemised"]["categories"]
+        if v not in cats:
+            raise ValueError(f"category must be one of {sorted(cats)}")
+        return v
+
+
+class Display(_Section):
+    show_discount_line: bool = False
+    show_savings: bool = False
+    show_package_comparison: bool = False
+
+
+class Discount(_Section):
+    amount: Decimal = Field(gt=0, decimal_places=2)
+    reason: str = Field(min_length=3, max_length=200)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v):
+        return _text_ok(_clean(v) or "", "the discount reason")
+
+
+class StudioPrice(Price):
+    """Price plus the Studio's discount. `list_basic` is computed (the price master's basic
+    for a list-priceable size, else None) and never typed; `reason` is required when the
+    offered price is below the price master."""
+    list_basic: Optional[Decimal] = None
+    discount: Optional[Discount] = None
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class StudioDocument(ProposalDocument):
+    schema_version: Literal[2] = STUDIO_SCHEMA_VERSION
+    project: StudioProject
+    price: StudioPrice = Field(default_factory=StudioPrice)
+    savings: Optional[SavingsInputs] = None
+    items: list[ItemRow] = Field(default_factory=list, max_length=60)
+    display: Display = Field(default_factory=Display)
+    notes_free: list[str] = Field(default_factory=list, max_length=10)   # printed under "Special Notes"
+    cover_highlight: Optional[str] = Field(default=None, max_length=90)
+    validity_days: int = Field(default=15, ge=1, le=90)
+
+    @field_validator("notes_free")
+    @classmethod
+    def _notes_free(cls, v):
+        return _bullets(v, "notes_free")
+
+    @field_validator("cover_highlight")
+    @classmethod
+    def _highlight(cls, v):
+        return _text_ok(_clean(v), "the cover highlight") if v is not None and _clean(v) else None
+
+
+def parse_any(raw: dict) -> ProposalDocument:
+    """A stored document of either schema."""
+    if isinstance(raw, dict) and raw.get("schema_version") == STUDIO_SCHEMA_VERSION:
+        return StudioDocument.model_validate(raw)
+    return ProposalDocument.model_validate(raw)
+
+
+def studio_project(doc: StudioDocument) -> dict:
+    from app.studio import config as studio_config
+    return studio_config.project_type(doc.project.project_type)
+
+
+def new_studio_document(project_type: str, *, validity_days: Optional[int] = None) -> StudioDocument:
+    """A fresh Studio document for a project type: segment, coverage, mount and category
+    from config/studio.yaml, the defaulted sections generated."""
+    from app.studio import config as studio_config
+    spec = studio_config.project_type(project_type)
+    doc = StudioDocument(project=StudioProject(project_type=project_type),
+                         validity_days=validity_days or studio_config.validity_days())
+    apply_project_type(doc)
+    refresh_defaults(doc)
+    return doc
+
+
+def apply_project_type(doc: StudioDocument) -> None:
+    """What the project type decides: segment, coverage, mount and housing society."""
+    spec = studio_project(doc)
+    doc.segment, doc.coverage = spec["segment"], spec["coverage"]
+    doc.mount_type = spec["mount"] or "rooftop"
+    doc.housing_society = bool(spec.get("housing_society"))
+    if spec["category"] and doc.connection.category is None:
+        doc.connection.category = spec["category"]
+
+
+def _studio_defaults_key(doc: StudioDocument, section: str) -> str:
+    lay = layout(doc)
+    cap = doc.plant.capacity_kwp
+    up_to_10 = cap is not None and cap <= document_config.compact_max_kwp()
+    if section == "payment_terms":
+        return f"v2|{lay}|le10={up_to_10}"
+    up_to_5 = cap is not None and cap <= 5
+    return f"v2|{lay}|pmsg={subsidy_applies(doc)}|up5={up_to_5}|package={doc.plant.package}"
+
+
+def _studio_default_section(doc: StudioDocument, section: str) -> list:
+    """Payment terms by size (≤ 10 kW: the price list's 20/60/20; above: 25/60/15), the
+    layout's BOQ and customer scope. The itemised layout has no default BOQ or scope."""
+    lay = layout(doc)
+    if section == "payment_terms":
+        if lay == "itemised":
+            return [PaymentTerm(**t) for t in _studio_cfg()["payment_terms"]["itemised"]]
+        cap = doc.plant.capacity_kwp
+        if cap is not None and cap <= document_config.compact_max_kwp():
+            from app.pricing import price_list
+            return [PaymentTerm(percent=Decimal(str(m["percent"])), label=m["label"])
+                    for m in price_list.commercial_terms()["payment_schedule"]]
+        return [PaymentTerm(**t) for t in document_config.load()["detailed"]["payment_terms"]]
+    if lay == "itemised":
+        return []
+    cfg = document_config.load()[lay]
+    if section == "customer_scope":
+        return [item["text"] for item in cfg["customer_scope"] if _when(item.get("when"), doc)]
+    rows = []
+    for row in cfg["boq"]:
+        if not _when(row.get("when"), doc):
+            continue
+        make = makes_text(doc.plant.package, row["makes_from"]) if "makes_from" in row else row["make"]
+        rows.append(BoqRow(description=row["description"], quantity=row["quantity"], standard=row.get("standard"),
+                           make=make, kind=row.get("kind")))
+    return rows
+
+
+def master_quote(doc: ProposalDocument):
+    """The price master's quote for the document's package, phase and capacity, or None
+    when the size is not list-priceable."""
+    from app.pricing import price_list
+    phase = {"single": "SINGLE", "three": "THREE"}.get(doc.connection.phase or "")
+    if not (doc.plant.package and phase and doc.plant.capacity_kwp):
+        return None
+    q = price_list.quote(doc.plant.package, phase, doc.plant.capacity_kwp)
+    return q if isinstance(q, price_list.PriceQuote) else None
+
+
+def _studio_requote(doc: StudioDocument) -> None:
+    """list_basic follows the plant; a price-master price follows it too. The discount and
+    the below-master reason stay as staff set them."""
+    q = master_quote(doc) if layout(doc) != "itemised" else None
+    price = doc.price
+    price.list_basic = q.basic if q is not None else None
+    if price.mode == "price_list":
+        if q is not None:
+            price.basic, price.price_list_version = q.basic, q.price_list_version
+        else:
+            price.mode, price.basic, price.price_list_version = "none", None, None
+
+
+def studio_subsidy(doc: StudioDocument, total: Optional[Decimal]) -> Optional[dict]:
+    """PM Surya Ghar GHS/RWA CFA for a housing society: ₹18,000/kW (special category
+    ₹19,800) on min(installed, 3 kW × houses, 500 kW) — app/estimate/subsidy.py. Only when
+    opted, with DCR modules and the number of houses known."""
+    if not (doc.housing_society and doc.pm_surya_ghar.subsidy_opted and doc.plant.dcr
+            and doc.plant.capacity_kwp and doc.project.houses):
+        return None
+    from app.estimate import subsidy as pm_surya_ghar
+    soc = pm_surya_ghar._society(Decimal(str(doc.plant.capacity_kwp)), doc.project.houses,
+                                 pm_surya_ghar.category(doc.site.state))
+    amount = money(soc["total"])
+    return {"applies": True, "kind": "housing_society",
+            "slabs": [{"kw": kw_text(soc["eligible_kwp"]), "rate": str(money(soc["rate_per_kwp"])),
+                       "amount": str(amount)}],
+            "state_lines": [], "total": str(amount),
+            "effective_cost": str(total - amount) if total is not None else None,
+            "houses": doc.project.houses, "eligible_kw": kw_text(soc["eligible_kwp"]),
+            "limited_by": soc["limited_by"], "kw_per_house": kw_text(soc["kwp_per_house"]),
+            "max_kw": kw_text(soc["max_kwp"])}
+
+
+def package_comparison(doc: ProposalDocument) -> Optional[list[dict]]:
+    """Nova Assured vs Nova Signature for the same capacity and phase, both from the price
+    master (Signature = Assured × 1.12 before GST): None when the size is not list-priced."""
+    from app.pricing import price_list
+    phase = {"single": "SINGLE", "three": "THREE"}.get(doc.connection.phase or "")
+    if not (phase and doc.plant.capacity_kwp):
+        return None
+    out = []
+    for package in price_list.PACKAGES:
+        q = price_list.quote(package, phase, doc.plant.capacity_kwp)
+        if not isinstance(q, price_list.PriceQuote):
+            return None
+        out.append({"package": package, "name": price_list.display_name(package),
+                    "panels": makes_text(package, "solar_panel"), "inverters": makes_text(package, "inverter"),
+                    "basic": str(q.basic), "gst": str(q.gst), "total": str(q.final),
+                    "chosen": package == doc.plant.package})
+    return out
+
+
+def _itemised_figures(doc: StudioDocument) -> dict:
+    """Quantity × unit rate per line, GST per line at its category's rate, grouped by rate."""
+    from app.pricing.amount_words import amount_in_words
+    from app.studio import config as studio_config
+    lines, groups = [], {}
+    for i, item in enumerate(doc.items, 1):
+        rate = Decimal(str(studio_config.gst_category(item.category)["gst_rate"]))
+        amount = money(item.quantity * item.unit_rate)
+        gst = money(amount * rate)
+        lines.append({"no": i, "amount": str(amount), "gst_rate": str(rate), "gst": str(gst),
+                      "gst_percent": kw_text(rate * 100)})
+        group = groups.setdefault(rate, {"rate": str(rate), "percent": kw_text(rate * 100), "taxable": Decimal(0),
+                                         "gst": Decimal(0)})
+        group["taxable"] += amount
+        group["gst"] += gst
+    subtotal = sum((Decimal(line["amount"]) for line in lines), Decimal(0))
+    gst_total = sum((g["gst"] for g in groups.values()), Decimal(0))
+    total = subtotal + gst_total if lines else None
+    payments = []
+    if total is not None and doc.payment_terms:
+        running = Decimal(0)
+        for i, term in enumerate(doc.payment_terms):
+            amount = total - running if i == len(doc.payment_terms) - 1 else money(total * term.percent / 100)
+            running += amount
+            payments.append({"percent": kw_text(term.percent), "label": term.label, "short_label": term.short_label,
+                             "amount": str(amount)})
+    amounts = [Decimal(x["amount"]) for x in lines] + [Decimal(p["amount"]) for p in payments]
+    amounts += [g["gst"] for g in groups.values()] + ([total] if total is not None else [])
+    return {
+        "layout": "itemised", "schema_version": STUDIO_SCHEMA_VERSION, "project_type": doc.project.project_type,
+        "capacity_kwp": None, "price_mode": "items",
+        "basic": str(subtotal) if lines else None, "gst": str(gst_total) if lines else None,
+        "total": str(total) if total is not None else None, "gst_rate": None,
+        "words": {"basic": amount_in_words(subtotal) if lines else None,
+                  "gst": amount_in_words(gst_total) if lines else None,
+                  "total": amount_in_words(total) if total is not None else None},
+        "payments": payments, "whole_rupees": all(a == a.to_integral_value() for a in amounts),
+        "items": lines,
+        "gst_groups": [{"rate": g["rate"], "percent": g["percent"], "taxable": str(g["taxable"]),
+                        "gst": str(g["gst"])} for _, g in sorted(groups.items())],
+        "subsidy": {"applies": False, "slabs": [], "state_lines": [], "total": None, "effective_cost": None},
+        "generation": {"units_per_kwp_per_month": None, "monthly_units": None, "annual_units": None},
+        "space_required_sqft": None, "validity_days": doc.validity_days,
+        "list_basic": None, "discount": None, "below_price_master": None, "savings": None,
+        "package_comparison": None,
+    }
+
+
+def studio_figures(doc: StudioDocument) -> dict:
+    """The plant figures (the same calculation as a lead proposal) plus the Studio's:
+    discount, housing-society CFA, validity, savings and the package comparison."""
+    if layout(doc) == "itemised":
+        return _itemised_figures(doc)
+    out = _plant_figures(doc)
+    out["schema_version"] = STUDIO_SCHEMA_VERSION
+    out["project_type"] = doc.project.project_type
+    out["validity_days"] = doc.validity_days
+    cap = doc.plant.capacity_kwp
+    before = basic_before_discount(doc.price, cap) if doc.price.mode != "staff_total" else None
+    discount = doc.price.discount
+    out["discount"] = ({"price_before_discount": str(before), "amount": str(money(discount.amount)),
+                        "reason": discount.reason} if discount is not None and before is not None else None)
+    out["list_basic"] = str(doc.price.list_basic) if doc.price.list_basic is not None else None
+    below = None
+    if doc.price.list_basic is not None and out["basic"] is not None:
+        list_basic, basic = Decimal(str(doc.price.list_basic)), Decimal(out["basic"])
+        if basic < list_basic:
+            below = {"list_basic": str(list_basic), "basic": str(basic),
+                     "percent": str(((list_basic - basic) / list_basic * 100).quantize(Decimal("0.01"),
+                                                                                       rounding=ROUND_HALF_UP))}
+    out["below_price_master"] = below
+    total = Decimal(out["total"]) if out["total"] is not None else None
+    society = studio_subsidy(doc, total)
+    if society is not None:
+        out["subsidy"] = society
+    effective = Decimal(out["subsidy"]["effective_cost"]) if out["subsidy"].get("effective_cost") else total
+    from app.studio import savings as studio_savings
+    out["savings"] = studio_savings.compute(doc, out, effective)
+    out["package_comparison"] = package_comparison(doc) if (cap is not None and cap <= document_config.compact_max_kwp()
+                                                            and layout(doc) == "compact") else None
+    amounts = [Decimal(a) for a in (out["basic"], out["gst"], out["total"], out["subsidy"].get("total"),
+                                    out["subsidy"].get("effective_cost")) if a]
+    amounts += [Decimal(p["amount"]) for p in out["payments"]]
+    if out["discount"]:
+        amounts += [Decimal(out["discount"]["price_before_discount"]), Decimal(out["discount"]["amount"])]
+    out["whole_rupees"] = all(a == a.to_integral_value() for a in amounts)
+    return out
+
+
+def studio_missing_required(doc: StudioDocument, figs: Optional[dict] = None) -> list[dict]:
+    """What still stops a Studio proposal being approved or issued (besides the proof-check).
+    The uncovered-segment text is reported separately (content_blockers → content_not_ready)."""
+    figs = figs or figures(doc)
+    if layout(doc) == "itemised":
+        out = []
+        a = doc.addressee
+        if not a.name:
+            out.append({"field": "addressee.name", "message": "the customer's name"})
+        if not a.address_lines:
+            out.append({"field": "addressee.address_lines", "message": "the customer's address"})
+        if not doc.items:
+            out.append({"field": "items", "message": "at least one line item"})
+        if not doc.payment_terms:
+            out.append({"field": "payment_terms", "message": "the payment terms"})
+        if not doc.customer_scope:
+            out.append({"field": "customer_scope", "message": "at least one customer-scope item"})
+        if not doc.site.state:
+            out.append({"field": "site.state", "message": "the site's state"})
+        return out
+    out = [({"field": "price", "message": "a price"} if m["field"] == "price" else m)
+           for m in missing_required(doc, figs)
+           if m["field"] != "segment_text" and not (m["field"] == "plant.mount_type"
+                                                    and studio_project(doc)["mount"] == "ground_mounted")]
+    if doc.housing_society and not doc.project.houses:
+        out.append({"field": "project.houses", "message": "the number of houses in the society"})
+    if doc.display.show_savings:
+        s = doc.savings
+        if s is None or s.tariff_per_unit is None or (s.monthly_units is None and s.monthly_bill is None):
+            out.append({"field": "savings", "message": "the customer's tariff and average monthly units or bill "
+                                                       "(for the savings page)"})
+    if doc.display.show_discount_line and doc.price.discount is None:
+        out.append({"field": "price.discount", "message": "a discount (or switch the discount line off)"})
+    if figs.get("below_price_master") and not doc.price.reason and doc.price.discount is None:
+        out.append({"field": "price.reason", "message": "the reason the price is below the price master"})
+    return out
+
+
+def content_blockers(doc: StudioDocument) -> list[dict]:
+    """[{registry, message}] — Grid Nova text or rates still missing for this proposal type:
+    the uncovered segment's scope text (PRO-7, PRO-8, PRO-10, PRO-11, PRO-12), an itemised
+    category's unconfirmed GST rate or missing warranty rows. Draft and preview work; approve
+    and issue answer 409 content_not_ready."""
+    from app.placeholders import registry
+    out = []
+    if doc.coverage is not None:
+        keys = document_config.load()["uncovered_segments"].get(doc.coverage, [])
+        reg = registry.load()
+        for key in keys:
+            if not _open_section(key):
+                continue
+            ids = [e.id for e in reg.entries if e.file == "config/proposal_content.yaml"
+                   and (e.location or {}).get("key") == key]
+            for eid in ids or [key]:
+                out.append({"registry": eid, "message": f"Grid Nova's text for {doc.coverage} proposals ({key})"})
+    if layout(doc) == "itemised":
+        seen = set()
+        for item in doc.items:
+            spec = _studio_cfg()["itemised"]["categories"][item.category]
+            for eid, what in ((spec.get("registry"), f"the GST rate for {spec['label']}"),
+                              (spec.get("warranty_registry"), f"the warranty terms for {spec['label']}")):
+                if eid and eid not in seen and registry.unresolved_ids([eid]):
+                    seen.add(eid)
+                    out.append({"registry": eid, "message": f"Grid Nova's confirmation of {what}"})
     return out
