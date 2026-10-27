@@ -29,7 +29,7 @@ CHUNK = 1024 * 1024
 
 
 def _admin(employee: AuthenticatedEmployee) -> None:
-    if not employee.is_admin:
+    if not employee.has("archive.manage"):
         raise HTTPException(status_code=403, detail="Only Admin can import, void or list project archive imports.")
 
 
@@ -277,7 +277,7 @@ def list_projects(filters: queries.ArchiveFilters = Depends(_filters), page: int
     """Newest commissioning first: {items, page, page_size, total}. Filters narrow before
     paging, so `total` is the filtered count. `q` searches the Grid Nova ref and, where the
     role may see them, customer name, address, block, district and state."""
-    rows, total = queries.page(db, filters, employee.role, page, page_size)
+    rows, total = queries.page(db, filters, employee, page, page_size)
     return {"items": [view.project_card(db, r, employee) for r in rows], "page": page, "page_size": page_size,
             "total": total}
 
@@ -296,4 +296,4 @@ def archive_stats(filters: queries.ArchiveFilters = Depends(_filters), db: Sessi
                   employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Counts and capacity sums by scheme, state, district and commissioning year, computed
     in SQL over the same filters as the list. Unmatched place names are grouped as typed."""
-    return queries.stats(db, filters, employee.role)
+    return queries.stats(db, filters, employee)

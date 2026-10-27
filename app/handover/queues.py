@@ -16,9 +16,9 @@ from datetime import datetime, timezone
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.scoping import lead_scope
+from app.auth.scoping import lead_scope, narrowed_to_assigned
 from app.memory.models import (
-    CustomerOnboarding, EmployeeRole, HandoverPack, Lead, ProjectExecution, ProjectStage, ProjectStageEvent,
+    CustomerOnboarding, HandoverPack, Lead, ProjectExecution, ProjectStage, ProjectStageEvent,
     ServiceRequest,
 )
 from app.handover.requests import OPEN
@@ -29,7 +29,7 @@ def _stage(stage: ProjectStage):
 
 
 def counts(db: Session, employee) -> dict:
-    sales = employee.role == EmployeeRole.sales
+    sales = narrowed_to_assigned(employee)
     incomplete = case((or_(HandoverPack.id.is_(None), HandoverPack.orientation_done_at.is_(None),
                            HandoverPack.acknowledged_at.is_(None), HandoverPack.om_contact_given_at.is_(None)), 1),
                       else_=0)

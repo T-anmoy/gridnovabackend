@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 import app.notifications.notifier as notifier_module
 from app.associates import issuance, service
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
+from app.auth.scoping import region_state_ids, require_region
 from app.memory.db import get_db
 from app.memory.models import (
     APPLICATION_DOCUMENTS,
@@ -152,6 +153,7 @@ def list_applications(
     the other paginated dashboard lists. The page and the count come from SQL (one
     UNION over both programmes); only the page's applications are loaded."""
     _require(employee.can_review_associate_applications(), "review associate applications")
+    regions = region_state_ids(db, employee)   # BE-17: the employee's regions; None = all
     parts = []
     for kind, model in service.APPLICATION_MODELS.items():
         if application_type and kind != application_type:
@@ -159,6 +161,8 @@ def list_applications(
         q = select(literal(kind.value).label("kind"), model.id.label("id"), model.submitted_at.label("submitted_at"))
         if status:
             q = q.where(model.status == status)
+        if regions is not None:
+            q = q.where(model.state_id.in_(regions))
         parts.append(q)
     both = union_all(*parts).subquery() if len(parts) > 1 else parts[0].subquery()
     total = db.execute(select(func.count()).select_from(both)).scalar_one()
@@ -180,8 +184,9 @@ def list_applications(
 def get_application(application_type: AssociateType, application_id: int, db: Session = Depends(get_db),
                     employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "review associate applications")
-    body = _serialize_application(db, _load_application(db, application_type, application_id), application_type,
-                                  full=True, reviewer=employee.employee_id)
+    application = _load_application(db, application_type, application_id)
+    require_region(db, employee, application.state_id)
+    body = _serialize_application(db, application, application_type, full=True, reviewer=employee.employee_id)
     db.commit()   # the PAN-decryption audit row
     return body
 
@@ -362,6 +367,9 @@ def list_associates(status: Optional[AssociateStatus] = None, associate_type: Op
                     employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "view associates")
     q = select(Associate)
+    regions = region_state_ids(db, employee)   # BE-17: the employee's regions; None = all
+    if regions is not None:
+        q = q.where(Associate.state_id.in_(regions))
     if status:
         q = q.where(Associate.status == status)
     if associate_type:
@@ -377,7 +385,9 @@ def list_associates(status: Optional[AssociateStatus] = None, associate_type: Op
 def get_associate(associate_id: str, db: Session = Depends(get_db),
                   employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "view associates")
-    return serialize_associate(db, _load_associate(db, associate_id))
+    associate = _load_associate(db, associate_id)
+    require_region(db, employee, associate.state_id)
+    return serialize_associate(db, associate)
 
 
 class AssociateStatusRequest(BaseModel):

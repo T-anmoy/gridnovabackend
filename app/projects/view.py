@@ -28,8 +28,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.archive import config
+from app.auth import access
 from app.memory.models import (
-    Associate, ArchivedProject, Customer, CustomerOnboarding, Equipment, EmployeeRole, InstalledUnit,
+    Associate, ArchivedProject, Customer, CustomerOnboarding, Equipment, InstalledUnit,
     InstalledUnitCategory, InstalledUnitStatus, Lead, Project, ProjectExecution, ProjectStageEvent, ProjectWarranty,
     Proposal, ProposalInputs, ProposalStatus, ServiceRequest, ServiceRequestStatus, TerritoryBlock, TerritoryDistrict,
     TerritoryState, WarrantyItem,
@@ -99,18 +100,13 @@ def find_subject(db: Session, ref: str) -> Optional[Subject]:
 
 # ── Redaction ────────────────────────────────────────────────────────────────────
 
-def _role(viewer) -> EmployeeRole:
-    role = getattr(viewer, "role", viewer)
-    return role if isinstance(role, EmployeeRole) else EmployeeRole(role)
-
-
 def _redact(fields: dict, viewer) -> dict:
-    allowed = config.visible_fields(_role(viewer))
+    allowed = config.visible_fields(viewer)
     return {k: v for k, v in fields.items() if k in allowed}
 
 
 def _sections_for(sections: dict, viewer) -> dict:
-    held = config.groups_for(_role(viewer))
+    held = config.groups_for(viewer)
     return {k: v for k, v in sections.items() if SECTION_GROUPS[k] in held}
 
 
@@ -168,14 +164,15 @@ def _live_context(db: Session, project: Project) -> dict:
 
 def can_view_live(viewer, ctx: dict) -> bool:
     """Today's rules: Sales its own or unassigned leads; Operations only projects in
-    execution; everyone else who may read the archive reads live projects too."""
-    role = _role(viewer)
-    if role == EmployeeRole.sales:
+    execution; a Network Manager none; everyone else who may read the archive reads live
+    projects too. Several roles: the widest (app/auth/access.py live_project_rule)."""
+    rule = access.live_project_rule(viewer)
+    if rule == "assigned":
         lead = ctx["lead"]
         return lead is not None and lead.assigned_employee_id in (None, getattr(viewer, "employee_id", None))
-    if role == EmployeeRole.operations:
+    if rule == "execution":
         return ctx["execution"] is not None
-    return True
+    return rule == "all"
 
 
 def _aggregate_units(db: Session, project_id: int) -> list[dict]:

@@ -1,0 +1,357 @@
+# Access control (BE-17) — the one source of truth for who may do what.
+#
+# Loaded once and validated at startup (app/auth/access.py). Every AuthenticatedEmployee
+# .can_*() gate is `return self.has("<permission>")`; tests/test_access_control_matrix.py
+# pins every role × permission and fails when a gate, a permission or a role drifts.
+#
+# A person may hold several roles: their permissions are the union. Roles come from the
+# database (employee_roles), never from the sign-in token.
+#
+# `sensitive: true` permissions are refused with 403 two_factor_required when every
+# held role that grants the permission has `requires_two_factor: true` and the session
+# did not complete a second factor (Clerk's `fva` claim).
+
+permissions:
+  # ── Leads ────────────────────────────────────────────────────────────────────
+  leads.view_all:
+    description: See every lead (Engineers through technical-only views).
+  leads.view_assigned:
+    description: See leads assigned to you or to nobody.
+  leads.view_commercial:
+    description: See customer contact details and prices on leads and proposals.
+  leads.view_technical:
+    description: Read leads, proposals and surveys limited to technical fields.
+  leads.create:
+    description: Enter a new lead.
+  leads.edit:
+    description: Edit a lead's details.
+  leads.change_stage:
+    description: Move a lead on the opportunity tracker.
+  leads.assign:
+    description: Assign a lead to a salesperson.
+  leads.be_assigned:
+    description: Can be chosen as the person a lead is assigned to.
+  leads.stale_check.run:
+    description: Run the stale-lead check by hand.
+  # ── Proposals ────────────────────────────────────────────────────────────────
+  proposals.draft:
+    description: Ask Nova to draft a proposal.
+  proposals.approve_standard:
+    description: Approve a proposal at the standard tier.
+  proposals.manager_signoff:
+    description: Give manager sign-off on a large proposal.
+    sensitive: true
+  proposals.partner_signoff:
+    description: Give the highest (partner) approval tier.
+    sensitive: true
+  proposals.send:
+    description: Send a proposal to the customer.
+  proposals.clear_reverification:
+    description: Clear a proposal flagged for re-verification after a survey change.
+  proposal_inputs.manage:
+    description: Create, upload to and draft from a site assessment.
+  proposal_inputs.review:
+    description: Review a site assessment.
+  pricing.adjust:
+    description: Adjust a proposal's price and read the price breakdown.
+    sensitive: true
+  # ── Customers, meetings, projects ────────────────────────────────────────────
+  customers.memory_query:
+    description: Ask Nova about a customer's history.
+  meetings.view:
+    description: See meetings.
+  meetings.view_all:
+    description: See every employee's meetings, not only your own.
+  meetings.schedule:
+    description: Book a meeting with a customer.
+  meetings.host:
+    description: Can be booked for customer meetings.
+  projects.record_stage:
+    description: Record hand-recorded progress stages (offline acceptance, portal approval).
+  analytics.view_full:
+    description: See company-wide analytics.
+  # ── Associate network ────────────────────────────────────────────────────────
+  associates.applications.review:
+    description: Review, approve and reject associate applications; suspend, reinstate or deactivate associates.
+    sensitive: true
+  associates.attribution.resolve:
+    description: Resolve an attribution conflict between two associates.
+    sensitive: true
+  associates.seats.manage:
+    description: Release territory seats.
+    sensitive: true
+  associates.network_summary.view:
+    description: See the associate network summary (aggregate revenue and commission figures).
+  territories.manage:
+    description: Create and edit districts and blocks.
+    sensitive: true
+  onboardings.view:
+    description: See associate-sourced customers.
+  onboardings.view_all:
+    description: See every associate-sourced customer, not only those on your own leads.
+  onboardings.verify:
+    description: Record the staff verification call on an associate-sourced customer.
+  surveys.view:
+    description: Read site surveys.
+  surveys.view_prices:
+    description: See the indicative prices in a site survey's results.
+  surveys.review:
+    description: Review a site survey, apply or reject corrections, generate the survey report.
+  # ── Execution and service ────────────────────────────────────────────────────
+  execution.view:
+    description: See project execution, submissions, photos and the serial register.
+  execution.view_all:
+    description: See execution on every project, not only your own leads.
+  execution.view_in_progress:
+    description: See execution on every project from agreement signed onwards.
+  execution.verify:
+    description: Verify or reject an associate's stage submission; verify the serial register.
+  execution.record:
+    description: Record a stage directly, upload evidence, act on the handover pack.
+  execution.mode.switch:
+    description: Take a project's execution over from the associate.
+    sensitive: true
+  execution.admin_override:
+    description: Record a stage on an associate-run project, or change a verified serial register, with a reason.
+    sensitive: true
+  execution.dcr_override:
+    description: Record why a project with a non-DCR module may still claim the subsidy.
+    sensitive: true
+  service_requests.handle:
+    description: Raise, assign and progress warranty and O&M service requests.
+  # ── Money ────────────────────────────────────────────────────────────────────
+  payments.view:
+    description: See payments and the ledger.
+  payments.view_all:
+    description: See every customer's payments, not only your own leads'.
+  payments.record:
+    description: Record a payment.
+  payments.process:
+    description: Deposit, verify, dishonour or cancel payments; schedules, receipts, exports.
+    sensitive: true
+  payments.segregation_override:
+    description: Verify a payment you recorded yourself, with a reason.
+    sensitive: true
+  commissions.view:
+    description: See commission entries, rate schedules, payout batches and queries.
+  commissions.process:
+    description: Approve entries; prepare, approve and pay payout batches; commission exports.
+    sensitive: true
+  commissions.rates.manage:
+    description: Publish rate schedules, re-rate pending entries, reverse entries, set individual rates.
+    sensitive: true
+  commissions.individual_rates.view:
+    description: See an associate's individual rate and its history.
+  payouts.segregation_override:
+    description: Approve a payout batch you prepared yourself, with a reason.
+    sensitive: true
+  payouts.bank_file.export:
+    description: Download the payout bank file (full account numbers).
+    sensitive: true
+  # ── Company setup and oversight ──────────────────────────────────────────────
+  equipment.manage:
+    description: Add and edit equipment in the catalogue.
+  equipment.procurement_price.view:
+    description: See equipment procurement prices.
+  placeholders.view:
+    description: See the placeholder registry.
+  placeholders.resolve:
+    description: Mark a placeholder as resolved.
+    sensitive: true
+  archive.manage:
+    description: Import, void and list project-archive imports.
+    sensitive: true
+  governance.manage:
+    description: Switch Nova's agents on and off.
+    sensitive: true
+  records.conversations.read_any:
+    description: Read any employee's Nova Records conversation (audited).
+  records.commissions.read:
+    description: See commission figures through Nova Records.
+  audit.view:
+    description: Read the whole audit log and agent activity.
+  audit.view_associates:
+    description: Read the audit log for associate-network records only.
+  staff.manage:
+    description: Invite, change roles of, deactivate and reactivate staff (within the roles you may assign).
+    sensitive: true
+
+roles:
+  admin:
+    label: Admin
+    description: Every power in the system except the payout bank file (hold Accounts as well for that).
+    permissions: all
+    exclude: [payouts.bank_file.export]
+    requires_two_factor: true
+    can_assign_roles: all
+  management:
+    label: Management
+    description: Oversight — reads everything commercial, gives manager sign-off, assigns leads.
+    permissions:
+      - leads.view_all
+      - leads.view_commercial
+      - leads.create
+      - leads.change_stage
+      - leads.assign
+      - proposals.manager_signoff
+      - proposals.clear_reverification
+      - customers.memory_query
+      - meetings.view
+      - meetings.view_all
+      - analytics.view_full
+      - associates.network_summary.view
+      - onboardings.view
+      - surveys.view
+      - surveys.view_prices
+      - execution.view
+      - execution.view_all
+      - payments.view
+      - payments.view_all
+      - commissions.view
+      - commissions.individual_rates.view
+      - equipment.procurement_price.view
+      - placeholders.view
+      - audit.view
+    requires_two_factor: true
+    can_assign_roles: []
+  network_manager:
+    label: Network Manager
+    description: Runs the Associate Network, invites staff below Admin, opens any proposal and adjusts its price. No proposal approval or sending, payments, commission rates or company settings.
+    permissions:
+      - leads.view_all
+      - leads.view_commercial
+      - pricing.adjust
+      - associates.applications.review
+      - associates.attribution.resolve
+      - associates.seats.manage
+      - associates.network_summary.view
+      - territories.manage
+      - onboardings.view
+      - onboardings.view_all
+      - surveys.view
+      - audit.view_associates
+      - staff.manage
+    requires_two_factor: true
+    can_assign_roles: [sales, engineer, operations]
+  sales:
+    label: Sales
+    description: Works their own and unassigned leads through to a sent proposal.
+    permissions:
+      - leads.view_assigned
+      - leads.view_commercial
+      - leads.create
+      - leads.edit
+      - leads.change_stage
+      - leads.be_assigned
+      - proposals.draft
+      - proposals.approve_standard
+      - proposals.send
+      - proposal_inputs.manage
+      - proposal_inputs.review
+      - pricing.adjust
+      - customers.memory_query
+      - meetings.view
+      - meetings.schedule
+      - meetings.host
+      - projects.record_stage
+      - onboardings.view
+      - onboardings.verify
+      - surveys.view
+      - surveys.view_prices
+      - execution.view
+      - payments.view
+      - payments.record
+      - equipment.procurement_price.view
+    requires_two_factor: false
+    can_assign_roles: []
+  engineer:
+    label: Engineer
+    description: Technical review — sees every lead's technical fields, never prices or contact details.
+    permissions:
+      - leads.view_all
+      - leads.view_technical
+      - proposals.clear_reverification
+      - proposal_inputs.review
+      - surveys.view
+      - surveys.review
+      - execution.view
+      - execution.view_all
+      - service_requests.handle
+    requires_two_factor: false
+    can_assign_roles: []
+  operations:
+    label: Operations
+    description: Runs project execution and service from agreement signed. Never money.
+    permissions:
+      - execution.view
+      - execution.view_in_progress
+      - execution.verify
+      - execution.record
+      - service_requests.handle
+    requires_two_factor: false
+    can_assign_roles: []
+  accounts:
+    label: Accounts
+    description: Runs payments, commissions and payouts, including the bank file.
+    permissions:
+      - payments.view
+      - payments.view_all
+      - payments.record
+      - payments.process
+      - commissions.view
+      - commissions.process
+      - payouts.bank_file.export
+      - records.commissions.read
+    requires_two_factor: true
+    can_assign_roles: []
+
+# At most one of these per person. Each narrows what its holder sees per record (Sales:
+# own leads; Engineer: technical fields only; Operations: projects in execution), and
+# two of them together would leave no single answer for a record one role sees fully and
+# the other only partly. Combining one of them with any other role is fine.
+exclusive_roles: [sales, engineer, operations]
+
+staff:
+  invitation_expiry_days: 7
+  # The system never goes below this many active Admins (deactivation or role change).
+  min_active_admins: 2
+
+approvals:
+  expiry_hours: 72
+  # true: the change waits for a second, different person holding the permission.
+  require_second_approval:
+    role.admin: true                     # granting or removing Admin
+    role.accounts: true                  # granting or removing Accounts
+    commissions.standard_rate_publish: false
+    commissions.individual_rate_change: false
+    payouts.batch_approve: false
+
+# Staff alerts: who receives each event. Recipients are the active employees holding any
+# listed role, the lead's assigned employee when `assigned_employee: true`, and — always —
+# the fixed addresses already configured (STAFF_NOTIFY_EMAILS, ACCOUNTS_NOTIFY_EMAILS,
+# OPERATIONS_NOTIFY_EMAILS), so shared mailboxes keep receiving. Deduplicated; a
+# deactivated employee is never emailed.
+alerts:
+  new_lead: {roles: [admin, management], assigned_employee: true}
+  lead_qualified: {roles: [admin, management], assigned_employee: true}
+  meeting_booked: {roles: [admin], assigned_employee: true}
+  stale_lead_digest: {roles: [admin, management]}
+  manager_signoff_required: {roles: [management, admin]}
+  customer_accepted: {roles: [admin, management], assigned_employee: true}
+  formal_proposal_requested: {roles: [admin], assigned_employee: true}
+  survey_review_overdue: {roles: [engineer, admin]}
+  onboarding_overdue: {roles: [admin, network_manager]}
+  stage_submitted: {roles: [operations]}
+  execution_stuck: {roles: [operations, admin]}
+  dcr_mismatch: {roles: [operations, admin]}
+  catalogue_unmatched: {roles: [operations]}
+  handover_blocked: {roles: [operations]}
+  service_request_raised: {roles: [operations]}
+  service_requests_overdue: {roles: [operations, admin]}
+  payment_recorded: {roles: [accounts]}
+  payment_dishonoured: {roles: [accounts, admin], assigned_employee: true}
+  receipt_blocked: {roles: [accounts]}
+  payments_attention: {roles: [accounts]}
+  commission_queries_overdue: {roles: [accounts]}
+  associate_application_submitted: {roles: [network_manager, admin]}
+  approval_requested: {roles: []}         # sent to the eligible approvers of that request

@@ -17,15 +17,11 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
-from app.memory.models import EmployeeRole, EquipmentCategory
+from app.memory.models import EquipmentCategory
 
-# Same population that sees proposal pricing elsewhere (dashboard.py's
-# `if employee.is_engineer:` restricted-projection pattern) — Admin, Sales and
-# Management see commercial figures; Engineer does not. Written as an allow-list
-# rather than replicating the `is_engineer` check literally so Operations and
-# Accounts (roles that didn't exist when that precedent was set, and which start
-# maximally restricted by design) are excluded too, not accidentally included.
-_CAN_VIEW_PROCUREMENT_PRICE = (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.management)
+# Procurement prices: `equipment.procurement_price.view` — the population that sees
+# proposal pricing elsewhere (Admin, Sales, Management; config/access_control.yaml).
+# Engineer, Operations, Accounts and Network Manager do not.
 
 router = APIRouter(prefix="/api/v1/equipment")
 
@@ -64,7 +60,7 @@ def _serialize(item, employee: AuthenticatedEmployee) -> dict:
     }
     # Absent, not null, for a role that can't see it — so the frontend can tell
     # "not permitted" apart from "no price set yet" (which is a real null).
-    if employee.role in _CAN_VIEW_PROCUREMENT_PRICE:
+    if employee.holds("equipment.procurement_price.view"):
         body["procurement_price_inr"] = item.procurement_price_inr
     return body
 
@@ -94,7 +90,7 @@ def create_equipment(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    if not employee.is_admin:
+    if not employee.has("equipment.manage"):
         raise HTTPException(status_code=403, detail="Only Admin can add equipment.")
 
     memory = MemoryManager(db)
@@ -118,7 +114,7 @@ def update_equipment(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    if not employee.is_admin:
+    if not employee.has("equipment.manage"):
         raise HTTPException(status_code=403, detail="Only Admin can edit equipment.")
 
     fields = body.model_dump(exclude_unset=True)

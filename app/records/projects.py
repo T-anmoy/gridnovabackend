@@ -23,17 +23,18 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Date, Integer, Numeric, String, and_, case, cast, exists, func, literal, or_, select, type_coerce, \
-    union_all
+from sqlalchemy import Date, Integer, Numeric, String, and_, case, cast, exists, false, func, literal, or_, select, \
+    type_coerce, union_all
 from sqlalchemy.orm import Session
 
 from app.memory.models import (
-    ArchivedProject, Associate, Customer, CustomerOnboarding, EmployeeRole, Equipment, InstalledUnit,
+    ArchivedProject, Associate, Customer, CustomerOnboarding, Equipment, InstalledUnit,
     InstalledUnitCategory, InstalledUnitStatus, Lead, PaymentLedgerEntry, Project, ProjectExecution, ProjectStage,
     ProjectStageEvent, ProjectWarranty, Proposal, ProposalInputs, ProposalStatus, TerritoryBlock, TerritoryDistrict,
     TerritoryState, WarrantyItem,
 )
 from app.onboarding.progress import ORDER as STAGE_ORDER
+from app.auth.access import live_project_rule
 from app.records import access
 
 KW = Numeric(12, 3)
@@ -145,12 +146,14 @@ def _live(db: Session, viewer):
     accepted_any = exists().where(Proposal.lead_id == Lead.id, Lead.project_id == P.id,
                                   Proposal.status == ProposalStatus.accepted)
     query = query.where(or_(O.id.isnot(None), exists().where(ProjectStageEvent.project_id == P.id), accepted_any))
-    role = access.role_of(viewer)
-    if role == EmployeeRole.sales:
+    rule = live_project_rule(viewer)
+    if rule == "assigned":
         query = query.where(first_lead.isnot(None), or_(first_assignee.is_(None),
                                                         first_assignee == getattr(viewer, "employee_id", None)))
-    elif role == EmployeeRole.operations:
+    elif rule == "execution":
         query = query.where(has_execution)
+    elif rule == "none":
+        query = query.where(false())
     return query
 
 

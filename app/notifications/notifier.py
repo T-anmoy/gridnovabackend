@@ -160,7 +160,7 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "catalogue_unmatched",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
                       "commission_queries_overdue", "handover_blocked", "service_request_raised",
-                      "service_requests_overdue")
+                      "service_requests_overdue", "associate_application_submitted")
 # Events for one team rather than all staff: sent to that team's own recipients
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
@@ -299,6 +299,12 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                 [f"Request #{r.get('request_id')} — {r.get('customer_name') or 'a customer'} "
                  f"({r.get('project_reference_id')}), {r.get('hours_overdue')} hours past" for r in rows],
                 "Open the dashboard", f"{base_url}/dashboard")
+    if event_type == "associate_application_submitted":
+        kind = str(payload.get("application_type", "")).replace("_", " ")
+        return (f"New {kind} application: {payload.get('name')}",
+                [f"{payload.get('name')} applied to join the network as a {kind} ({payload.get('state')}).",
+                 f"Application #{payload.get('application_id')} is waiting for review."],
+                "Open applications", f"{base_url}/dashboard/associate-applications")
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
     if event_type == "manager_signoff_required":
         value = payload.get("total_value")
@@ -447,7 +453,8 @@ class EmailNotifier(Notifier):
         # {"accounts": [...], "operations": [...]} — a team with none falls back to staff.
         self._roles = role_emails or {}
 
-    def _recipients(self, event_type: str) -> list[str]:
+    def _fixed(self, event_type: str) -> list[str]:
+        """The configured addresses (shared mailboxes) for an event."""
         audience = EVENT_AUDIENCE.get(event_type)
         if not audience:
             return list(self._staff)
@@ -458,12 +465,24 @@ class EmailNotifier(Notifier):
                     to.append(email)
         return to
 
+    def _recipients(self, event_type: str, payload: Optional[dict] = None) -> list[str]:
+        """The fixed addresses plus the active holders of the event's roles
+        (config/access_control.yaml alerts; app/notifications/alerts.py)."""
+        from app.notifications import alerts
+
+        return alerts.recipients(event_type, payload or {}, self._fixed(event_type))
+
     def notify(self, event_type: str, payload: dict) -> None:
         self._inner.notify(event_type, payload)
         if event_type == "onboarding_overdue":
             self._send_onboarding_overdue(payload)
             return
-        to = self._recipients(event_type)
+        if event_type == "approval_requested":
+            self._send_approval_requested(payload)
+            return
+        if event_type not in STAFF_EMAIL_EVENTS:
+            return
+        to = self._recipients(event_type, payload)
         if not to or event_type not in STAFF_EMAIL_EVENTS:
             return
         if payload.get("source") in _NO_STAFF_EMAIL_SOURCES:
@@ -503,7 +522,7 @@ class EmailNotifier(Notifier):
         Preferred Associates the job escalated to, or staff at the Admin step."""
         staff = payload.get("escalated_to") == "admin"
         if staff:
-            to = self._staff
+            to = self._recipients("onboarding_overdue", payload)
         else:
             to = [r["email"] for r in payload.get("recipients", []) if r.get("email")]
         if not to:
@@ -522,6 +541,18 @@ class EmailNotifier(Notifier):
             return
         self._send(to, f"Overdue: verification call for customer #{payload.get('onboarding_id')}",
                    html_body, text_body, "onboarding_overdue")
+
+    def _send_approval_requested(self, payload: dict) -> None:
+        """A change waits for a second approver: email the people who could approve it."""
+        to = [e for e in payload.get("recipients") or [] if e]
+        if not to:
+            _report_failure("approval_requested", "no eligible approver has an email address")
+            return
+        lines = [f"{payload.get('requested_by')} asked for: {payload.get('summary')}.",
+                 "Nothing changes until someone other than the requester approves it.",
+                 f"The request expires at {payload.get('expires_at')}."]
+        html_body, text_body = _render(lines, "Review the request", f"{self._base_url}/dashboard/approvals")
+        self._send(to, f"Approval needed: {payload.get('summary')}", html_body, text_body, "approval_requested")
 
     def send_associate_email(self, to, subject, lines, link_label=None, link_url=None,
                              event_type="associate_email") -> bool:
@@ -593,6 +624,21 @@ class EmailNotifier(Notifier):
 
 def _own_list(raw: str) -> list[str]:
     return [e.strip() for e in (raw or "").split(",") if e.strip()]
+
+
+def fixed_recipient_count(event_type: str) -> int:
+    """How many configured shared addresses receive this event (GET /access/alerts)."""
+    from app.config import settings
+
+    staff = settings.staff_notify_email_list
+    teams = {"accounts": _own_list(settings.accounts_notify_emails),
+             "operations": _own_list(settings.operations_notify_emails)}
+    if event_type in ("approval_requested",):
+        return 0
+    audience = EVENT_AUDIENCE.get(event_type)
+    if not audience:
+        return len(staff)
+    return len({e for team in audience for e in (teams.get(team) or staff)})
 
 
 def get_notifier() -> Notifier:

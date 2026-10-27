@@ -10,6 +10,12 @@ endpoint:
                         (require_execution_access, below); Accounts only through
                         payments.
 
+BE-17: these are permissions (config/access_control.yaml), so several roles combine as
+a union — `leads.view_all` (Admin, Management, Network Manager, Engineer) beats
+`leads.view_assigned` (Sales). A Network Manager holds `leads.view_all` so it can open
+any proposal and adjust its price; associate-sourced customers it reaches through
+onboarding_lead_scope / require_onboarding_access (`onboardings.view_all`).
+
 Single records go through require_lead_access(); list queries through LeadScope,
 which becomes a WHERE clause so filtering never happens after the fact.
 
@@ -26,7 +32,8 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import and_, false, func, or_, true
 
-from app.memory.models import EmployeeRole, Lead
+from app.auth.access import viewer_holds
+from app.memory.models import Lead
 
 ASSIGNED_FILTERS = ("me", "unassigned", "any")
 NOT_YOURS = "This lead is not assigned to you."
@@ -50,7 +57,17 @@ class LeadScope:
 
 
 def _sees_everything(employee) -> bool:
-    return employee.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.engineer)
+    return viewer_holds(employee, "leads.view_all")
+
+
+def _sees_assigned(employee) -> bool:
+    return viewer_holds(employee, "leads.view_assigned")
+
+
+def narrowed_to_assigned(employee) -> bool:
+    """True when this person reads leads only as Sales does (own + unassigned): the
+    narrowing every Sales-scoped list applies."""
+    return _sees_assigned(employee) and not _sees_everything(employee)
 
 
 def can_access_lead(employee, lead) -> bool:
@@ -58,7 +75,7 @@ def can_access_lead(employee, lead) -> bool:
         return False
     if _sees_everything(employee):
         return True
-    if employee.role == EmployeeRole.sales:
+    if _sees_assigned(employee):
         return lead.assigned_employee_id in (None, employee.employee_id)
     return False
 
@@ -78,14 +95,31 @@ def lead_scope(employee, assigned: Optional[str] = None) -> LeadScope:
     if assigned == "me":
         return LeadScope(employee_id=employee.employee_id)
     if assigned == "unassigned":
-        if _sees_everything(employee) or employee.role == EmployeeRole.sales:
+        if _sees_everything(employee) or _sees_assigned(employee):
             return LeadScope(unassigned=True)
         return LeadScope()
     if _sees_everything(employee):
         return LeadScope(everything=True)
-    if employee.role == EmployeeRole.sales:
+    if _sees_assigned(employee):
         return LeadScope(employee_id=employee.employee_id, unassigned=True)
     return LeadScope()
+
+
+def _sees_all_onboardings(employee) -> bool:
+    return _sees_everything(employee) or viewer_holds(employee, "onboardings.view_all")
+
+
+def onboarding_lead_scope(employee) -> LeadScope:
+    """Lead scope for associate-sourced customers (onboardings, their surveys): everyone
+    lead_scope() allows, plus — for `onboardings.view_all` (Network Manager) — every
+    associate-sourced customer."""
+    return LeadScope(everything=True) if _sees_all_onboardings(employee) else lead_scope(employee)
+
+
+def require_onboarding_access(employee, lead, detail: str = NOT_YOURS) -> None:
+    if _sees_all_onboardings(employee):
+        return
+    require_lead_access(employee, lead, detail)
 
 
 # ── Associate visibility over onboarded customers ──────────────────────────────
@@ -242,11 +276,11 @@ EXECUTION_NOT_VISIBLE = "Your role cannot view this project's execution."
 def can_access_execution(employee, lead, has_execution: bool) -> bool:
     if not employee.can_view_execution():
         return False
-    if employee.role == EmployeeRole.sales:
-        return can_access_lead(employee, lead)
-    if employee.role == EmployeeRole.operations:
-        return has_execution
-    return True
+    if viewer_holds(employee, "execution.view_all"):
+        return True
+    if viewer_holds(employee, "execution.view_in_progress") and has_execution:
+        return True
+    return _sees_assigned(employee) and can_access_lead(employee, lead)
 
 
 def require_execution_access(employee, lead, has_execution: bool) -> None:
@@ -266,5 +300,33 @@ PAYMENTS_NOT_VISIBLE = "Your role cannot view this customer's payments."
 def require_payment_access(employee, lead) -> None:
     if not employee.can_view_payments():
         raise HTTPException(status_code=403, detail=PAYMENTS_NOT_VISIBLE)
-    if employee.role == EmployeeRole.sales and not can_access_lead(employee, lead):
+    if not viewer_holds(employee, "payments.view_all") and not can_access_lead(employee, lead):
         raise HTTPException(status_code=403, detail=PAYMENTS_NOT_VISIBLE)
+
+
+# ── Staff regions (BE-17) ─────────────────────────────────────────────────────────
+#
+# `employees.regions` lists the states a person works in (empty = every region). It is
+# enforced only where the record already carries a state id: associates and associate
+# applications (`state_id`). Leads are not scoped — their state is free text on the
+# project and often missing (docs/api/access_control.md).
+
+OUTSIDE_REGION = "This record is outside the regions you work in."
+
+
+def region_state_ids(db, employee) -> Optional[list[int]]:
+    """TerritoryState ids of the employee's regions, or None for every region."""
+    from sqlalchemy import select
+
+    from app.memory.models import TerritoryState
+
+    regions = list(getattr(employee, "regions", ()) or ())
+    if not regions:
+        return None
+    return list(db.execute(select(TerritoryState.id).where(TerritoryState.name.in_(regions))).scalars())
+
+
+def require_region(db, employee, state_id) -> None:
+    ids = region_state_ids(db, employee)
+    if ids is not None and state_id not in ids:
+        raise HTTPException(status_code=403, detail=OUTSIDE_REGION)

@@ -170,7 +170,7 @@ class DocumentEditRequest(BaseModel):
 # ── Routes ───────────────────────────────────────────────────────────────────────
 
 def _proposal_for(db: Session, proposal_id: int, employee: AuthenticatedEmployee):
-    if employee.role.value not in _READERS:
+    if not (employee.holds("leads.view_all") or employee.holds("leads.view_assigned")):
         raise HTTPException(status_code=403, detail="Your role cannot open proposals.")
     memory = MemoryManager(db)
     proposal = memory.get_proposal(proposal_id)
@@ -189,7 +189,7 @@ def get_proposal_document(
     """The structured document, its computed figures, what still blocks approval and the
     sections this viewer may change (none once approved)."""
     proposal = _proposal_for(db, proposal_id, employee)
-    return document_service.view(proposal, employee.role.value)
+    return document_service.view(proposal, employee.role_values)
 
 
 @router.patch("/proposals/{proposal_id}/document", response_model=DocumentEditResponse)
@@ -203,20 +203,20 @@ def edit_proposal_document(
     section), 409 proposal_locked / stale_version / no_document, 422 invalid_value /
     payment_terms_total / make_not_in_catalogue."""
     _proposal_for(db, proposal_id, employee)
-    if not document_service.editable_sections(employee.role.value):
+    if not document_service.editable_sections(employee.role_values):
         raise HTTPException(status_code=403, detail={"code": "field_not_editable",
                                                      "message": "Your role cannot change proposal documents."})
     proposal = document_service.lock_proposal(db, proposal_id)
     try:
-        result = document_service.edit(db, proposal, role=employee.role.value, employee_id=employee.employee_id,
+        result = document_service.edit(db, proposal, role=employee.role_values, employee_id=employee.employee_id,
                                        section=body.section, value=body.value, base_revision=body.base_revision)
     except d.DocumentError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.body())
     db.commit()
     proposal = MemoryManager(db).get_proposal(proposal_id)
-    priced = not employee.is_engineer
-    return {**document_service.view(proposal, employee.role.value), **result,
+    priced = not employee.technical_only
+    return {**document_service.view(proposal, employee.role_values), **result,
             "total_value": proposal.total_value if priced else None,
             "requires_manager_signoff": proposal.requires_manager_signoff if priced else None}
 
@@ -231,7 +231,7 @@ def preview_proposal_pdf(
     """The document as the customer would receive it, rendered now and never stored —
     stamped "DRAFT — NOT FOR CUSTOMER" until the proposal is approved. It carries
     pricing and contact details, so Engineers are refused, as for /pdf."""
-    if employee.is_engineer:
+    if employee.technical_only:
         raise HTTPException(status_code=403, detail="Engineers cannot access proposal PDFs.")
     proposal = _proposal_for(db, proposal_id, employee)
     doc = d.stored(proposal.content)

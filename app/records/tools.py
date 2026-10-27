@@ -133,15 +133,11 @@ def check_filters(viewer, f: ProjectFilters) -> None:
 
 # ── Refs and paths ───────────────────────────────────────────────────────────────
 
-EXECUTION_PAGE_ROLES = ("admin", "management", "sales", "engineer", "operations")
-
-
 def project_ref(viewer, source: str, pk: int, ref: str, label: str, onboarding_id=None, lead_id=None) -> dict:
-    role = access.role_of(viewer).value
     if source == "archive":
         return {"ref": ref, "kind": "archive_project", "label": label, "path": records_config.path("archive", id=pk)}
     out = {"ref": ref, "kind": "live_project", "label": label}
-    if onboarding_id and role in EXECUTION_PAGE_ROLES:
+    if onboarding_id and access.reads_service(viewer):   # the page's own rule (can_view_execution)
         out["path"] = records_config.path("live_project", onboarding_id=int(onboarding_id))
     elif lead_id and access.reads_leads(viewer):
         out["path"] = records_config.path("lead", lead_id=int(lead_id))
@@ -386,7 +382,7 @@ def service_requests(db: Session, viewer, args: ServiceRequests) -> dict:
                      "warranty_end": view._plain(sr.warranty_end), "sla_due_at": view._plain(sr.sla_due_at)})
         untrusted.append({"ref": key, "field": "description", "text": (sr.description or "")[:300]})
         sr_ref = {"ref": key, "kind": "service_request", "label": f"{sr.category.value} on {ref}"}
-        if access.role_of(viewer).value in EXECUTION_PAGE_ROLES:   # the page's own rule (can_view_execution)
+        if access.reads_service(viewer):   # the page's own rule (can_view_execution)
             sr_ref["path"] = records_config.path("service_request", id=sr.id)
         refs.append(sr_ref)
         onboarding_id = db.execute(select(CustomerOnboarding.id).where(
@@ -558,7 +554,7 @@ def customer_records(db: Session, viewer, args: CustomerRecords) -> dict:
     from app.memory.memory_manager import MemoryManager
 
     memory = MemoryManager(db)
-    sales = access.role_of(viewer).value == "sales"
+    sales = access.memory_narrowed_to_assigned(viewer)
     me = getattr(viewer, "employee_id", None)
     visible = (lambda c: memory.customer_visible_to_sales(c.id, me)) if sales else None   # noqa: E731
     searched = args.model_dump(exclude_none=True, exclude={"question"})

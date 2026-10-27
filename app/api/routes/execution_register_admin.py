@@ -137,7 +137,7 @@ def dcr_override(onboarding_id: int, body: OverrideIn, db: Session = Depends(get
                  employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Admin records why a PM Surya Ghar project with a non-DCR module may still claim
     the subsidy. Clears the dcr_mismatch flag and the subsidy_claimed block."""
-    if not employee.is_admin:
+    if not employee.has("execution.dcr_override"):
         raise HTTPException(status_code=403, detail="Only Admin can record a DCR override.")
     onboarding, record, _ = _target(db, employee, onboarding_id, change=False)
     _write(db, lambda: register.record_dcr_override(db, record, employee.employee_id, body.reason))

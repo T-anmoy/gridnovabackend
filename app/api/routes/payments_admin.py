@@ -24,7 +24,7 @@ from app.auth.scoping import lead_scope, require_payment_access
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
-    CustomerOnboarding, EmployeeRole, Lead, Payment, PaymentMode, PaymentStatus,
+    CustomerOnboarding, Lead, Payment, PaymentMode, PaymentStatus,
 )
 from app.payments import receipts
 from app.payments import service as payments
@@ -52,9 +52,14 @@ def _payment(db: Session, employee: AuthenticatedEmployee, payment_id: int) -> P
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.onboarding_id is not None:
         _onboarding(db, employee, payment.onboarding_id)
-    elif employee.role == EmployeeRole.sales:   # no lead to scope it by: not Sales' to see
+    elif _sales_scoped(employee):   # no lead to scope it by: not Sales' to see
         raise HTTPException(status_code=403, detail="Your role cannot view this payment.")
     return payment
+
+
+def _sales_scoped(employee: AuthenticatedEmployee) -> bool:
+    """Reads payments only on its own or unassigned leads (Sales)."""
+    return not employee.holds("payments.view_all")
 
 
 def _processor(employee: AuthenticatedEmployee) -> None:
@@ -79,7 +84,7 @@ def _act(db: Session, fn):
 # ── Queue ────────────────────────────────────────────────────────────────────────
 
 def _visible(db: Session, employee: AuthenticatedEmployee, q):
-    if employee.role == EmployeeRole.sales:
+    if _sales_scoped(employee):
         q = q.join(CustomerOnboarding, CustomerOnboarding.id == Payment.onboarding_id) \
              .join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     return q
@@ -189,7 +194,7 @@ def list_milestones(needs_attention: Optional[bool] = None, page: int = Query(de
         raise HTTPException(status_code=403, detail="Your role cannot view payments.")
     from app.memory.models import PaymentMilestone
     scoped = select(PaymentMilestone)
-    if employee.role == EmployeeRole.sales:
+    if _sales_scoped(employee):
         scoped = scoped.join(CustomerOnboarding, CustomerOnboarding.id == PaymentMilestone.onboarding_id) \
                        .join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     ordered = scoped.order_by(PaymentMilestone.onboarding_id, PaymentMilestone.number)
@@ -262,7 +267,7 @@ def verify(payment_id: int, body: Optional[VerifyIn] = None, db: Session = Depen
     _processor(employee)
     _payment(db, employee, payment_id)
     return _detail(db, _act(db, lambda: payments.verify(db, payment_id, employee.employee_id,
-                                                        is_admin=employee.is_admin,
+                                                        is_admin=employee.holds("payments.segregation_override"),
                                                         reason=body.reason if body else None)))
 
 
@@ -460,6 +465,6 @@ def work_queues(db: Session = Depends(get_db), employee: AuthenticatedEmployee =
 def _scheduled_onboardings(db: Session, employee: AuthenticatedEmployee) -> set[int]:
     from app.memory.models import PaymentMilestone
     q = select(CustomerOnboarding.id).where(CustomerOnboarding.id.in_(select(PaymentMilestone.onboarding_id)))
-    if employee.role == EmployeeRole.sales:
+    if _sales_scoped(employee):
         q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     return set(db.execute(q).scalars())

@@ -78,8 +78,10 @@ class TestDeactivate:
         assert memory.get_employee("emp-admin-1").is_active is True
 
     def test_may_deactivate_an_admin_when_another_remains_active(self, client, memory, db_session):
+        # BE-17: the floor is two active Admins (config/access_control.yaml), so two must remain.
         client.get("/api/v1/dashboard/employees", headers=admin_headers())  # provisions emp-admin-1
         _seed_employee(memory, db_session, "emp-admin-2", role="admin")
+        _seed_employee(memory, db_session, "emp-admin-3", role="admin")
 
         response = client.patch(
             "/api/v1/dashboard/employees/emp-admin-2/deactivate", headers=admin_headers()

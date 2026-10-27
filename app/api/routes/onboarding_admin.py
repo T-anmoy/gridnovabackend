@@ -14,7 +14,7 @@ from app.api.routes.dashboard import _require_admin_or_internal_key
 from app.api.routes.associate_onboarding import InPersonAcceptanceRequest
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
-from app.auth.scoping import lead_scope, require_lead_access
+from app.auth.scoping import onboarding_lead_scope, require_onboarding_access
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
@@ -34,7 +34,8 @@ def _load(db: Session, employee: AuthenticatedEmployee, onboarding_id: int) -> C
     onboarding = service.get(db, onboarding_id)
     if onboarding is None:
         raise HTTPException(status_code=404, detail="Onboarding not found")
-    require_lead_access(employee, MemoryManager(db).get_lead(onboarding.lead_id))
+    # Network Manager: every associate-sourced customer (onboardings.view_all).
+    require_onboarding_access(employee, MemoryManager(db).get_lead(onboarding.lead_id))
     return onboarding
 
 
@@ -50,7 +51,7 @@ def list_onboardings(status: Optional[OnboardingStatus] = None, flagged: Optiona
     if not employee.can_view_onboardings():
         raise HTTPException(status_code=403, detail="Your role cannot view associate-sourced customers.")
     q = (select(CustomerOnboarding).join(Lead, Lead.id == CustomerOnboarding.lead_id)
-         .where(lead_scope(employee).condition()))
+         .where(onboarding_lead_scope(employee).condition()))
     if status:
         q = q.where(CustomerOnboarding.status == status)
     if flagged is not None:

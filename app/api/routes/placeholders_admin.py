@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.memory.db import get_db
-from app.memory.models import AuditLog, EmployeeRole, PlaceholderResolution
+from app.memory.models import AuditLog, PlaceholderResolution
 from app.placeholders import registry
 
 router = APIRouter(prefix="/api/v1/dashboard/placeholders")
@@ -41,7 +41,7 @@ def _item(entry: registry.Entry, state: dict) -> dict:
 
 @router.get("")
 def list_placeholders(db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    if employee.role not in (EmployeeRole.admin, EmployeeRole.management):
+    if not employee.has("placeholders.view"):
         raise HTTPException(status_code=403, detail="Only Admin and Management can view the placeholder registry.")
     items = [_item(e, s) for e, s in registry.evaluate_all(db)]
     by_blocking = {level: {"total": 0, "unresolved": 0} for level in registry.BLOCKING}
@@ -63,7 +63,7 @@ class ResolveRequest(BaseModel):
 @router.post("/{entry_id}/resolve")
 def resolve_placeholder(entry_id: str, body: ResolveRequest, db: Session = Depends(get_db),
                         employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    if not employee.is_admin:
+    if not employee.has("placeholders.resolve"):
         raise HTTPException(status_code=403, detail="Only Admin can resolve a placeholder.")
     entry = registry.load().by_id.get(entry_id)
     if entry is None:

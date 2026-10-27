@@ -1,5 +1,6 @@
-"""The stored employee role follows the login token (auth_sync), deactivation is never
-undone by signing in, and the admin role change updates Clerk and the DB together."""
+"""The dev sign-in headers set the stored role (auth_sync); a real token never does — the
+database decides (BE-17). Deactivation is never undone by signing in, and the admin role
+change updates Clerk and the DB together."""
 import pytest
 
 import app.auth.dependencies as deps
@@ -50,15 +51,15 @@ class TestAuthSync:
         assert row.is_active is False and row.role == EmployeeRole.sales
         assert _role_audits(memory, "emp-d") == []
 
-    def test_jwt_path_syncs_too(self, client, memory, db_session, monkeypatch):
+    def test_jwt_path_never_takes_the_role_from_the_token(self, client, memory, db_session, monkeypatch):
         db_session.add(Employee(id="user_clerk1", name="C", email="c@gridnova.in", role=EmployeeRole.sales))
         db_session.commit()
         monkeypatch.setattr(deps, "_verify_clerk_jwt", lambda token: {
             "sub": "user_clerk1", "public_metadata": {"role": "management"}, "email": "c@gridnova.in"})
         r = client.get(ME, headers={"Authorization": "Bearer test-token"})
-        assert r.status_code == 200 and r.json()["role"] == "management"
-        assert _stored(db_session, "user_clerk1").role == EmployeeRole.management
-        assert _role_audits(memory, "user_clerk1")[0].performed_by == "auth_sync"
+        assert r.status_code == 200 and r.json()["role"] == "sales"
+        assert _stored(db_session, "user_clerk1").role == EmployeeRole.sales
+        assert _role_audits(memory, "user_clerk1") == []
 
     def test_assignment_uses_the_synced_role(self, client, memory, db_session):
         # Stored as engineer at first sign-in, promoted to sales in Clerk later.
@@ -90,6 +91,9 @@ class TestAdminRoleChange:
             raise ClerkSyncError("down")
         monkeypatch.setattr("app.api.routes.dashboard.update_user_role", _fail)
         client.get(ME, headers=_as("emp-u", "sales"))
-        r = client.post("/api/v1/dashboard/employees/emp-u/role", json={"role": "admin"}, headers=admin_headers())
+        # Management, not Admin: granting Admin waits for a second approval (BE-17) and
+        # never reaches Clerk until then.
+        r = client.post("/api/v1/dashboard/employees/emp-u/role", json={"role": "management"},
+                        headers=admin_headers())
         assert r.status_code == 502
         assert _stored(db_session, "emp-u").role == EmployeeRole.sales

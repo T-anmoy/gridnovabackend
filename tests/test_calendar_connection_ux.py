@@ -121,9 +121,14 @@ class TestEmployeesMe:
     def test_returns_own_record_and_nothing_else(self, client, db_session):
         r = client.get("/api/v1/dashboard/employees/me", headers=sales_headers("emp-me"))
         assert r.status_code == 200
-        assert r.json() == {
+        body = r.json()
+        assert {k: body[k] for k in ("id", "role", "is_active", "google_calendar_connected")} == {
             "id": "emp-me", "role": "sales", "is_active": True, "google_calendar_connected": False,
         }
+        # BE-17 added the person's roles, permissions and two-step state — still only their own.
+        assert set(body) == {"id", "role", "is_active", "google_calendar_connected", "roles", "permissions",
+                             "two_factor_ok", "requires_two_factor", "can_assign_roles", "regions"}
+        assert body["roles"] == ["sales"] and "google_refresh_token" not in r.text
 
     def test_reflects_a_connected_calendar_without_leaking_the_token(self, client, db_session):
         client.get("/api/v1/dashboard/employees/me", headers=sales_headers("emp-me"))

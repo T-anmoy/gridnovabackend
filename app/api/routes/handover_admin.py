@@ -23,12 +23,12 @@ from app.api.routes.execution_admin import _load
 from app.associates import uploads
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
-from app.auth.scoping import lead_scope, require_execution_access
+from app.auth.scoping import lead_scope, narrowed_to_assigned, require_execution_access
 from app.handover import link, pack as pack_module, requests, service, warranty as warranty_register
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
-    Customer, CustomerOnboarding, EmployeeRole, Lead, Project, ServiceRequest, ServiceRequestCategory,
+    Customer, CustomerOnboarding, Lead, Project, ServiceRequest, ServiceRequestCategory,
     ServiceRequestStatus,
 )
 
@@ -230,7 +230,7 @@ def service_request_queue(status: Optional[ServiceRequestStatus] = None, open: O
          .join(Customer, Customer.id == CustomerOnboarding.customer_id)
          .join(Project, Project.id == ServiceRequest.project_id)
          .join(Lead, Lead.id == CustomerOnboarding.lead_id))
-    if employee.role == EmployeeRole.sales:
+    if narrowed_to_assigned(employee):
         q = q.where(lead_scope(employee).condition())
     now = datetime.now(timezone.utc)
     if status is not None:

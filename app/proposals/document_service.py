@@ -122,11 +122,23 @@ def problem(proposal: Proposal) -> Optional[dict]:
             "missing": missing}
 
 
-def editable_sections(role: str) -> list[str]:
-    return [s for s in document_config.EDITABLE_SECTIONS if role in document_config.edit_roles(s)]
+def _roles(role) -> frozenset:
+    """A role id, or the set a person holds (BE-17: several roles read as their union)."""
+    return frozenset([role]) if isinstance(role, str) else frozenset(role)
 
 
-def view(proposal: Proposal, role: str) -> dict:
+def editable_sections(role) -> list[str]:
+    held = _roles(role)
+    return [s for s in document_config.EDITABLE_SECTIONS if held & set(document_config.edit_roles(s))]
+
+
+def technical_view(role) -> bool:
+    """The Engineer view: Engineer held, and no role that reads the commercial document."""
+    held = _roles(role)
+    return "engineer" in held and not held & {"admin", "management", "sales"}
+
+
+def view(proposal: Proposal, role) -> dict:
     doc = d.stored(proposal.content)
     if doc is None:
         return {"proposal_id": proposal.id, "has_document": False}
@@ -135,7 +147,7 @@ def view(proposal: Proposal, role: str) -> dict:
     base = {"proposal_id": proposal.id, "has_document": True, "version": proposal.version,
             "status": ProposalStatus(proposal.status).value, "revision": doc.revision, "layout": d.layout(doc),
             "locked": locked, "editable_sections": sections}
-    if role == "engineer":
+    if technical_view(role):
         # Technical part only — no customer, price or contact (the Engineer surface).
         return {**base, "document": {"view": "technical", "revision": doc.revision,
                                      "plant": {"capacity_kwp": d.kw_text(doc.plant.capacity_kwp)
@@ -156,7 +168,7 @@ def lock_proposal(db: Session, proposal_id: int) -> Optional[Proposal]:
                       .execution_options(populate_existing=True)).scalar_one_or_none()
 
 
-def edit(db: Session, proposal: Proposal, *, role: str, employee_id: str, section: str, value,
+def edit(db: Session, proposal: Proposal, *, role, employee_id: str, section: str, value,
          base_revision: int) -> dict:
     """Apply one section edit. Raises d.DocumentError (403 field_not_editable, 409
     proposal_locked / stale_version, 422 invalid_value / payment_terms_total /
@@ -169,7 +181,7 @@ def edit(db: Session, proposal: Proposal, *, role: str, employee_id: str, sectio
         raise d.DocumentError("proposal_locked", f"This proposal is '{ProposalStatus(proposal.status).value}'; an "
                                                  "approved or sent version cannot change. Request a revision.",
                               status_code=409)
-    if section not in document_config.EDITABLE_SECTIONS or role not in document_config.edit_roles(section):
+    if section not in document_config.EDITABLE_SECTIONS or not _roles(role) & set(document_config.edit_roles(section)):
         raise d.DocumentError("field_not_editable", f"Your role cannot change '{section}'.", field=section,
                               status_code=403)
     if base_revision != doc.revision:

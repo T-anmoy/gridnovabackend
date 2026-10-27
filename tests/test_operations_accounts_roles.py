@@ -183,7 +183,12 @@ class TestRestrictedRolesSignInStillWorks:
         assert r.status_code == 200 and r.json()["role"] == role
         assert db_session.get(Employee, headers["X-Employee-Id"]).role == EmployeeRole(role)
 
-    def test_jwt_with_the_role_claim_is_accepted(self, client, monkeypatch, role):
+    def test_jwt_for_an_employee_with_the_role_is_accepted(self, client, monkeypatch, db_session, role):
+        # BE-17: the database decides the role; a role claim alone no longer creates a
+        # staff member (403 not_invited — tests/test_access_control.py).
+        from app.memory.models import Employee
+        db_session.add(Employee(id=f"user_{role}", name=role, email=f"{role}@gridnova.test", role=EmployeeRole(role)))
+        db_session.commit()
         monkeypatch.setattr(deps, "_verify_clerk_jwt", lambda token: {
             "sub": f"user_{role}", "public_metadata": {"role": role}})
         r = client.get("/api/v1/dashboard/employees/me", headers={"Authorization": "Bearer t"})
@@ -216,6 +221,8 @@ class TestNewAdminPowers:
     @pytest.mark.parametrize("gate", ["can_review_associate_applications",
                                       "can_manage_territories", "can_manage_seats"])
     def test_admin_only(self, gate):
-        for r in EmployeeRole:
+        # Among the roles that existed before BE-17; the Network Manager (which also holds
+        # these) is pinned in tests/test_access_control.py.
+        for r in (r for r in EmployeeRole if r != EmployeeRole.network_manager):
             allowed = getattr(AuthenticatedEmployee(employee_id="x", role=r), gate)()
             assert allowed is (r == EmployeeRole.admin), (gate, r)

@@ -16,24 +16,26 @@ of the dashboard already applies, never a second copy of them:
   * service requests    every role that reads execution, Accounts none (BE-5)
   * list prices         Admin and Sales (the roles that see /pricing/breakdown today)
 
+BE-17: each rule is the permission behind it (config/access_control.yaml), so a person
+holding several roles reads the union.
+
 KYC fields (Aadhaar, PAN, bank, identity documents) are never read by any tool.
 """
 from __future__ import annotations
 
 from app.archive import config as visibility
+from app.auth.access import viewer_holds
 from app.memory.models import EmployeeRole
-
-A, M, S, E, O, C = (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales, EmployeeRole.engineer,
-                    EmployeeRole.operations, EmployeeRole.accounts)
 
 
 def role_of(viewer) -> EmployeeRole:
+    """The viewer's primary role — for prompts and stored turns, never for a decision."""
     role = getattr(viewer, "role", viewer)
     return role if isinstance(role, EmployeeRole) else EmployeeRole(role)
 
 
 def fields(viewer) -> frozenset:
-    return visibility.visible_fields(role_of(viewer))
+    return visibility.visible_fields(viewer)
 
 
 def sees(viewer, field: str) -> bool:
@@ -45,16 +47,16 @@ def sees_money(viewer) -> bool:
 
 
 def reads_leads(viewer) -> bool:
-    return role_of(viewer) in (A, M, S, E)
+    return viewer_holds(viewer, "leads.view_all") or viewer_holds(viewer, "leads.view_assigned")
 
 
 def lead_contact(viewer) -> bool:
     """Customer name/email/phone on a lead (an Engineer reads technical fields only)."""
-    return role_of(viewer) in (A, M, S)
+    return viewer_holds(viewer, "leads.view_commercial")
 
 
 def reads_customer_memory(viewer) -> bool:
-    return role_of(viewer) in (A, M, S)
+    return viewer_holds(viewer, "customers.memory_query")
 
 
 def reads_payments(viewer) -> bool:
@@ -62,11 +64,11 @@ def reads_payments(viewer) -> bool:
 
 
 def reads_commissions(viewer) -> bool:
-    return role_of(viewer) in (A, C)
+    return viewer_holds(viewer, "records.commissions.read")
 
 
 def reads_service(viewer) -> bool:
-    return role_of(viewer) in (A, M, S, E, O)
+    return viewer_holds(viewer, "execution.view")
 
 
 def reads_associates(viewer) -> bool:
@@ -74,4 +76,10 @@ def reads_associates(viewer) -> bool:
 
 
 def sees_prices(viewer) -> bool:
-    return role_of(viewer) in (A, S)
+    return viewer_holds(viewer, "pricing.adjust")
+
+
+def memory_narrowed_to_assigned(viewer) -> bool:
+    """Customer memory as Sales reads it: customers with a lead that is theirs or unassigned."""
+    return viewer_holds(viewer, "leads.view_assigned") and not viewer_holds(viewer, "leads.view_all")
+

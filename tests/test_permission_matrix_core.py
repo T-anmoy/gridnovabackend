@@ -32,7 +32,9 @@ INPUT_REVIEWERS = {"admin", "engineer", "sales"}
 NOT_ENGINEER = ALL - {"engineer"}                      # engineers never see pricing or analytics
 PRICE_READERS = {"admin", "management", "sales"}       # lead readers minus engineers
 
-COVERED_ROUTERS = ("dashboard", "proposal_inputs", "equipment", "agent_governance", "proposal_document")
+COVERED_ROUTERS = ("dashboard", "proposal_inputs", "equipment", "agent_governance", "proposal_document",
+                   "access_admin")
+APPROVERS = {"admin", "accounts"}                     # staff.manage / commissions.process (BE-17 approvals)
 DOCUMENT_EDITORS = {"admin", "sales", "engineer"}      # config/proposal_document.yaml edit_permissions
 D = "/api/v1/dashboard"
 PDF = b"%PDF-1.4 matrix test"
@@ -110,6 +112,23 @@ STAFF = {
     ("GET", "/api/v1/governance/agents"): (ADMIN, {}),
     ("PATCH", "/api/v1/governance/agents/{agent_id}"): (ADMIN, {"json": {"enabled": True}}),
     ("GET", "/api/v1/governance/agents/{agent_id}/audit"): (ADMIN, {}),
+    # BE-17 access control (app/api/routes/access_admin.py). The Network Manager — not one
+    # of ROLES here — is covered in tests/test_access_control.py.
+    ("GET", f"{D}/access/matrix"): (ALL, {}),
+    ("GET", f"{D}/access/alerts"): (ALL, {}),
+    ("POST", f"{D}/staff/invitations"): (ADMIN, {"json": {"name": "Matrix", "email": "matrix-{role}@gmail.com",
+                                                         "roles": ["sales"]}}),
+    ("GET", f"{D}/staff/invitations"): (ADMIN, {}),
+    ("POST", f"{D}/staff/invitations/{{invitation_id}}/resend"): (ADMIN, {}),
+    ("DELETE", f"{D}/staff/invitations/{{invitation_id}}"): (ADMIN, {}),
+    ("PUT", f"{D}/employees/{{employee_id}}/roles"): (ADMIN, {"json": {"roles": ["sales"]}}),
+    ("PUT", f"{D}/employees/{{employee_id}}/regions"): (ADMIN, {"json": {"regions": []}}),
+    ("GET", f"{D}/employees/{{employee_id}}/handover"): (ADMIN, {}),
+    ("POST", f"{D}/employees/{{employee_id}}/reassign"): (ADMIN, {"json": {"to_employee_id": "emp-sales-1"}}),
+    ("GET", f"{D}/approvals"): (APPROVERS, {}),
+    ("POST", f"{D}/approvals/{{request_id}}/approve"): (APPROVERS, {}),
+    ("POST", f"{D}/approvals/{{request_id}}/reject"): (APPROVERS, {}),
+    ("POST", f"{D}/approvals/{{request_id}}/cancel"): (APPROVERS, {}),
 }
 
 # Not staff routes: Google redirects the browser here after consent; it is authenticated
@@ -154,7 +173,7 @@ def scenario(client, db_session, memory, fake_storage, monkeypatch):
     file_ref = uploaded_files(db_session.get(ProposalInputs, inputs_id))[0]["file_ref"]
     return {"lead_id": lead.id, "customer_id": customer.id, "proposal_id": proposal.id, "inputs_id": inputs_id,
             "equipment_id": equipment.id, "employee_id": "emp-target-1", "agent_id": "sales_agent",
-            "file_ref": file_ref}
+            "file_ref": file_ref, "invitation_id": "no-such-invitation", "request_id": "no-such-request"}
 
 
 def _fill(node, values: dict, role: str):

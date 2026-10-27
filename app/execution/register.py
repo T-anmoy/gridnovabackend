@@ -78,7 +78,7 @@ class Viewer:
 
     @property
     def is_admin(self) -> bool:
-        return self.employee is not None and self.employee.is_admin
+        return self.employee is not None and self.employee.holds("execution.admin_override")
 
 
 def _holder(db: Session, unit: InstalledUnit, viewer: Viewer) -> Optional[dict]:

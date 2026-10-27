@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func, distinct, or_
+from sqlalchemy import and_, select, func, distinct, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.notifications.deferred import notify_after_commit
@@ -28,6 +28,7 @@ from app.memory.models import (
     CustomerProfile,
     Employee,
     EmployeeRole,
+    EmployeeRoleGrant,
     Equipment,
     EquipmentCategory,
     Lead,
@@ -1874,6 +1875,8 @@ class MemoryManager:
         )
         self._db.add(emp)
         self._db.flush()
+        self._db.add(EmployeeRoleGrant(employee_id=employee_id, role=EmployeeRole(role).value, granted_by="system"))
+        self._db.flush()
         self._audit("employee", employee_id, "created", "system", after={"name": name, "role": role})
         return emp
 
@@ -2012,9 +2015,13 @@ class MemoryManager:
         date_to: Optional[datetime] = None,
         page: int = 1,
         page_size: int = 50,
+        entity_types: Optional[tuple[str, ...]] = None,
     ) -> tuple[list[AuditLog], int]:
-        """Filtered, paginated audit log for the dashboard. Returns (page, total)."""
+        """Filtered, paginated audit log for the dashboard. Returns (page, total).
+        `entity_types` limits it to those kinds of record (the associate-network view)."""
         base = select(AuditLog)
+        if entity_types is not None:
+            base = base.where(AuditLog.entity_type.in_(entity_types))
         if entity_type:
             base = base.where(AuditLog.entity_type == entity_type)
         if employee_id:
@@ -2044,36 +2051,86 @@ class MemoryManager:
             self._db.execute(select(Employee).order_by(Employee.created_at.desc())).scalars()
         )
 
+    def employee_roles(self, employee_id: str) -> list[str]:
+        """The roles a person holds (employee_roles), sorted. A row written before BE-17
+        without grants — only possible in tests that add Employee directly — holds its
+        primary role."""
+        held = sorted(self._db.execute(select(EmployeeRoleGrant.role)
+                                       .where(EmployeeRoleGrant.employee_id == employee_id)).scalars())
+        if held:
+            return held
+        emp = self._db.get(Employee, employee_id)
+        return [EmployeeRole(emp.role).value] if emp else []
+
+    def replace_employee_roles(self, employee_id: str, roles: list[str], performed_by: str,
+                               audit: bool = True) -> tuple[list[str], list[str]]:
+        """Make `roles` exactly the roles held; employees.role becomes the primary one
+        (config/access_control.yaml order). Audits role_granted / role_revoked with the
+        before and after sets. Returns (before, after). Callers check who may do this."""
+        from app.auth import access
+
+        emp = self._db.get(Employee, employee_id)
+        before = self.employee_roles(employee_id)
+        after = sorted(set(roles))
+        rows = {g.role: g for g in self._db.execute(select(EmployeeRoleGrant)
+                                                    .where(EmployeeRoleGrant.employee_id == employee_id)).scalars()}
+        for role in after:
+            if role not in rows:
+                self._db.add(EmployeeRoleGrant(employee_id=employee_id, role=role, granted_by=performed_by))
+        for role, grant in rows.items():
+            if role not in after:
+                self._db.delete(grant)
+        primary = access.primary_role(after)
+        if emp is not None and EmployeeRole(emp.role).value != primary:
+            emp.role = EmployeeRole(primary)
+        self._db.flush()
+        if audit:
+            for role in after:
+                if role not in before:
+                    self._audit("employee", employee_id, "role_granted", performed_by,
+                                before={"roles": before}, after={"roles": after, "role": role})
+            for role in before:
+                if role not in after:
+                    self._audit("employee", employee_id, "role_revoked", performed_by,
+                                before={"roles": before}, after={"roles": after, "role": role})
+        return before, after
+
     def update_employee_role(
         self, employee_id: str, role: "EmployeeRole", performed_by: str
     ) -> Optional[Employee]:
-        """Update the locally mirrored role. Clerk remains the source of truth —
-        the route syncs Clerk's public_metadata separately. Returns None if the
-        employee has never been mirrored locally yet."""
+        """Make `role` the one role this person holds (the pre-BE-17 single-role change,
+        used by POST /employees/{id}/role and the dev sign-in headers). Audited as
+        role_changed. Returns None if the employee has no row yet."""
         emp = self._db.get(Employee, employee_id)
         if not emp:
             return None
         before = {"role": emp.role}
         emp.role = role
         self._db.flush()
+        self.replace_employee_roles(employee_id, [EmployeeRole(role).value], performed_by, audit=False)
         self._audit(
             "employee", employee_id, "role_changed", performed_by,
             before=before, after={"role": role},
         )
         return emp
 
-    def count_active_admins(self, exclude_employee_id: Optional[str] = None) -> int:
-        """How many active Admins exist, optionally excluding one — the guard a
-        deactivate call uses so the system can never deactivate its way into
-        having zero admins."""
-        from app.memory.models import EmployeeRole as _Role
+    def holders_of_role(self, role: str, active_only: bool = True) -> list[Employee]:
+        """Employees holding `role` (a grant, or — for a row with no grants at all — the
+        primary role)."""
+        no_grants = ~select(EmployeeRoleGrant.employee_id).where(
+            EmployeeRoleGrant.employee_id == Employee.id).exists()
+        has_grant = select(EmployeeRoleGrant.employee_id).where(
+            EmployeeRoleGrant.employee_id == Employee.id, EmployeeRoleGrant.role == role).exists()
+        q = select(Employee).where(or_(has_grant, and_(no_grants, Employee.role == EmployeeRole(role))))
+        if active_only:
+            q = q.where(Employee.is_active.is_(True))
+        return list(self._db.execute(q.order_by(Employee.id)).scalars())
 
-        q = select(func.count(Employee.id)).where(
-            Employee.role == _Role.admin, Employee.is_active.is_(True)
-        )
-        if exclude_employee_id is not None:
-            q = q.where(Employee.id != exclude_employee_id)
-        return int(self._db.execute(q).scalar_one_or_none() or 0)
+    def count_active_admins(self, exclude_employee_id: Optional[str] = None) -> int:
+        """How many active Admins exist, optionally excluding one — the floor that
+        deactivation and role changes are checked against."""
+        return sum(1 for e in self.holders_of_role(EmployeeRole.admin.value)
+                   if exclude_employee_id is None or e.id != exclude_employee_id)
 
     def set_employee_active(
         self, employee_id: str, active: bool, performed_by: str

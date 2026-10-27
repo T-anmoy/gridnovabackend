@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.dashboard import _require_admin_or_internal_key
 from app.associates.service import AssociateError
+from app.auth import access
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.associates import service as associate_service
 from app.commissions import config, network, payouts, performance, periods, rates, serialize
@@ -47,6 +48,17 @@ def _act(db: Session, fn):
         raise _error(exc)
     db.commit()
     return result
+
+
+def _deferred(db: Session, employee: AuthenticatedEmployee, action: str, summary: str, payload: dict):
+    """Record a maker–checker request instead of acting (app/staff/approvals.py)."""
+    from fastapi.responses import JSONResponse
+
+    from app.staff import approvals
+
+    req = approvals.request(db, employee, action, summary, payload)
+    db.commit()
+    return JSONResponse(status_code=202, content=approvals.pending_response(req))
 
 
 def _reader(employee: AuthenticatedEmployee) -> None:
@@ -189,11 +201,17 @@ class ScheduleIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=2000)
 
 
-@router.post("/commission-rate-schedules", status_code=201)
+@router.post("/commission-rate-schedules", status_code=201, responses={202: {"description": "Waiting for a second approval (pending_approval)"}})
 def publish_rate_schedule(body: ScheduleIn, db: Session = Depends(get_db),
                           employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Admin: publish a new version (never an edit). Every rate key is required."""
+    """Admin: publish a new version (never an edit). Every rate key is required. With
+    second approval switched on (config/access_control.yaml) this answers 202 and the
+    schedule is published when a second Admin approves."""
     _rates_admin(employee)
+    if access.second_approval_required("commissions.standard_rate_publish"):
+        return _deferred(db, employee, "commissions.standard_rate_publish",
+                         f"Publish a commission rate schedule from {body.effective_from.isoformat()}",
+                         body.model_dump(mode="json"))
     today = periods.today_ist()
     schedule = _act(db, lambda: rates.publish(db, effective_from=body.effective_from,
                                               is_placeholder=body.is_placeholder, rates=body.rates,
@@ -356,15 +374,22 @@ def associate_commission_rate(associate_id: str, db: Session = Depends(get_db),
     return _rate_view(db, _associate(db, associate_id), periods.today_ist())
 
 
-@router.post("/associates/{associate_id}/commission-rate", response_model=SetRateResponse, status_code=201)
+@router.post("/associates/{associate_id}/commission-rate", response_model=SetRateResponse, status_code=201,
+             responses={202: {"description": "Waiting for a second approval (pending_approval)"}})
 def set_associate_commission_rate(associate_id: str, body: SetRateIn, db: Session = Depends(get_db),
                                   employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Admin: set the Associate's individual rate from effective_from (rate_percent null =
     back to the standard schedule). A reduction needs the notice period; an increase may
     take effect today. A new row every time — nothing is edited. Audited; the
-    Associate is told (home feed, email) without the reason."""
+    Associate is told (home feed, email) without the reason. With second approval on:
+    202, applied when a second Admin approves."""
     _rates_admin(employee)
     associate = _associate(db, associate_id)
+    if access.second_approval_required("commissions.individual_rate_change"):
+        return _deferred(db, employee, "commissions.individual_rate_change",
+                         f"Set {associate.associate_id}'s individual rate to {body.rate_percent or 'the standard schedule'}"
+                         f" from {body.effective_from.isoformat()}",
+                         {"associate_id": associate.associate_id, **body.model_dump(mode="json")})
     today = periods.today_ist()
     row = _act(db, lambda: rates.set_individual(db, associate, rate_percent=body.rate_percent,
                                                 effective_from=body.effective_from, reason=body.reason,
@@ -469,13 +494,18 @@ class ApproveBatchIn(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=2000)
 
 
-@router.post("/payout-batches/{batch_id}/approve")
+@router.post("/payout-batches/{batch_id}/approve", responses={202: {"description": "Waiting for a second approval (pending_approval)"}})
 def approve_payout_batch(batch_id: int, body: Optional[ApproveBatchIn] = None, db: Session = Depends(get_db),
                          employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Accounts/Admin, never the preparer (an Admin may, with a reason)."""
+    """Accounts/Admin, never the preparer (an Admin may, with a reason). With second
+    approval on: 202, approved when a second person who processes commissions agrees."""
     _processor(employee)
     _batch(db, batch_id)
-    batch = _act(db, lambda: payouts.approve(db, batch_id, employee.employee_id, is_admin=employee.is_admin,
+    if access.second_approval_required("payouts.batch_approve"):
+        return _deferred(db, employee, "payouts.batch_approve", f"Approve payout batch #{batch_id}",
+                         {"batch_id": batch_id, "reason": body.reason if body else None,
+                          "segregation_override": employee.holds("payouts.segregation_override")})
+    batch = _act(db, lambda: payouts.approve(db, batch_id, employee.employee_id, is_admin=employee.holds("payouts.segregation_override"),
                                              reason=body.reason if body else None))
     return payouts.batch_json(db, batch, with_lines=True)
 

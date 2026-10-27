@@ -27,9 +27,9 @@ from app.api.staff_schemas import (
 )
 from app.api.lead_filters import parse_lead_filters
 from app.associates import referrals
-from app.auth.clerk_client import ClerkSyncError, update_user_role
+from app.auth.clerk_client import update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
-from app.auth.scoping import lead_scope, require_lead_access
+from app.auth.scoping import lead_scope, narrowed_to_assigned, require_lead_access
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
@@ -45,6 +45,8 @@ from app.rules.project_types import family_for_project_type
 from app.scheduling import availability, booking, google_calendar
 from app.security.csv_cells import safe_cell
 from app.security.internal_key import has_valid_internal_key
+from app.staff import StaffError, approvals
+from app.staff import roles as staff_roles
 from app.notifications.notifier import notifier
 from app.orchestrator.orchestrator import orchestrator
 from app.pdf.generator import generate_and_upload_pdf
@@ -106,7 +108,7 @@ def _parse_date(value: Optional[str], field_name: str) -> Optional[datetime]:
 def _proposal_summary(p, employee: AuthenticatedEmployee) -> dict:
     """List-row projection for a proposal, with its lead/customer summary joined."""
     lead = p.lead
-    if employee.is_engineer:
+    if employee.technical_only:
         return {
             "id": p.id,
             "lead_id": p.lead_id,
@@ -192,7 +194,7 @@ def list_leads(
     memory = MemoryManager(db)
     # One visibility rule (app/auth/scoping.py): Sales sees its own and unassigned
     # leads; ?assigned=me|unassigned|any narrows it for every role.
-    if employee.is_engineer and q and not q.strip().isdigit():
+    if employee.technical_only and q and not q.strip().isdigit():
         return {"items": [], "page": page, "page_size": page_size, "total": 0}
     leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q, filters=filters,
                                          page=page, page_size=page_size)
@@ -371,7 +373,7 @@ def get_lead(
     require_lead_access(employee, lead)
 
     # Engineers see only technical fields
-    if employee.is_engineer:
+    if employee.technical_only:
         return {
             "lead_id": lead.id,
             "pipeline_stage": lead.pipeline_stage,
@@ -403,7 +405,7 @@ def get_lead(
         "messages": [
             {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
             for m in ctx["messages"]
-        ] if not employee.is_engineer else [],
+        ] if not employee.technical_only else [],
     }
 
 
@@ -590,7 +592,7 @@ def create_manual_lead(
     lead = memory.create_lead(
         customer_id=customer.id, performed_by=performed_by, project_id=project.id, source=body.source,
     )
-    if employee.is_sales:
+    if narrowed_to_assigned(employee):   # Sales owns what it enters (it could not see it otherwise)
         memory.reassign_lead(lead.id, performed_by, performed_by=performed_by)
 
     fields = {
@@ -653,7 +655,7 @@ def assign_lead(
         raise HTTPException(status_code=422, detail=f"Unknown employee: {body.employee_id!r}")
     if not target.is_active:
         raise HTTPException(status_code=422, detail="That employee is deactivated.")
-    if EmployeeRole(target.role) not in (EmployeeRole.admin, EmployeeRole.sales):
+    if not staff_roles.can_be_assigned_leads(memory, target):
         raise HTTPException(status_code=422, detail="Leads can only be assigned to Admin or Sales employees.")
     if lead.assigned_employee_id == target.id:
         raise HTTPException(status_code=409, detail="The lead is already assigned to that employee.")
@@ -1127,7 +1129,7 @@ def get_proposal_pdf(
 
     # The PDF contains pricing + customer contact — same access rules as the
     # proposal detail endpoint: Engineers are blocked; Sales is scoped to own leads.
-    if employee.is_engineer:
+    if employee.technical_only:
         raise HTTPException(status_code=403, detail="Engineers cannot access proposal PDFs.")
     require_lead_access(employee, memory.get_lead(proposal.lead_id), "This proposal is not assigned to you.")
 
@@ -1209,7 +1211,7 @@ def get_proposal_detail(
     # Sales may only open proposals on its own leads.
     require_lead_access(employee, lead, "This proposal is not assigned to you.")
 
-    if employee.is_engineer:
+    if employee.technical_only:
         return {
             "id": proposal.id,
             "lead_id": proposal.lead_id,
@@ -1280,7 +1282,7 @@ def get_proposal_detail(
 
 def _document_view(proposal, employee: AuthenticatedEmployee) -> dict:
     from app.proposals import document_service
-    return document_service.view(proposal, employee.role.value)
+    return document_service.view(proposal, employee.role_values)
 
 
 @router.get("/proposals/{proposal_id}/required-approval-tier")
@@ -1304,7 +1306,7 @@ def get_required_approval_tier(
     yet — only total_value is. Pass real figures here if you have them from
     elsewhere; omit what you don't.
     """
-    if employee.is_engineer:
+    if employee.technical_only:
         raise HTTPException(status_code=403, detail="Your role cannot view approval-tier information.")
 
     memory = memory_of(db)
@@ -1345,7 +1347,7 @@ def get_analytics(
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
     # Engineers have no analytics view.
-    if employee.is_engineer:
+    if employee.technical_only:
         raise HTTPException(status_code=403, detail="Your role cannot view analytics.")
 
     # Full analytics (any employee, or the whole org) is Admin/Management only.
@@ -1410,7 +1412,7 @@ def analytics_pipeline_trend(
     return {"weeks": memory_of(db).analytics_pipeline_trend()}
 
 
-# ── Employees (Admin only) ────────────────────────────────────────────────────
+# ── Employees (staff.manage: Admin; Network Manager within its roles) ─────────
 
 @router.get("/employees")
 def list_employees(
@@ -1419,18 +1421,21 @@ def list_employees(
 ):
     if not employee.can_manage_employees():
         raise HTTPException(status_code=403, detail="Only Admin can view employees.")
+    memory = memory_of(db)
     return [
         {
             "id": e.id,
             "name": e.name,
             "email": e.email,
             "role": e.role,
+            "roles": memory.employee_roles(e.id),
+            "regions": e.regions or [],
             "is_active": e.is_active,
             # Connection state only — the refresh token itself never leaves the database.
             "google_calendar_connected": bool(e.google_calendar_connected),
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
-        for e in memory_of(db).list_employees()
+        for e in memory.list_employees()
     ]
 
 
@@ -1439,16 +1444,14 @@ def list_assignable_employees(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    """Admin/Management: who a lead can be assigned to — active employees with the
-    role PATCH /leads/{id}/assign accepts (Admin or Sales), name-sorted. Deliberately
+    """Admin/Management: who a lead can be assigned to — active employees holding a role
+    PATCH /leads/{id}/assign accepts (leads.be_assigned: Admin or Sales), name-sorted. Deliberately
     minimal (id/name/role only): unlike GET /employees this is not an employee-
     management surface, so no email, calendar or activity data is exposed."""
     if not employee.can_assign_lead():
         raise HTTPException(status_code=403, detail="Only Admin or Management can view assignable employees.")
-    assignable = [
-        e for e in memory_of(db).list_employees()
-        if e.is_active and EmployeeRole(e.role) in (EmployeeRole.admin, EmployeeRole.sales)
-    ]
+    memory = memory_of(db)
+    assignable = [e for e in memory.list_employees() if staff_roles.can_be_assigned_leads(memory, e)]
     return [
         {"id": e.id, "name": e.name, "role": e.role}
         for e in sorted(assignable, key=lambda e: (e.name or "").lower())
@@ -1460,14 +1463,23 @@ def get_my_employee(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    """Any authenticated employee's own record. `role` is the role this request was
-    authorised with (from the Clerk token), which is what every permission check uses."""
+    """Any authenticated employee's own record: the roles and permissions this request
+    was authorised with (from the database), whether this session completed two-step
+    verification, and whether any held role needs it. `role` is the primary role."""
+    from app.auth import access
+
     me = memory_of(db).get_employee(employee.employee_id)
     if me is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {
         "id": me.id,
         "role": employee.role.value,
+        "roles": sorted(employee.role_values),
+        "permissions": sorted(employee.permissions),
+        "two_factor_ok": employee.two_factor_ok,
+        "requires_two_factor": access.requires_two_factor(employee.roles),
+        "can_assign_roles": sorted(access.assignable_roles(employee.roles)),
+        "regions": list(employee.regions),
         "is_active": me.is_active,
         "google_calendar_connected": bool(me.google_calendar_connected),
     }
@@ -1477,43 +1489,30 @@ class RoleUpdateRequest(BaseModel):
     role: EmployeeRole
 
 
-@router.post("/employees/{employee_id}/role")
+@router.post("/employees/{employee_id}/role", responses={202: {"description": "Waiting for a second approval (pending_approval)"}})
 def update_employee_role(
     employee_id: str,
     body: RoleUpdateRequest,
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
+    """Make `role` the person's one role — the pre-BE-17 form of PUT …/roles, with the
+    same rules (scope, Admin floor, second approval for Admin/Accounts → 202)."""
+    from fastapi.responses import JSONResponse
+
+    from app.api.routes.access_admin import change_roles
+
     if not employee.can_manage_employees():
         raise HTTPException(status_code=403, detail="Only Admin can change roles.")
-
-    # Clerk is the source of truth the JWT reads from — sync it first so we never
-    # leave the local mirror ahead of Clerk on a failure.
-    try:
-        synced = update_user_role(employee_id, body.role.value)
-    except ClerkSyncError:
-        raise HTTPException(status_code=502, detail="Failed to update role in Clerk. No change applied.")
-
-    updated = memory_of(db).update_employee_role(
-        employee_id=employee_id,
-        role=body.role,
-        performed_by=employee.employee_id,
-    )
-    db.commit()
-
-    if updated is None:
-        # Clerk updated (or skipped in dev) but this employee isn't mirrored locally yet.
-        return {
-            "employee_id": employee_id,
-            "role": body.role.value,
-            "clerk_synced": synced,
-            "local_mirror": False,
-        }
-
+    code, payload = change_roles(db, employee, employee_id, [body.role.value],
+                                 clerk_sync=lambda: update_user_role(employee_id, body.role.value))
+    if code != 200:
+        return JSONResponse(status_code=code, content=payload)
     return {
         "employee_id": employee_id,
         "role": body.role.value,
-        "clerk_synced": synced,
+        "roles": payload["roles"],
+        "clerk_synced": payload["clerk_synced"],
         "local_mirror": True,
     }
 
@@ -1540,16 +1539,21 @@ def deactivate_employee(
     if not target.is_active:
         return {"employee_id": employee_id, "is_active": False}
 
-    # A system must never be able to deactivate its way into having zero admins.
-    if target.role == EmployeeRole.admin and memory.count_active_admins(exclude_employee_id=employee_id) == 0:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot deactivate the last remaining active Admin.",
-        )
+    # Scope (whose roles the caller may assign), never yourself, and never below the
+    # Admin floor (config/access_control.yaml staff.min_active_admins).
+    try:
+        staff_roles.validate_deactivation(memory, employee, target)
+    except StaffError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.body())
 
     memory.set_employee_active(employee_id, active=False, performed_by=employee.employee_id)
+    withdrawn = approvals.cancel_for_leaver(db, employee_id, employee.employee_id)
     db.commit()
-    return {"employee_id": employee_id, "is_active": False}
+    # Refused from the next request on (the database decides); Clerk then bans the user,
+    # which revokes every session and blocks sign-in.
+    clerk = staff_roles.ban_in_clerk(db, employee_id, employee.employee_id)
+    return {"employee_id": employee_id, "is_active": False, **clerk,
+            "handover": staff_roles.handover(db, employee_id), "approval_requests_withdrawn": withdrawn}
 
 
 @router.patch("/employees/{employee_id}/reactivate")
@@ -1571,12 +1575,22 @@ def reactivate_employee(
     if target.is_active:
         return {"employee_id": employee_id, "is_active": True}
 
+    try:
+        staff_roles.check_scope(employee, set(memory.employee_roles(employee_id)), verb="reactivate")
+    except StaffError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.body())
     memory.set_employee_active(employee_id, active=True, performed_by=employee.employee_id)
     db.commit()
-    return {"employee_id": employee_id, "is_active": True}
+    return {"employee_id": employee_id, "is_active": True, "roles": memory.employee_roles(employee_id),
+            **staff_roles.unban_in_clerk(employee_id)}
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
+
+# The associate network's records, for audit.view_associates (BE-17).
+ASSOCIATE_AUDIT_ENTITIES = ("associate", "associate_application", "preferred_associate_application",
+                            "territory_seat", "territory_master", "customer_onboarding")
+
 
 @router.get("/audit-log")
 def get_audit_log(
@@ -1589,11 +1603,16 @@ def get_audit_log(
     db: Session = Depends(get_db),
     employee: AuthenticatedEmployee = Depends(get_current_employee),
 ):
-    # Admin full, Management read-only. Sales/Engineer blocked.
+    # Admin full, Management read-only; Network Manager the associate network's records
+    # only (audit.view_associates). Sales/Engineer blocked.
+    entity_types = None
     if not employee.can_view_audit_logs():
-        raise HTTPException(status_code=403, detail="Your role cannot view the audit log.")
+        if not employee.holds("audit.view_associates"):
+            raise HTTPException(status_code=403, detail="Your role cannot view the audit log.")
+        entity_types = ASSOCIATE_AUDIT_ENTITIES
 
     logs, total = memory_of(db).paginate_audit_logs(
+        entity_types=entity_types,
         entity_type=entity_type,
         employee_id=employee_id,
         date_from=_parse_date(date_from, "date_from"),
@@ -1671,7 +1690,7 @@ def recent_activity(
     a lead they can access; entries about no lead at all (employees, equipment,
     governance) are left out for them."""
     memory = memory_of(db)
-    exclude = _PRICING_AUDIT_ACTIONS if employee.is_engineer else None
+    exclude = _PRICING_AUDIT_ACTIONS if employee.technical_only else None
     if lead_scope(employee).everything:
         entries = memory.list_recent_activity(limit=15, exclude_actions=exclude)
     else:
@@ -1885,11 +1904,11 @@ def list_meetings(
     meeting. Engineers have no reason to see customer-identifying meeting data
     (same "nothing to access yet" restriction already applied to their lead view), and
     Operations and Accounts see no customer data at all (app/auth/scoping.py)."""
-    if employee.role not in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales):
+    if not employee.has("meetings.view"):
         raise HTTPException(status_code=403, detail="Your role cannot view meetings.")
 
     memory = memory_of(db)
-    assigned_filter = employee.employee_id if employee.is_sales else None
+    assigned_filter = None if employee.holds("meetings.view_all") else employee.employee_id
     meetings, total = memory.paginate_meetings(employee_id=assigned_filter, page=page, page_size=page_size)
 
     return {
@@ -1934,7 +1953,7 @@ def _require_admin_or_internal_key(
     if has_valid_internal_key(request):
         return
     employee = get_current_employee(request, credentials, db)
-    if not employee.is_admin:
+    if not employee.has("leads.stale_check.run"):
         raise HTTPException(status_code=403, detail="Only Admin can run the stale-lead check.")
 
 
@@ -1986,7 +2005,7 @@ def _assert_may_read_customer_memory(
     another rep — or who has no lead at all — is not. Admin and Management see
     everything, as they do elsewhere.
     """
-    if not employee.is_sales:
+    if not narrowed_to_assigned(employee):
         return
     if not memory.customer_visible_to_sales(customer_id, employee.employee_id):
         raise HTTPException(
@@ -2023,7 +2042,7 @@ def ask_customer_memory(
         question=body.question,
         performed_by=employee.employee_id,
         customer_id=body.customer_id,
-        scope_employee_id=employee.employee_id if employee.is_sales else None,
+        scope_employee_id=employee.employee_id if narrowed_to_assigned(employee) else None,
     )
 
     # A question that resolved by name still has to pass the same scoping check —

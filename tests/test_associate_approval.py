@@ -171,7 +171,11 @@ class TestApproval:
         assert body["associate"]["capability"] == "sales" and body["associate"]["level"] is None
         assert body["associate"]["clerk_invite_status"] == "skipped"  # no CLERK_SECRET_KEY in tests
         assert body["associate"]["documents"]["id_card"] and body["associate"]["documents"]["welcome_letter"]
-        assert ready.events == [("associate_approved", {
+        # BE-17: the application itself now alerts staff too (associate_application_submitted).
+        assert [e for e in ready.events if e[0] == "associate_application_submitted"] == [
+            ("associate_application_submitted", {"application_id": app_id, "application_type": "associate",
+                                                 "name": "Test Applicant 1", "state": "WEST BENGAL"})]
+        assert [e for e in ready.events if e[0] != "associate_application_submitted"] == [("associate_approved", {
             "associate_id": f"GNA-WB-{yy}-00001", "associate_type": "associate", "name": "Test Applicant 1",
             "level": None, "approved_by": "emp-admin-1"})]
 

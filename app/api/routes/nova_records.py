@@ -235,7 +235,7 @@ def get_conversation(conversation_id: str, db: Session = Depends(get_db),
     """One conversation with every turn as it was shown. Own only; Admin may read any for
     audit (that read is written to the audit log). Anything else is 404."""
     c = db.get(NovaConversation, conversation_id)
-    if c is None or (c.employee_id != employee.employee_id and not employee.is_admin):
+    if c is None or (c.employee_id != employee.employee_id and not employee.holds("records.conversations.read_any")):
         raise _fail(404, "conversation_not_found", "No such conversation.")
     if c.employee_id != employee.employee_id:
         db.add(AuditLog(entity_type="nova_conversation", entity_id=c.id, action="nova_conversation_read_for_audit",

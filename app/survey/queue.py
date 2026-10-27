@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.memory.models import (
-    Associate, Customer, CustomerOnboarding, EmployeeRole, Lead, OnboardingStatus, Project, ProposalInputs,
+    Associate, Customer, CustomerOnboarding, Lead, OnboardingStatus, Project, ProposalInputs,
 )
 from app.survey import config, status
 
@@ -69,13 +69,13 @@ def _row(onboarding: CustomerOnboarding, inputs: ProposalInputs, now: datetime) 
 def rows(db: Session, employee=None, now: Optional[datetime] = None) -> list[dict]:
     """Every survey in the queue the caller may see (all of them when `employee` is
     None — the alert job), newest wait first."""
-    from app.auth.scoping import lead_scope
+    from app.auth.scoping import lead_scope, narrowed_to_assigned
 
     now = now or datetime.now(timezone.utc)
     q = (select(CustomerOnboarding, ProposalInputs)
          .join(ProposalInputs, ProposalInputs.id == CustomerOnboarding.proposal_inputs_id)
          .where(CustomerOnboarding.status.in_((OnboardingStatus.submitted, OnboardingStatus.verified))))
-    if employee is not None and employee.role == EmployeeRole.sales:
+    if employee is not None and narrowed_to_assigned(employee):
         q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     out = []
     for onboarding, inputs in db.execute(q).all():

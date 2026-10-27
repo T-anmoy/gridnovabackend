@@ -18,9 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.associates.service import AssociateError
+from app.auth import access
 from app.handover import config, pack as pack_module, warranty as warranty_register
 from app.memory.models import (
-    AuditLog, Customer, CustomerOnboarding, Employee, EmployeeRole, Project, ServiceRequest, ServiceRequestCategory,
+    AuditLog, Customer, CustomerOnboarding, Employee, Project, ServiceRequest, ServiceRequestCategory,
     ServiceRequestEvent, ServiceRequestStatus,
 )
 
@@ -33,7 +34,9 @@ TRANSITIONS = {
 VIAS = ("staff", "associate", "customer")
 MAX_DESCRIPTION = 2000
 MAX_NOTE = 2000
-ASSIGNEE_ROLES = (EmployeeRole.admin, EmployeeRole.operations, EmployeeRole.engineer)
+# Who a service request can be assigned to: active holders of service_requests.handle
+# (Admin, Operations, Engineer — config/access_control.yaml).
+ASSIGNEE_PERMISSION = "service_requests.handle"
 
 
 def _now() -> datetime:
@@ -161,7 +164,10 @@ def assign(db: Session, req: ServiceRequest, assignee_id: Optional[str], actor: 
         raise AssociateError("This request is closed.", code="request_closed", status_code=409)
     if assignee_id is not None:
         employee = db.get(Employee, assignee_id)
-        if employee is None or not employee.is_active or employee.role not in ASSIGNEE_ROLES:
+        from app.memory.memory_manager import MemoryManager
+
+        if employee is None or not employee.is_active or ASSIGNEE_PERMISSION not in access.permissions_for(
+                MemoryManager(db).employee_roles(employee.id)):
             raise AssociateError("Choose an Admin, Operations or Engineer employee.", code="invalid_assignee",
                                  status_code=422, field="assignee_id")
     before = req.assignee_id

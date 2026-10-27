@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import settings
-from app.memory.models import EmployeeRole
 from app.scheduling import google_calendar
 
 if TYPE_CHECKING:
@@ -22,8 +21,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Only these roles receive customer bookings.
-ELIGIBLE_ROLES = [EmployeeRole.sales, EmployeeRole.admin]
+# Customer bookings go to active employees holding `meetings.host` (Admin, Sales —
+# config/access_control.yaml).
+BOOKING_PERMISSION = "meetings.host"
 
 
 class NoConnectedCalendarsError(RuntimeError):
@@ -39,7 +39,10 @@ def _decrypt_token(encrypted: str) -> str:
 def _connected_calendars(memory: "MemoryManager") -> list[tuple[str, str, str]]:
     """Return (employee_id, refresh_token_plaintext, calendar_id) for eligible,
     calendar-connected employees. Raises NoConnectedCalendarsError if there are none."""
-    employees = memory.list_calendar_connected_employees(roles=ELIGIBLE_ROLES)
+    from app.auth import access
+
+    employees = [e for e in memory.list_calendar_connected_employees()
+                 if e.is_active and BOOKING_PERMISSION in access.permissions_for(memory.employee_roles(e.id))]
     connected = [e for e in employees if e.google_refresh_token]
     if not connected:
         raise NoConnectedCalendarsError(

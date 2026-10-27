@@ -17,10 +17,10 @@ from app.api.routes.dashboard import _require_admin_or_internal_key
 from app.api.routes.onboarding_admin import _error, _load
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
-from app.auth.scoping import lead_scope, require_lead_access
+from app.auth.scoping import lead_scope, narrowed_to_assigned, require_lead_access
 from app.memory.db import get_db
 from app.memory.models import (
-    CustomerOnboarding, EmployeeRole, FeasibilityOutcome, Lead, Proposal, ProposalInputs, SurveyCorrectionRequest,
+    CustomerOnboarding, FeasibilityOutcome, Lead, Proposal, ProposalInputs, SurveyCorrectionRequest,
     SurveyCorrectionStatus,
 )
 from app.survey import results, status
@@ -51,7 +51,7 @@ def get_survey_results(onboarding_id: int, db: Session = Depends(get_db),
                        employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require_reader(employee)
     onboarding = _load(db, employee, onboarding_id)
-    return results.compute(db, onboarding, include_prices=not employee.is_engineer)
+    return results.compute(db, onboarding, include_prices=employee.holds("surveys.view_prices"))
 
 
 # ── Step 5: the Engineer's feasibility review ────────────────────────────────────
@@ -152,7 +152,7 @@ def correction_queue(status_filter: Optional[SurveyCorrectionStatus] = Query(def
     _require_reader(employee)
     q = (select(SurveyCorrectionRequest, CustomerOnboarding)
          .join(CustomerOnboarding, CustomerOnboarding.id == SurveyCorrectionRequest.onboarding_id))
-    if employee.role == EmployeeRole.sales:
+    if narrowed_to_assigned(employee):
         q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     if status_filter is not None:
         q = q.where(SurveyCorrectionRequest.status == status_filter)

@@ -2735,6 +2735,24 @@
         "title": "CustomerType",
         "type": "string"
       },
+      "DecisionIn": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "DecisionIn",
+        "type": "object"
+      },
       "DiscomConsumerCategory": {
         "description": "The DISCOM's own tariff-category classification — distinct from\nCustomerType above (which is about who the customer entity is: an\nindividual or an organisation), not about how the electricity connection\nitself is billed.",
         "enum": [
@@ -3390,7 +3408,8 @@
           "management",
           "engineer",
           "operations",
-          "accounts"
+          "accounts",
+          "network_manager"
         ],
         "title": "EmployeeRole",
         "type": "string"
@@ -4358,6 +4377,38 @@
         ],
         "title": "InverterLocation",
         "type": "string"
+      },
+      "InvitationIn": {
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeRole"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "roles"
+        ],
+        "title": "InvitationIn",
+        "type": "object"
       },
       "LeadAssignRequest": {
         "properties": {
@@ -8523,6 +8574,21 @@
         "title": "RateNotice",
         "type": "object"
       },
+      "ReassignIn": {
+        "properties": {
+          "to_employee_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "To Employee Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to_employee_id"
+        ],
+        "title": "ReassignIn",
+        "type": "object"
+      },
       "RecordExecutionStageRequest": {
         "properties": {
           "admin_override_reason": {
@@ -8759,6 +8825,20 @@
         "title": "ReflectResponse",
         "type": "object"
       },
+      "RegionsIn": {
+        "properties": {
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 40,
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "title": "RegionsIn",
+        "type": "object"
+      },
       "ResolveFlagRequest": {
         "properties": {
           "note": {
@@ -8949,6 +9029,24 @@
           "role"
         ],
         "title": "RoleUpdateRequest",
+        "type": "object"
+      },
+      "RolesIn": {
+        "properties": {
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeRole"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "title": "RolesIn",
         "type": "object"
       },
       "RoofMaterial": {
@@ -14000,6 +14098,50 @@
         "summary": "Chat Message"
       }
     },
+    "/api/v1/dashboard/access/alerts": {
+      "get": {
+        "description": "Which roles receive each staff alert, and whether each currently reaches anyone.\nAny staff member. Fixed shared addresses are counted, never listed.",
+        "operationId": "access_alerts_api_v1_dashboard_access_alerts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Access Alerts"
+      }
+    },
+    "/api/v1/dashboard/access/matrix": {
+      "get": {
+        "description": "Every role × permission with labels and descriptions (config/access_control.yaml)\n— the \"Who can do what\" page. Any staff member.",
+        "operationId": "access_matrix_api_v1_dashboard_access_matrix_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Access Matrix"
+      }
+    },
     "/api/v1/dashboard/activity/recent": {
       "get": {
         "description": "Last 15 audit entries as a human-readable feed (all roles). Engineers do not\nsee pricing-related entries, matching the dashboard's pricing-visibility rule.\nAnyone who does not see every lead (Sales) only sees entries that trace back to\na lead they can access; entries about no lead at all (employees, equipment,\ngovernance) are left out for them.",
@@ -14185,6 +14327,219 @@
           }
         ],
         "summary": "Analytics Rep Performance"
+      }
+    },
+    "/api/v1/dashboard/approvals": {
+      "get": {
+        "description": "Requests you asked for or could decide.",
+        "operationId": "list_approvals_api_v1_dashboard_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|approved|rejected|cancelled|expired)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Approvals"
+      }
+    },
+    "/api/v1/dashboard/approvals/{request_id}/approve": {
+      "post": {
+        "description": "Apply the change, re-checked with your permissions. You cannot approve your own.",
+        "operationId": "approve_request_api_v1_dashboard_approvals__request_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DecisionIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Request"
+      }
+    },
+    "/api/v1/dashboard/approvals/{request_id}/cancel": {
+      "post": {
+        "description": "Withdraw your own pending request.",
+        "operationId": "cancel_request_api_v1_dashboard_approvals__request_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Request"
+      }
+    },
+    "/api/v1/dashboard/approvals/{request_id}/reject": {
+      "post": {
+        "operationId": "reject_request_api_v1_dashboard_approvals__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DecisionIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Request"
       }
     },
     "/api/v1/dashboard/archive/imports": {
@@ -15373,7 +15728,7 @@
         "summary": "Associate Commission Rate"
       },
       "post": {
-        "description": "Admin: set the Associate's individual rate from effective_from (rate_percent null =\nback to the standard schedule). A reduction needs the notice period; an increase may\ntake effect today. A new row every time — nothing is edited. Audited; the\nAssociate is told (home feed, email) without the reason.",
+        "description": "Admin: set the Associate's individual rate from effective_from (rate_percent null =\nback to the standard schedule). A reduction needs the notice period; an increase may\ntake effect today. A new row every time — nothing is edited. Audited; the\nAssociate is told (home feed, email) without the reason. With second approval on:\n202, applied when a second Admin approves.",
         "operationId": "set_associate_commission_rate_api_v1_dashboard_associates__associate_id__commission_rate_post",
         "parameters": [
           {
@@ -15406,6 +15761,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
           },
           "422": {
             "content": {
@@ -16043,7 +16401,7 @@
         "summary": "List Rate Schedules"
       },
       "post": {
-        "description": "Admin: publish a new version (never an edit). Every rate key is required.",
+        "description": "Admin: publish a new version (never an edit). Every rate key is required. With\nsecond approval switched on (config/access_control.yaml) this answers 202 and the\nschedule is published when a second Admin approves.",
         "operationId": "publish_rate_schedule_api_v1_dashboard_commission_rate_schedules_post",
         "requestBody": {
           "content": {
@@ -16063,6 +16421,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
           },
           "422": {
             "content": {
@@ -16548,7 +16909,7 @@
     },
     "/api/v1/dashboard/employees/assignable": {
       "get": {
-        "description": "Admin/Management: who a lead can be assigned to — active employees with the\nrole PATCH /leads/{id}/assign accepts (Admin or Sales), name-sorted. Deliberately\nminimal (id/name/role only): unlike GET /employees this is not an employee-\nmanagement surface, so no email, calendar or activity data is exposed.",
+        "description": "Admin/Management: who a lead can be assigned to — active employees holding a role\nPATCH /leads/{id}/assign accepts (leads.be_assigned: Admin or Sales), name-sorted. Deliberately\nminimal (id/name/role only): unlike GET /employees this is not an employee-\nmanagement surface, so no email, calendar or activity data is exposed.",
         "operationId": "list_assignable_employees_api_v1_dashboard_employees_assignable_get",
         "responses": {
           "200": {
@@ -16570,7 +16931,7 @@
     },
     "/api/v1/dashboard/employees/me": {
       "get": {
-        "description": "Any authenticated employee's own record. `role` is the role this request was\nauthorised with (from the Clerk token), which is what every permission check uses.",
+        "description": "Any authenticated employee's own record: the roles and permissions this request\nwas authorised with (from the database), whether this session completed two-step\nverification, and whether any held role needs it. `role` is the primary role.",
         "operationId": "get_my_employee_api_v1_dashboard_employees_me_get",
         "responses": {
           "200": {
@@ -16732,6 +17093,49 @@
         "summary": "Deactivate Employee"
       }
     },
+    "/api/v1/dashboard/employees/{employee_id}/handover": {
+      "get": {
+        "description": "What this person leaves behind: open leads, open proposals they drafted, pending\ninvitations they sent.",
+        "operationId": "employee_handover_api_v1_dashboard_employees__employee_id__handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Employee Handover"
+      }
+    },
     "/api/v1/dashboard/employees/{employee_id}/reactivate": {
       "patch": {
         "description": "Reactivate a previously deactivated employee. Audit-logged like every\nother change to an employee's standing.",
@@ -16775,8 +17179,115 @@
         "summary": "Reactivate Employee"
       }
     },
+    "/api/v1/dashboard/employees/{employee_id}/reassign": {
+      "post": {
+        "description": "Move every open lead of this person to another employee who takes leads. Needs\nstaff management and lead assignment.",
+        "operationId": "reassign_leads_api_v1_dashboard_employees__employee_id__reassign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reassign Leads"
+      }
+    },
+    "/api/v1/dashboard/employees/{employee_id}/regions": {
+      "put": {
+        "description": "The states a person works in (TerritoryState names); empty = every region. Applied\nto Network Manager associate lists (app/auth/scoping.py).",
+        "operationId": "set_employee_regions_api_v1_dashboard_employees__employee_id__regions_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Employee Regions"
+      }
+    },
     "/api/v1/dashboard/employees/{employee_id}/role": {
       "post": {
+        "description": "Make `role` the person's one role — the pre-BE-17 form of PUT …/roles, with the\nsame rules (scope, Admin floor, second approval for Admin/Accounts → 202).",
         "operationId": "update_employee_role_api_v1_dashboard_employees__employee_id__role_post",
         "parameters": [
           {
@@ -16808,6 +17319,9 @@
             },
             "description": "Successful Response"
           },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -16825,6 +17339,62 @@
           }
         ],
         "summary": "Update Employee Role"
+      }
+    },
+    "/api/v1/dashboard/employees/{employee_id}/roles": {
+      "put": {
+        "description": "Replace a person's roles. Only roles you may assign, on people whose roles you may\nassign; never your own Admin role; never below the Admin floor. Granting or removing\nAdmin or Accounts waits for a second Admin (202). Takes effect on their next request.",
+        "operationId": "set_employee_roles_api_v1_dashboard_employees__employee_id__roles_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Employee Roles"
       }
     },
     "/api/v1/dashboard/execution": {
@@ -21948,7 +22518,7 @@
     },
     "/api/v1/dashboard/payout-batches/{batch_id}/approve": {
       "post": {
-        "description": "Accounts/Admin, never the preparer (an Admin may, with a reason).",
+        "description": "Accounts/Admin, never the preparer (an Admin may, with a reason). With second\napproval on: 202, approved when a second person who processes commissions agrees.",
         "operationId": "approve_payout_batch_api_v1_dashboard_payout_batches__batch_id__approve_post",
         "parameters": [
           {
@@ -21986,6 +22556,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
           },
           "422": {
             "content": {
@@ -23454,6 +24027,183 @@
           }
         ],
         "summary": "Set Service Request Status"
+      }
+    },
+    "/api/v1/dashboard/staff/invitations": {
+      "get": {
+        "operationId": "list_invitations_api_v1_dashboard_staff_invitations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|accepted|revoked|expired)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Invitations"
+      },
+      "post": {
+        "description": "Invite a person with the given roles (each one you may assign). An invitation\ngranting Admin or Accounts waits for a second Admin (202 pending_approval).",
+        "operationId": "create_invitation_api_v1_dashboard_staff_invitations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "description": "Waiting for a second approval (pending_approval)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Invitation"
+      }
+    },
+    "/api/v1/dashboard/staff/invitations/{invitation_id}": {
+      "delete": {
+        "operationId": "revoke_invitation_api_v1_dashboard_staff_invitations__invitation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Invitation"
+      }
+    },
+    "/api/v1/dashboard/staff/invitations/{invitation_id}/resend": {
+      "post": {
+        "operationId": "resend_invitation_api_v1_dashboard_staff_invitations__invitation_id__resend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resend Invitation"
       }
     },
     "/api/v1/dashboard/survey-corrections": {

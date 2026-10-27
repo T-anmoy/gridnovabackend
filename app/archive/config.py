@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 _PATH = Path(__file__).resolve().parents[2] / "config" / "archive.yaml"
+# A role not listed in config/archive.yaml (the Network Manager, BE-17) sees no field.
 ROLES = ("admin", "management", "accounts", "operations", "engineer", "sales")
 
 
@@ -58,9 +59,12 @@ def field_groups() -> dict[str, str]:
 
 
 def groups_for(role) -> frozenset:
-    """The groups a role may see. An unknown role sees nothing."""
-    key = getattr(role, "value", role)
-    return frozenset(load()["visibility"]["roles"].get(key, ()))
+    """The groups a role — or a viewer holding several roles (their union) — may see.
+    An unknown role sees nothing."""
+    from app.auth.access import viewer_roles
+
+    roles = load()["visibility"]["roles"]
+    return frozenset(g for key in viewer_roles(role) for g in roles.get(key, ()))
 
 
 def visible_fields(role) -> frozenset:

@@ -38,19 +38,16 @@ class DeactivatedEmployeeError(Exception):
     """Raised when a deactivated employee's credentials are otherwise valid."""
 
 
-def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name: str = "", email: str = "") -> None:
-    """Get-or-create the local Employee mirror row for an authenticated identity.
-
-    Called on every successful authentication (dev-header or real JWT) so the
-    `employees` table actually reflects who has signed in — previously nothing
-    ever wrote to it, which silently broke Sales-role lead/proposal scoping and
-    the Google Calendar connection flow for any employee who hadn't been
-    manually pre-seeded. Committed immediately so it survives independent of
-    whatever the route handler does with its own session afterward.
+def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name: str = "", email: str = "",
+                        roles=None) -> list[str]:
+    """Dev/test headers only: get-or-create the Employee row and make its roles the ones
+    the headers name (X-Employee-Role, or X-Employee-Roles for several), so a test can
+    sign in as any role. Returns the roles held. The JWT path never does this — there the
+    database decides (get_current_employee).
 
     Raises DeactivatedEmployeeError for an existing employee whose access has
     been switched off — a deactivated employee must not be re-activated by the
-    mere act of presenting a still-valid Clerk session.
+    mere act of presenting credentials.
     """
     from app.memory.memory_manager import MemoryManager
 
@@ -66,12 +63,13 @@ def _provision_employee(db: Session, employee_id: str, role: EmployeeRole, name:
         # deactivated employee's row, and never reactivates it.
         db.commit()
         raise DeactivatedEmployeeError(employee_id)
-    # The token's role is authoritative (Clerk metadata). Keep the local mirror in
-    # step so checks that read the stored role — e.g. lead assignment targets —
-    # never act on a role changed in Clerk since this employee's first sign-in.
+    wanted = sorted({r.value for r in (roles or [role])})
     if EmployeeRole(emp.role) != role:
         memory.update_employee_role(employee_id=employee_id, role=role, performed_by="auth_sync")
+    if sorted(memory.employee_roles(employee_id)) != wanted:
+        memory.replace_employee_roles(employee_id, wanted, performed_by="auth_sync", audit=False)
     db.commit()
+    return wanted
 
 
 # One JWKS client per process (per issuer), so its key-set cache actually serves
@@ -153,34 +151,97 @@ def _missing_claims() -> HTTPException:
 _DEV_HEADERS_REFUSED = "Dev auth headers are only accepted in development and test."
 
 
+TWO_FACTOR_REQUIRED = {
+    "code": "two_factor_required",
+    "message": "This action needs two-step verification. Turn it on in your account settings, then sign in again.",
+}
+
+
 class AuthenticatedEmployee:
-    def __init__(self, employee_id: str, role: EmployeeRole, email: str = "", name: str = ""):
+    """The signed-in staff member and what they may do.
+
+    `roles` are the roles held (from employee_roles — the database decides, not the
+    token); `permissions` their union (config/access_control.yaml). `role` is the
+    primary role, kept for responses and code that only needs one.
+
+    Every `can_*` gate is `has(<permission>)`. has() raises 403 two_factor_required
+    when the permission is sensitive, every held role granting it requires two-step
+    verification and this session did not complete a second factor; holds() is the
+    same test as a plain yes/no, for narrowing a view rather than guarding an action.
+    """
+
+    def __init__(self, employee_id: str, role: EmployeeRole, email: str = "", name: str = "",
+                 roles=None, two_factor_ok: bool = True, regions=None):
+        from app.auth import access
+
         self.employee_id = employee_id
         self.role = role
         self.email = email
         self.name = name
+        self.roles = frozenset(EmployeeRole(r) for r in (roles or (role,)))
+        self.permissions = access.permissions_for(self.roles)
+        self.two_factor_ok = two_factor_ok
+        self.regions = tuple(regions or ())
+
+    @property
+    def role_values(self) -> frozenset:
+        return frozenset(r.value for r in self.roles)
+
+    def _blocked_by_two_factor(self, permission: str) -> bool:
+        from app.auth import access
+
+        return not self.two_factor_ok and access.needs_two_factor(self.roles, permission)
+
+    def holds(self, permission: str) -> bool:
+        from app.auth import access
+
+        if permission not in access.load().permissions:
+            raise KeyError(f"Unknown permission {permission!r}")
+        return permission in self.permissions and not self._blocked_by_two_factor(permission)
+
+    def has(self, permission: str) -> bool:
+        if self.holds(permission):
+            return True
+        if permission in self.permissions:  # held, but this session lacks the second factor
+            raise HTTPException(status_code=403, detail=TWO_FACTOR_REQUIRED)
+        return False
+
+    # ── Identity and view narrowing ──
 
     @property
     def is_admin(self) -> bool:
-        return self.role == EmployeeRole.admin
+        """Holds the Admin role — an identity check (e.g. the Admin floor), never a gate."""
+        return EmployeeRole.admin in self.roles
 
     @property
     def is_sales(self) -> bool:
-        return self.role == EmployeeRole.sales
+        return EmployeeRole.sales in self.roles
 
     @property
     def is_management(self) -> bool:
-        return self.role == EmployeeRole.management
+        return EmployeeRole.management in self.roles
 
     @property
     def is_engineer(self) -> bool:
-        return self.role == EmployeeRole.engineer
+        return EmployeeRole.engineer in self.roles
+
+    @property
+    def sees_all_leads(self) -> bool:
+        return self.holds("leads.view_all")
+
+    @property
+    def technical_only(self) -> bool:
+        """The Engineer view: technical fields only — no customer contact details, prices
+        or commercial history. False as soon as any held role sees commercial fields."""
+        return self.holds("leads.view_technical") and not self.holds("leads.view_commercial")
+
+    # ── Gates (one permission each; config/access_control.yaml) ──
 
     def can_approve_standard(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("proposals.approve_standard")
 
     def can_approve_manager_signoff(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+        return self.has("proposals.manager_signoff")
 
     def can_approve_partner_signoff(self) -> bool:
         """The 3rd, highest approval tier (app/rules/approval_engine.py). There
@@ -189,167 +250,170 @@ class AuthenticatedEmployee:
         the same way can_manage_employees() does. If a real Partner-vs-Admin
         distinction is ever wanted, that's a role-model change, not a
         permission-check change."""
-        return self.role == EmployeeRole.admin
+        return self.has("proposals.partner_signoff")
 
     def can_edit_lead(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("leads.edit")
 
     def can_change_lead_stage(self) -> bool:
         """Opportunity-tracker moves. Sales is further limited to its own or
         unassigned leads by the route, as everywhere else on the Sales surface."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+        return self.has("leads.change_stage")
 
     def can_create_lead(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+        return self.has("leads.create")
 
     def can_assign_lead(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+        return self.has("leads.assign")
 
     def can_trigger_proposal_draft(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("proposals.draft")
 
     def can_send_proposal(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("proposals.send")
 
     def can_view_audit_logs(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+        return self.has("audit.view")
 
     def can_manage_employees(self) -> bool:
-        return self.role == EmployeeRole.admin
+        return self.has("staff.manage")
 
     def can_view_full_analytics(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+        return self.has("analytics.view_full")
 
     def can_schedule_meeting(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("meetings.schedule")
 
     def can_adjust_pricing(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("pricing.adjust")
 
     def can_query_customer_memory(self) -> bool:
         """Engineers are deliberately excluded: customer memory is full of PII and
         commercial context, and the Engineer surface elsewhere is limited to
         technical fields for exactly that reason."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.management)
+        return self.has("customers.memory_query")
 
     def can_manage_proposal_inputs(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("proposal_inputs.manage")
 
     def can_review_proposal_inputs(self) -> bool:
         """Reviewing a site assessment: Admin and Sales, and Engineer (technical
         review). Creating, uploading to and drafting from it stay Admin/Sales."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales, EmployeeRole.engineer)
+        return self.has("proposal_inputs.review")
 
     def can_record_project_stage(self) -> bool:
         """Hand-recorded progress stages (offline acceptance, PM Surya Ghar portal approval)."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("projects.record_stage")
 
     def can_review_associate_applications(self) -> bool:
         """Review, approve and reject Associate / Preferred Associate applications,
         and suspend, reinstate or deactivate associates."""
-        return self.role == EmployeeRole.admin
+        return self.has("associates.applications.review")
 
     def can_view_onboardings(self) -> bool:
         """Associate-sourced customers. Sales is further limited to its own or
         unassigned leads, as everywhere else on the Sales surface."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales)
+        return self.has("onboardings.view")
 
     def can_view_surveys(self) -> bool:
         """The on-site survey of an associate-sourced customer (S1). Engineers read it
         (they review it) but never the indicative prices in its results. Sales is
         limited to its own or unassigned leads."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales, EmployeeRole.engineer)
+        return self.has("surveys.view")
 
     def can_review_surveys(self) -> bool:
         """The feasibility review of a site survey, applying or rejecting survey
         corrections, and generating the survey report (S1 Steps 5–7)."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.engineer)
+        return self.has("surveys.review")
 
     def can_clear_reverification(self) -> bool:
         """Clear a proposal flagged for re-verification after a survey change."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.engineer)
+        return self.has("proposals.clear_reverification")
 
     def can_verify_onboarding(self) -> bool:
         """The staff verification call on an associate-sourced customer."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.sales)
+        return self.has("onboardings.verify")
 
     def can_resolve_attribution(self) -> bool:
-        return self.role == EmployeeRole.admin
+        return self.has("associates.attribution.resolve")
 
     def can_manage_territories(self) -> bool:
-        return self.role == EmployeeRole.admin
+        return self.has("territories.manage")
 
     def can_manage_seats(self) -> bool:
-        return self.role == EmployeeRole.admin
-
-    # ── Payments (Phase 4A) — see app/auth/scoping.py require_payment_access ──
+        return self.has("associates.seats.manage")
 
     def can_view_payments(self) -> bool:
         """Payment amounts and the ledger. Sales only for its own or unassigned
         leads (it records payments there too). Operations and Engineer: never."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.accounts,
-                             EmployeeRole.sales)
+        return self.has("payments.view")
 
     def can_record_payment(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.accounts, EmployeeRole.sales)
+        return self.has("payments.record")
 
     def can_process_payments(self) -> bool:
         """Deposit, verify, dishonour, cancel any payment; edit schedules; receipts;
         exports. Management reads but does not act."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.accounts)
-
-    # ── Commissions, TDS and payouts (BE-4) — app/api/routes/commissions_admin.py ──
+        return self.has("payments.process")
 
     def can_view_commissions(self) -> bool:
         """Commission entries, rate schedules, payout batches and queries. Management
         reads; Sales, Engineer and Operations: never."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.accounts)
+        return self.has("commissions.view")
 
     def can_process_commissions(self) -> bool:
         """Approve entries; prepare, approve and mark paid payout batches; answer
         queries; the commission and TDS exports."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.accounts)
+        return self.has("commissions.process")
 
     def can_manage_commission_rates(self) -> bool:
         """Publish a rate schedule, re-rate pending entries, reverse an entry (4.7)."""
-        return self.role == EmployeeRole.admin
+        return self.has("commissions.rates.manage")
 
     def can_view_individual_rates(self) -> bool:
         """BE-12: an Associate's individual rate, its history (with the internal reason)
         and their performance summary. Admin sets; Management reads; Accounts reads
         the rates on the ledger entries only."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
+        return self.has("commissions.individual_rates.view")
 
     def can_export_payout_bank_file(self) -> bool:
         """The payout bank file carries full account numbers: Accounts only."""
-        return self.role == EmployeeRole.accounts
+        return self.has("payouts.bank_file.export")
 
     def can_view_network_summary(self) -> bool:
-        return self.role in (EmployeeRole.admin, EmployeeRole.management)
-
-    # ── Execution (Phase 4A) — see app/auth/scoping.py require_execution_access ──
+        return self.has("associates.network_summary.view")
 
     def can_view_execution(self) -> bool:
         """Execution status, submissions, photos and the serial register. Sales is
         limited to its own or unassigned leads; Operations to projects at or after
         agreement_signed; Engineer reads the technical record. Accounts: none."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.management, EmployeeRole.sales,
-                             EmployeeRole.engineer, EmployeeRole.operations)
+        return self.has("execution.view")
 
     def can_verify_execution(self) -> bool:
         """Verify or reject an associate's stage submission; verify the serial register."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.operations)
+        return self.has("execution.verify")
 
     def can_record_execution(self) -> bool:
         """Record a stage directly (grid_nova mode) and upload execution evidence. Also
         acts on the handover pack (ticks, customer link) — BE-5."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.operations)
+        return self.has("execution.record")
 
     def can_handle_service_requests(self) -> bool:
         """Raise on a customer's behalf, assign, add notes and change the status of a
         warranty / O&M service request (BE-5). Management and Sales read (scoped as
         execution is); Accounts: none."""
-        return self.role in (EmployeeRole.admin, EmployeeRole.operations, EmployeeRole.engineer)
+        return self.has("service_requests.handle")
+
+
+def _second_factor_ok(payload: dict) -> bool:
+    """Clerk's `fva` claim: [minutes since first factor, minutes since second factor];
+    -1 for the second means no second factor in this session."""
+    fva = payload.get("fva")
+    return (isinstance(fva, list) and len(fva) == 2 and isinstance(fva[1], int)
+            and not isinstance(fva[1], bool) and fva[1] >= 0)
+
+
+_DEACTIVATED = "This account has been deactivated."
 
 
 def get_current_employee(
@@ -365,13 +429,19 @@ def get_current_employee(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_DEV_HEADERS_REFUSED)
         try:
             role = EmployeeRole(dev_role)
+            extra = [EmployeeRole(r.strip()) for r in (request.headers.get("X-Employee-Roles") or "").split(",")
+                     if r.strip()]
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Unknown role: {dev_role}")
+        roles = sorted({role, *extra}, key=lambda r: r.value)
         try:
-            _provision_employee(db, dev_id, role)
+            held = _provision_employee(db, dev_id, role, roles=roles)
         except DeactivatedEmployeeError:
-            raise HTTPException(status_code=403, detail="This account has been deactivated.")
-        return AuthenticatedEmployee(employee_id=dev_id, role=role)
+            raise HTTPException(status_code=403, detail=_DEACTIVATED)
+        from app.memory.memory_manager import MemoryManager
+        regions = MemoryManager(db).get_employee(dev_id).regions
+        return AuthenticatedEmployee(employee_id=dev_id, role=role, roles=held, regions=regions,
+                                     two_factor_ok=request.headers.get("X-Employee-Two-Factor", "").lower() != "off")
 
     # ── JWT verification ───────────────────────────────────────────────────────
     if not credentials:
@@ -402,25 +472,28 @@ def get_current_employee(
     principal = metadata.get("principal")
     if principal not in (None, "", STAFF_PRINCIPAL):
         raise HTTPException(status_code=403, detail="This account cannot access staff endpoints.")
-    role_str = metadata.get("role", "")
 
-    try:
-        role = EmployeeRole(role_str)
-    except ValueError:
-        raise HTTPException(status_code=403, detail=f"Unknown employee role: {role_str!r}")
+    # The token proves who this is; the database decides what they may do. Roles in the
+    # token's metadata are only a copy for the frontend and are never read here — except
+    # by the bootstrap path for a first Admin (app/staff/invitations.py).
+    from app.memory.memory_manager import MemoryManager
+    from app.staff import invitations
 
-    email = payload.get("email", "")
-    name = payload.get("name", "")
-    try:
-        _provision_employee(db, employee_id, role, name=name, email=email)
-    except DeactivatedEmployeeError:
-        raise HTTPException(status_code=403, detail="This account has been deactivated.")
-
+    memory = MemoryManager(db)
+    emp = memory.get_employee(employee_id)
+    if emp is None:
+        emp = invitations.first_sign_in(db, employee_id, payload, metadata)
+    if not emp.is_active:
+        raise HTTPException(status_code=403, detail=_DEACTIVATED)
+    roles = memory.employee_roles(employee_id)
     return AuthenticatedEmployee(
         employee_id=employee_id,
-        role=role,
-        email=email,
-        name=name,
+        role=EmployeeRole(emp.role),
+        roles=roles,
+        email=payload.get("email", "") or emp.email,
+        name=payload.get("name", "") or emp.name,
+        two_factor_ok=_second_factor_ok(payload),
+        regions=emp.regions,
     )
 
 

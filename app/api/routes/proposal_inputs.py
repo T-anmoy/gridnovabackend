@@ -191,7 +191,7 @@ _ENGINEER_HIDDEN_FIELDS = ("gst_number", "internal_notes")
 
 def _serialize_for(inputs, employee: AuthenticatedEmployee) -> dict:
     data = _serialize(inputs)
-    if employee.is_engineer:
+    if employee.technical_only:
         for field in _ENGINEER_HIDDEN_FIELDS:
             data.pop(field, None)
     return data

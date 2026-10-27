@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/v1/governance")
 
 
 def _require_admin(employee: AuthenticatedEmployee) -> None:
-    if not employee.is_admin:
+    if not employee.has("governance.manage"):
         raise HTTPException(status_code=403, detail="Only Admin can manage agent governance.")
 
 

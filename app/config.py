@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     # Where Clerk sends an invited associate after they accept their invitation (the
     # associate portal's sign-up page). Blank = Clerk's own default for the instance.
     associate_invite_redirect_url: str = ""
+    # Where a staff invitation lands after acceptance (BE-17). Blank = Clerk's own sign-up page.
+    staff_invite_redirect_url: str = ""
 
     # Lifetime of presigned storage GET links (app/storage/r2.py). R2 caps it at 7 days.
     storage_signed_url_ttl_seconds: int = Field(default=600, ge=60, le=604_800)

@@ -23,6 +23,8 @@ from starlette.concurrency import run_in_threadpool
 from app.associates import service, texts, uploads, validation
 from app.config import settings
 from app.memory.db import get_db
+from app.notifications import notifier as notifier_module
+from app.notifications.deferred import notify_after_commit
 from app.memory.models import (
     APPLICATION_DOCUMENTS,
     ApplicationStatus,
@@ -276,6 +278,10 @@ def _persist_application(db: Session, application_type: AssociateType, common: d
         service.audit(db, service.application_entity(application_type), str(application.id), "submitted", "public",
                       after={"status": "submitted", "state_id": application.state_id,
                              "documents": sorted(stored), "kyc_consent_version": application.kyc_consent_version})
+        alert = {"application_id": application.id, "application_type": application_type.value,
+                 "name": application.full_name, "state": place.state.name}
+        notify_after_commit(db, lambda: notifier_module.notifier.notify("associate_application_submitted", alert),
+                            f"associate application {application_type.value} {application.id}")
         db.commit()
     except service.AssociateError as exc:
         db.rollback()

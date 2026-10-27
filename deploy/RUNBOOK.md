@@ -374,16 +374,15 @@ gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name=
   writable). If that run is interrupted, drop the INVALID index it leaves
   (`DROP INDEX CONCURRENTLY <name>;`) and run the job again.
 
-## 8. Clerk (D8) — the session token must carry the role
+## 8. Clerk (D8) — the session token, sign-up mode, two-step, the first Admins
 
-The backend reads the caller's role from the **session JWT**: `public_metadata.role`
-(staff), `public_metadata.principal` and `public_metadata.associate_id` (associates), plus
-`email` and `name` (`app/auth/dependencies.py`). The frontend reads the role from
-`user.publicMetadata`, which works without any Clerk change — so on a fresh Clerk instance
-the dashboard menus look right while **every backend call answers 403
-`session_token_missing_claims`**. For each Clerk instance (staging, production):
+Since BE-17 the backend reads **who** someone is from the session JWT and decides **what
+they may do from the database** (`employee_roles`; `app/auth/dependencies.py`). Clerk
+`public_metadata` carries a copy of the roles (`roles`, `role`) only so the frontend can
+render before its first API call. For each Clerk instance (staging, production):
 
-1. Clerk Dashboard → the instance → **Sessions** → **Customize session token** → Claims:
+1. **Session token.** Clerk Dashboard → the instance → **Sessions** → **Customize session
+   token** → Claims:
    ```json
    {
      "public_metadata": "{{user.public_metadata}}",
@@ -391,16 +390,56 @@ the dashboard menus look right while **every backend call answers 403
      "name": "{{user.full_name}}"
    }
    ```
-   → **Save**. (Clerk caps custom claims at about 1.2 KB, because the token lives in a
-   cookie: keep `public_metadata` small — role, principal, associate id.)
-2. Users → the first administrator → **Metadata** → Public: `{"role": "admin"}`. Every
-   other staff role is set from the dashboard after that; associates get
-   `{"principal": "associate", "associate_id": "GNA-…"}` from their invitation.
-3. Copy the instance's **Frontend API URL** (`https://clerk.<domain>` in production) into
-   `CLERK_JWT_ISSUER`, and its secret key into `gridnova-clerk-secret-key`.
-4. `ALLOWED_ORIGINS` (§10) must contain every origin the frontend is served from: Clerk
+   → **Save**. `public_metadata` carries `roles`, `role`, `staff_invitation_id` (staff) or
+   `principal`, `associate_id` (associates); a token without it is refused (403
+   `session_token_missing_claims`). Keep it small — Clerk caps custom claims at about
+   1.2 KB because the token lives in a cookie. The second-factor claim **`fva`** is one of
+   Clerk's default claims (`[minutes since first factor, minutes since second factor]`,
+   `-1` = none) and needs no template entry: it cannot be removed and is always present.
+2. **Invite-only sign-up.** Clerk Dashboard → the **Access mode** page → **Invite-only**
+   → **Save** (API value `restricted`). Only people holding a Clerk invitation can
+   create an account; everyone else is refused by Clerk (`sign_up_mode_restricted`). Staff
+   invitations (dashboard → Staff → Invite) and associate invitations both work under it.
+   The backend refuses any signed-in user with no employee row and no matching invitation
+   anyway (403 `not_invited`) — this setting stops the account being created at all.
+3. **Two-step verification.** Clerk Dashboard → the **Multi-factor** page → enable
+   **Authenticator application (TOTP)** and **Backup codes** (a paid Clerk plan is needed
+   in production). Leave **Require multi-factor authentication** *off*: it would force it
+   on associates too. The backend enforces it where it matters — Admin, Management,
+   Network Manager and Accounts get 403 `two_factor_required` on sensitive actions until
+   their session completed a second factor (`fva`). **Verify on staging** with a passkey
+   sign-in: Clerk does not document what `fva` shows when a passkey satisfies MFA.
+4. **The first Admins** (once per instance, after the migration job has run 0056). Run the
+   bootstrap as the migration job — it refuses anywhere else in staging/production:
+   ```bash
+   for who in "shouvik@gridnova.in|Shouvik Biswas" "rp@gridnova.in|Raju Paul" \
+              "tanmoyhalderxyz@gmail.com|Tanmoy Halder"; do
+     gcloud run jobs execute gridnova-migrate --region=$REGION --wait \
+       --args=-c,"python scripts/grant_admin.py --email '${who%%|*}' --name '${who##*|}'"
+   done
+   ```
+   Each person receives a Clerk invitation (or, if they already have an employee row,
+   gains Admin). Their first sign-in with that **verified** address creates them as Admin.
+   Then, from the dashboard: give Tanmoy **Accounts** as a second role (a second Admin
+   approves), invite Michael Gomes and Srinjay Das as **Management** and Abhijit
+   Bhattacharjee as **Network Manager**. Everyone else is invited from the dashboard with
+   their **personal email** — never a shared mailbox. The older path (setting
+   `{"role": "admin"}` on a Clerk user's public metadata by hand) still creates an Admin at
+   first sign-in and is audited as `bootstrap`; prefer the script.
+5. Copy the instance's **Frontend API URL** (`https://clerk.<domain>` in production) into
+   `CLERK_JWT_ISSUER`, and its secret key into `gridnova-clerk-secret-key` (the backend
+   needs it for invitations, the verified-email check at first sign-in, and banning a
+   deactivated employee). Set `STAFF_INVITE_REDIRECT_URL` to the dashboard page that
+   completes Clerk's invitation sign-up.
+6. `ALLOWED_ORIGINS` (§10) must contain every origin the frontend is served from: Clerk
    puts that origin in the token's `azp` claim, and a token whose `azp` is not listed is
    refused (401).
+
+**Offboarding.** Deactivating someone in the dashboard refuses them from their next
+request, then bans the Clerk user (all sessions revoked, sign-in refused); reactivating
+unbans. If the ban fails the response says so (`clerk_banned: false`) — ban them by hand
+in Clerk (Users → the user → Ban). Never delete the Clerk user: their id is the employee id
+in the audit trail.
 
 The app logs a reminder of step 1 at every staging/production start. Check it with the
 smoke test (§11, step 4).

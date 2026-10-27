@@ -22,13 +22,13 @@ from app.api.routes.dashboard import _require_admin_or_internal_key
 from app.associates import uploads
 from app.associates.service import AssociateError
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
-from app.auth.scoping import lead_scope, require_execution_access
+from app.auth.scoping import lead_scope, narrowed_to_assigned, require_execution_access
 from app.execution import files as execution_files
 from app.execution import service as execution
 from app.memory.db import get_db
 from app.memory.memory_manager import MemoryManager
 from app.memory.models import (
-    Associate, Customer, CustomerOnboarding, EmployeeRole, ExecutionMode, Lead, OnboardingStatus, Project,
+    Associate, Customer, CustomerOnboarding, ExecutionMode, Lead, OnboardingStatus, Project,
     ProjectExecution, ProjectStage, ProjectStageEvent, StageSubmission, StageSubmissionStatus,
 )
 
@@ -65,7 +65,7 @@ def customer_block(db: Session, onboarding: CustomerOnboarding, employee: Authen
                       "longitude": onboarding.site_longitude},
              "associate": {"associate_id": owner.associate_id, "full_name": owner.full_name,
                            "associate_type": owner.associate_type.value, "mobile": owner.mobile}}
-    if employee.role != EmployeeRole.engineer:
+    if not employee.technical_only:
         block["mobile"] = onboarding.customer_mobile
     return block
 
@@ -90,7 +90,7 @@ def queue_rows(db: Session, employee: AuthenticatedEmployee) -> list[dict]:
     q = (select(ProjectExecution, CustomerOnboarding, Lead)
          .join(CustomerOnboarding, CustomerOnboarding.id == ProjectExecution.onboarding_id)
          .join(Lead, Lead.id == CustomerOnboarding.lead_id))
-    if employee.role == EmployeeRole.sales:
+    if narrowed_to_assigned(employee):
         q = q.where(lead_scope(employee).condition())
     rows = db.execute(q).all()
     project_ids = [r[0].project_id for r in rows]
@@ -300,7 +300,7 @@ class SwitchModeRequest(BaseModel):
 def switch_execution_mode(onboarding_id: int, body: SwitchModeRequest, db: Session = Depends(get_db),
                           employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Admin only: Grid Nova takes over this project's execution from the associate."""
-    if not employee.is_admin:
+    if not employee.has("execution.mode.switch"):
         raise HTTPException(status_code=403, detail="Only Admin can change a project's execution mode.")
     onboarding = _load(db, employee, onboarding_id)
     try:
@@ -330,7 +330,8 @@ def record_execution_stage(onboarding_id: int, stage: str, body: RecordExecution
     onboarding = _load(db, employee, onboarding_id)
     try:
         execution.record_direct(db, onboarding, employee.employee_id, stage, body.text, body.note,
-                                is_admin=employee.is_admin, admin_override_reason=body.admin_override_reason)
+                                is_admin=employee.holds("execution.admin_override"),
+                                admin_override_reason=body.admin_override_reason)
     except AssociateError as exc:
         db.rollback()
         raise _error(exc)

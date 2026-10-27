@@ -68,6 +68,9 @@ class EmployeeRole(str, enum.Enum):
     # tests/test_operations_accounts_roles.py.
     operations = "operations"
     accounts = "accounts"
+    # BE-17: runs the Associate Network and invites staff below Admin
+    # (config/access_control.yaml; migration 0056_access_control).
+    network_manager = "network_manager"
 
 
 class LeadScore(str, enum.Enum):
@@ -361,6 +364,10 @@ class Employee(Base):
     google_calendar_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     google_refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     calendar_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # BE-17: the states this person works in (TerritoryState names). Empty or NULL = every
+    # region. Enforced only where the data carries a state (app/auth/scoping.py).
+    regions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="assigned_employee")
     approved_proposals: Mapped[list["Proposal"]] = relationship(back_populates="approved_by")
@@ -2685,3 +2692,84 @@ class NovaTurn(Base):
     feedback_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     feedback_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+# ── Access control (BE-17) ──────────────────────────────────────────────────────
+
+class EmployeeRoleGrant(Base):
+    """One role a person holds. The database decides access: every request reads these
+    rows (app/auth/dependencies.py); `employees.role` is kept as the primary role."""
+    __tablename__ = "employee_roles"
+
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    granted_by: Mapped[str] = mapped_column(String, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+
+
+class StaffInvitationStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    revoked = "revoked"
+    expired = "expired"
+
+
+class StaffInvitation(Base):
+    """An invitation to join the dashboard with given roles. Accepted at first sign-in by
+    a verified email; expiry is decided from `expires_at` (an expired pending row is
+    reported as expired, never accepted)."""
+    __tablename__ = "staff_invitations"
+    __table_args__ = (
+        # One open invitation per address.
+        Index("uq_staff_invitations_pending_email", "email", unique=True,
+              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    roles: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[StaffInvitationStatus] = mapped_column(
+        SAEnum(StaffInvitationStatus, native_enum=False, length=16), nullable=False,
+        default=StaffInvitationStatus.pending)
+    invited_by: Mapped[str] = mapped_column(String, nullable=False)
+    clerk_invitation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    clerk_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # sent | skipped | failed
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    resent_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    accepted_employee_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    revoked_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ApprovalRequestStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    cancelled = "cancelled"
+    expired = "expired"
+
+
+class ApprovalRequest(Base):
+    """Maker–checker: a sensitive change waiting for a second, different person holding
+    the permission (config/access_control.yaml approvals). Nothing changes while pending;
+    expiry is decided from `expires_at`."""
+    __tablename__ = "approval_requests"
+    __table_args__ = (Index("ix_approval_requests_status_created", "status", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[ApprovalRequestStatus] = mapped_column(
+        SAEnum(ApprovalRequestStatus, native_enum=False, length=16), nullable=False,
+        default=ApprovalRequestStatus.pending)
+    requested_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    decided_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
