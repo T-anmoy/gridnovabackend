@@ -16,6 +16,10 @@
 *.db.bak*
 *.sqlite
 
+# Real customer documents, local renders and live evaluation reports (never in an image).
+_private/
+eval_reports/
+
 # Virtualenvs, tooling and caches.
 .venv*
 venv/

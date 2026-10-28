@@ -8,6 +8,9 @@ Staging and production are **separate GCP projects**, so every resource and secr
 below is the same in both; only §0 differs. Do staging end to end (including §11, the
 smoke test = Gate 1) before touching production.
 
+**Which value goes where** (production env file, secrets, Vercel, Clerk, DNS) and the extra live checks for
+BE-17 → BE-20 (staff access, Proposal Studio, direct payments): `deploy/PRODUCTION_ENV_GUIDE.md`.
+
 Contents: 0 Variables · 1 APIs · 2 Artifact Registry & build · 3 Cloud SQL (+ connection
 budget) · 4 Service accounts · 5 Secret Manager (+ rotation) · 6 Deploy (Cloud Run flags,
 background work, probes) · 7 Migration job · 8 Clerk session token (D8) · 9 Scheduler ·

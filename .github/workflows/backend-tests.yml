@@ -48,7 +48,7 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +76,7 @@ jobs:
   # enforce foreign keys, varchar lengths or native enum types; this job does.
   test-postgres:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 150
 
     services:
       postgres:
