@@ -1,4 +1,4 @@
-# Customer Nova — KNOWLEDGE suite (draft v1, 26 Oct 2026)
+# Customer Nova — KNOWLEDGE suite (v2, 29 Oct 2026: 42 v1 cases + 22 v2 cases)
 #
 # The existing evals/customer_nova.yaml tests what Nova must REFUSE (prices, promises,
 # injections). This suite tests what Nova must KNOW: each case asks a real customer
@@ -302,3 +302,143 @@ cases:
     turns: ["কত বছরের ওয়ারেন্টি পাব?"]
     must_not: *no_component_warranty
     must_any: ["5 বছর", "৫ বছর", "5 years"]
+
+  # ── v2: company, coverage, services ──────────────────────────────────────────
+  - id: k2-coverage-odisha-en
+    category: services
+    locale: en
+    turns: ["do you install rooftop solar in Odisha?"]
+    must_not: ["across India", "pan[- ]India", "we (?:do|can) install in Odisha"]
+    must_any: ["West Bengal", "Bihar"]
+  - id: k2-coverage-bn
+    category: services
+    locale: bn
+    turns: ["আপনারা কোন কোন রাজ্যে কাজ করেন?"]
+    must_not: *no_price
+    must_any: ["পশ্চিমবঙ্গ", "বিহার", "West Bengal", "Bihar"]
+  - id: k2-services-en
+    category: services
+    locale: en
+    turns: ["what services do you offer?"]
+    must_not: ["Green Energy Projects", "Grid-Scale"]
+    must_any: ["[Rr]ooftop [Ss]olar"]
+  - id: k2-languages-hi
+    category: company
+    locale: hi
+    turns: ["क्या आपकी टीम बंगाली बोलती है?"]
+    must_not: *no_price
+    must_any: ["बंगाली", "Bengali", "बांग्ला"]
+  - id: k2-established-en
+    category: company
+    locale: en
+    turns: ["when was Grid Nova Energy founded?"]
+    must_not: *no_price
+    must_any: ["2026"]
+
+  # ── v2: process, survey, documents, timelines ────────────────────────────────
+  - id: k2-survey-free-en
+    category: process
+    locale: en
+    turns: ["do you charge for the site visit?"]
+    must_not: *no_price
+    must_any: ["free"]
+  - id: k2-survey-free-hi
+    category: process
+    locale: hi
+    turns: ["साइट सर्वे का कितना पैसा लगेगा?"]
+    must_not: *no_price
+    must_any: ["फ्री", "मुफ़्त", "मुफ्त", "free"]
+  - id: k2-documents-en
+    category: process
+    locale: en
+    turns: ["what documents do I need for PM Surya Ghar?"]
+    must_not: *no_promise
+    must_any: ["electricity bill", "Aadhaar"]
+  - id: k2-timeline-en
+    category: process
+    locale: en
+    turns: ["how many days will the installation take?"]
+    must_not: ["guarantee", "within \\d+ days? (?:for sure|guaranteed)"]
+    must_any: ["1 to 3 days", "1–3 days", "DISCOM", "survey"]
+  - id: k2-journey-bn
+    category: process
+    locale: bn
+    turns: ["বাড়িতে সোলার লাগানোর পুরো প্রক্রিয়া কী?"]
+    must_not: *no_price
+    must_any: ["সার্ভে", "survey", "প্রস্তাব", "proposal"]
+
+  # ── v2: payments ─────────────────────────────────────────────────────────────
+  - id: k2-upi-en
+    category: pricing
+    locale: en
+    turns: ["can I pay by UPI or Google Pay?"]
+    must_not: ["(?:yes|sure)[^.]{0,30}UPI", "you can pay (?:by|via|through) UPI"]
+    must_any: ["NEFT", "RTGS", "IMPS", "cheque"]
+  - id: k2-cash-hi
+    category: pricing
+    locale: hi
+    turns: ["क्या मैं नकद पैसे दे सकता हूँ?"]
+    must_not: ["हाँ[^.]{0,20}नकद"]
+    must_any: ["NEFT", "चेक", "cheque", "नहीं"]
+  - id: k2-pay-associate-en
+    category: pricing
+    locale: en
+    turns: ["the associate asked me to transfer the advance to his account, is that ok?"]
+    must_not: ["(?:yes|that's fine|go ahead)"]
+    must_any: ["do not pay", "don't pay", "never", "98747 74440"]
+  - id: k2-loan-en
+    category: pricing
+    locale: en
+    turns: ["can I take a bank loan for rooftop solar?"]
+    must_not: ["\\d+(?:\\.\\d+)?\\s*%", "will be approved"]
+    must_any: ["bank", "loan"]
+
+  # ── v2: technical and FAQs ───────────────────────────────────────────────────
+  - id: k2-power-cut-en
+    category: faq
+    locale: en
+    turns: ["will my solar run during a power cut?"]
+    must_not: ["yes,? it (?:will|keeps) run", "backup"]
+    must_any: ["switch(?:es)? off", "shuts? (?:down|off)", "safety"]
+  - id: k2-power-cut-bn
+    category: faq
+    locale: bn
+    turns: ["লোডশেডিং হলে সোলার চলবে?"]
+    must_not: *no_price
+    must_any: ["বন্ধ", "switch", "safety", "নিরাপত্তা"]
+  - id: k2-zero-bill-en
+    category: faq
+    locale: en
+    turns: ["will my electricity bill become zero after solar?"]
+    must_not: *no_promise
+    must_any: ["depend", "fixed charge", "estimate"]
+  - id: k2-net-metering-wb-en
+    category: technical
+    locale: en
+    turns: ["how does net metering work in West Bengal?"]
+    must_not: *no_price
+    must_any: ["net metering", "net billing", "gross metering", "DISCOM"]
+  - id: k2-load-en
+    category: technical
+    locale: en
+    turns: ["my sanctioned load is 2 kW, can I install 3 kW?"]
+    must_not: *no_price
+    must_any: ["load increase", "sanctioned load"]
+  - id: k2-cleaning-en
+    category: faq
+    locale: en
+    turns: ["how should I clean my solar panels?"]
+    must_not: ["detergent is fine", "pressure washer"]
+    must_any: ["water", "soft"]
+  - id: k2-service-en
+    category: after_sales
+    locale: en
+    turns: ["my inverter is showing an error, who do I call?"]
+    must_not: ["within \\d+ hours"]
+    must_any: ["98747 74440", "info@gridnova\\.in", "handover link"]
+  - id: k2-dcr-make-en
+    category: subsidy
+    locale: en
+    turns: ["is the Waaree panel you use DCR compliant?"]
+    must_not: *no_dcr_claim
+    must_any: ["team", "proposal"]

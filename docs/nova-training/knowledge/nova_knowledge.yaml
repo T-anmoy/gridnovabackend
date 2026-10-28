@@ -1,31 +1,38 @@
-# Nova knowledge base — draft v1 (26 Oct 2026)
+# Nova knowledge base — v2 (29 Oct 2026)
 #
 # WHAT THIS IS: every fact Nova (the website assistant) and Nova Records may state, as
 # atomic, sourced entries. It is RUNTIME KNOWLEDGE, not fine-tuning data: the backend
-# loads it, retrieves the entries relevant to a message and adds them to the prompt and
-# to the guardrails' allow-list (see BE-16 prompt). Facts change (subsidies, prices,
-# rules); runtime knowledge can be corrected in one place, a fine-tuned model cannot.
+# loads it (BE-16), retrieves the entries relevant to a message, adds them to the prompt
+# and to the guardrails' allow-list. A fact that changes is corrected here, once.
+#
+# v2 CHANGES (from v1, 26 Oct 2026)
+# - All six conflicts settled with Grid Nova (see conflicts.md): one service name,
+#   West Bengal and Bihar only, no payback claims, roof area as a range, track-record wording.
+# - Grid Nova answers added: partnership firm est. 2026, two offices, free site survey,
+#   languages, payment methods (cheque/NEFT/RTGS/IMPS only), signatory, validity.
+# - Content Grid Nova delegated to Highline (27 Oct 2026) added: customer journey,
+#   typical timelines, document checklist, net metering per state, load rules, customer
+#   FAQs, cleaning advice. Source marked "Highline (delegated by Grid Nova, 27 Oct 2026)".
+# - Published website policy facts added (Customer Payment Policy, 23 Oct 2026).
 #
 # RULES FOR EDITING
 # - One fact per line in `facts`. No adjectives that are not in the source.
 # - status:
-#     verified        Grid Nova confirmed it, or it is a government rule already in
-#                     config/subsidies.yaml / config/price_list.yaml
+#     verified        Grid Nova confirmed it, delegated it to Highline, or it is in config
 #     published       already on www.gridnova.in (Grid Nova approved the site copy)
-#     external        government source, cited; Nova states it as the rule, never a ruling
-#     unconfirmed     developer default — Nova must NOT state it until Grid Nova confirms
-#     conflict        sources disagree — resolve before loading (see conflicts.md)
-#     needs_grid_nova the answer does not exist yet; Nova routes to the team
-# - Only `verified`, `published` and `external` entries are loaded at runtime.
-# - Numbers that are config values (subsidy amounts, makes, warranty years) must be
-#   rendered FROM config at load time (BE-16), not copied here, so they never drift.
-#   They are written here as {config:path} placeholders.
+#     external        government / regulator source, cited; stated as the rule, never a ruling
+#     conflict        sources disagree — not loaded (see conflicts.md)
+#     needs_grid_nova no answer yet; Nova routes to the team and logs a knowledge gap
+# - Only verified, published and external entries are loaded at runtime.
+# - {config:path} values are rendered from config at load time (BE-16), never copied.
 # - audience: customer (website Nova), associate (portal Nova), staff (Nova Records).
-# - Never put a price, a per-kW rate, a savings percentage or a payback period in an
-#   answer for customers (guardrails and evals block them).
+# - Never a price, per-kW rate, discount, EMI, savings percentage or payback period in a
+#   customer answer; never a subsidy ruling ("you will get"); never a DCR claim for a make.
+# - Questions in hi/bn are for retrieval; facts stay in English and Nova replies in the
+#   customer's language.
 
-schema_version: 1
-as_of: 2026-10-26
+schema_version: 2
+as_of: 2026-10-29
 
 entries:
 
@@ -35,28 +42,46 @@ entries:
     audience: [customer, associate, staff]
     questions:
       en: ["Who is Grid Nova Energy?", "What does your company do?", "Tell me about Grid Nova"]
-      hi: ["ग्रिड नोवा एनर्जी कौन है?"]
-      bn: ["গ্রিড নোভা এনার্জি কী করে?"]
+      hi: ["ग्रिड नोवा एनर्जी कौन है?", "आपकी कंपनी क्या करती है?"]
+      bn: ["গ্রিড নোভা এনার্জি কী করে?", "আপনাদের কোম্পানি সম্পর্কে বলুন"]
     facts:
-      - Grid Nova Energy is a renewable energy company ("Eco-Energy Initiative").
-      - It designs, develops and implements solar power systems for residential, commercial, industrial and institutional clients.
-      - Its aim is to be a trusted, long-term partner in India's renewable energy transition.
-    source: messages/en.json about.overview; app/llm/company_facts.py
-    status: published
+      - "Grid Nova Energy is a solar energy company (\"Eco-Energy Initiative\"), a partnership firm established in 2026."
+      - "It designs, supplies, installs and maintains solar power systems — mainly rooftop solar for homes, housing societies, businesses, industry and institutions."
+      - "It currently works in West Bengal and Bihar."
+      - "It installs rooftop solar under PM Surya Ghar: Muft Bijli Yojana."
+    do_not_say: ["'across India' or 'pan-India'", "any certification or empanelment not listed in this file"]
+    source: "Grid Nova via Tanmoy Halder, 26 Oct 2026; messages/en.json about.overview"
+    status: verified
 
   - id: company-contact
     topic: company
     audience: [customer, associate, staff]
     questions:
       en: ["What is your phone number?", "How can I contact you?", "Where is your office?"]
+      hi: ["आपका फ़ोन नंबर क्या है?", "ऑफिस कहाँ है?"]
+      bn: ["আপনাদের ফোন নম্বর কী?", "অফিস কোথায়?"]
     facts:
       - "Head office: {config:proposal_content.company.address}"
       - "Branch office: {config:proposal_content.company.branch_offices}"
+      - "Grid Nova has only these two offices (Kolkata and Patna)."
       - "Phone: {config:proposal_content.company.phone}"
       - "Email: {config:proposal_content.company.email}"
       - "Website: www.gridnova.in"
       - "Business hours: {config:settings.business_days} {config:settings.business_hours} IST"
-    source: config/proposal_content.yaml; app/config.py
+    source: "config/proposal_content.yaml; app/config.py; Grid Nova via Tanmoy, 26 Oct 2026"
+    status: verified
+
+  - id: company-languages
+    topic: company
+    audience: [customer]
+    questions:
+      en: ["Do you speak Bengali?", "Can I talk in Hindi?"]
+      hi: ["क्या मैं हिंदी में बात कर सकता हूँ?"]
+      bn: ["বাংলায় কথা বলা যাবে?"]
+    facts:
+      - "The sales team speaks English, Hindi and Bengali."
+      - "The website and this chat work in English, Hindi and Bengali."
+    source: "Grid Nova via Tanmoy, 26 Oct 2026"
     status: verified
 
   - id: company-response-time
@@ -82,6 +107,7 @@ entries:
       - "Moloy Das — GM Projects"
       - "Arun Kumar — Zonal Sales Manager"
       - "Naren Mukherjee — Senior Advisor, Solar Power"
+    do_not_say: ["personal phone numbers or emails of individuals"]
     source: app/llm/company_facts.py
     status: verified
 
@@ -91,14 +117,14 @@ entries:
     questions:
       en: ["What have you done before?", "How experienced are you?", "Show me your track record"]
     facts:
-      - "Figures are the track record of Grid Nova's team and branches; state them exactly, never round."
+      - "These figures are the track record of Grid Nova's team, branches and associates; state them exactly, never round."
       - "4,800+ solar street lamps delivered"
       - "330+ 10 kW WBREDA schools powered"
       - "2,350+ PM-KUSUM solar pumps installed"
       - "1,200+ PM Surya Ghar residential installations"
       - "1.3 MWp EPC project delivered for Showa India, Faridabad"
-    do_not_say: ["any other project, client name, or figure", "that every figure is Grid Nova Energy's own company history"]
-    source: app/llm/company_facts.py; messages/en.json industries
+    do_not_say: ["any other project, client name or figure", "that these are Grid Nova Energy's own history since 2026"]
+    source: "app/llm/company_facts.py; Grid Nova via Tanmoy, 26 Oct 2026 (wording: team, branches and associates)"
     status: verified
 
   - id: company-values
@@ -107,13 +133,14 @@ entries:
     questions:
       en: ["Why should I choose Grid Nova?", "What makes you different?"]
     facts:
-      - "Experienced leadership with large-scale EPC delivery."
-      - "Systems tailored to each client's energy requirements."
+      - "Experienced leadership with large-scale solar delivery."
+      - "Systems sized to each customer's own electricity use."
+      - "A free site survey before any formal proposal."
       - "Vendor partnerships for consistent quality and timely procurement."
-      - "Lifecycle focus: accountability for output over the system's life, not just installation."
+      - "Accountability for the system's output over its life, not just installation."
       - "Core values: sustainability, integrity, quality, innovation, customer focus."
-    do_not_say: ["comparisons with named competitors", "'cheapest' or 'best price' claims"]
-    source: messages/en.json about.advantage, about.values
+    do_not_say: ["comparisons with named competitors", "'cheapest', 'lowest price' or 'best price'", "guaranteed savings"]
+    source: "messages/en.json about.advantage, about.values; Grid Nova via Tanmoy, 26 Oct 2026"
     status: published
 
 # ── 2. Services and coverage ────────────────────────────────────────────────────
@@ -121,25 +148,27 @@ entries:
     topic: services
     audience: [customer, associate, staff]
     questions:
-      en: ["What services do you offer?", "Do you do commercial solar?", "Do you install ground-mounted plants?"]
+      en: ["What services do you offer?", "Do you do commercial solar?", "What do you install?"]
+      hi: ["आप कौन-कौन सी सेवाएँ देते हैं?"]
+      bn: ["আপনারা কী কী পরিষেবা দেন?"]
     facts:
-      - "Rooftop solar for residential, housing society, commercial, industrial and institutional buildings."
-      - "Ground-mounted solar."
-      - "Government and institutional solar."
-      - "Solar street lighting."
-      - "Solar water pumps under PM-KUSUM."
-      - "Operation and maintenance (O&M)."
-      - "Energy consulting and project services, including feasibility studies and DISCOM support."
-    source: app/llm/company_facts.py (8 service areas)
-    status: conflict   # website FAQ says "five core services" — see conflicts.md C1
+      - "Grid Nova's main service is Rooftop Solar Solutions: grid-connected rooftop solar for homes, housing societies, commercial, industrial and institutional buildings."
+      - "Programmes under its services: solar street lighting, solar water pumps under PM-KUSUM, and government and institutional solar projects."
+      - "Ground-mounted solar projects are taken up on enquiry."
+      - "Operation and maintenance (O&M) of solar systems."
+      - "Solar consulting: feasibility, system design, and DISCOM net-metering and subsidy paperwork."
+    do_not_say: ["'Green Energy Projects' or 'Grid-Scale Solar' as service names", "battery, EV charging or microgrid as available services"]
+    source: "Grid Nova via Tanmoy, 27 Oct 2026 (C1 settled); app/llm/company_facts.py"
+    status: verified
 
   - id: services-not-yet
     topic: services
     audience: [customer, associate]
     questions:
-      en: ["Do you install batteries?", "Can you set up EV charging?", "Do you do microgrids?"]
+      en: ["Do you install batteries?", "Can you set up EV charging?", "Do you do off-grid solar?"]
     facts:
-      - "Battery storage (BESS), EV charging and microgrid solutions are emerging areas and are not offered yet."
+      - "Battery storage, EV charging and microgrid solutions are not offered yet."
+      - "Grid Nova installs grid-connected (on-grid) systems."
       - "A team member can follow up about future availability."
     source: app/llm/company_facts.py
     status: verified
@@ -149,12 +178,15 @@ entries:
     audience: [customer, associate]
     questions:
       en: ["Do you work in my state?", "Do you install in Odisha?", "Which areas do you serve?"]
+      hi: ["क्या आप बिहार में काम करते हैं?"]
+      bn: ["আপনারা কোন কোন জায়গায় কাজ করেন?"]
     facts:
-      - "Grid Nova serves customers across India."
-      - "Online package prices and the Solar Calculator prices currently cover {config:pricing_policy.applicability.states}."
-      - "For other states, the calculator still shows size, subsidy and generation, and a team member follows up with a quote."
-    source: app/llm/company_facts.py; config/pricing_policy.yaml
-    status: conflict   # about page says operating footprint West Bengal & Bihar — conflicts.md C2
+      - "Grid Nova currently installs only in West Bengal and Bihar."
+      - "Online package prices and the Solar Calculator prices cover {config:pricing_policy.applicability.states}."
+      - "For other states the team can note the enquiry, but cannot promise an installation."
+    do_not_say: ["'across India'", "that Grid Nova will install outside West Bengal and Bihar"]
+    source: "Grid Nova via Tanmoy, 26 Oct 2026 (C2 settled)"
+    status: verified
 
   - id: segments
     topic: services
@@ -162,11 +194,11 @@ entries:
     questions:
       en: ["Do you work with hospitals?", "Do you do solar for factories?", "Can a housing society get solar?"]
     facts:
-      - "Residential: homeowners and housing societies — PM Surya Ghar subsidy handling, net-metering DISCOM application, structural load assessment, long-term performance support."
+      - "Residential: homeowners and housing societies — PM Surya Ghar subsidy paperwork, net-metering application with the DISCOM, roof structure check, long-term performance support."
       - "Commercial: offices, hospitals, hotels, campuses and educational institutions."
-      - "Industrial: manufacturing plants, warehouses and processing facilities; installation is planned with plant engineering teams to minimise disruption."
+      - "Industrial: factories, warehouses and processing units; installation is planned with the plant team to keep disruption low."
       - "Government and institutional: schools, municipal infrastructure, public-sector facilities, delivered to programme documentation standards."
-    do_not_say: ["payback periods (the commercial page's '3–5 year' line is not for chat — conflicts.md C3)"]
+    do_not_say: ["payback periods of any kind (C3: removed from the website)"]
     source: messages/en.json industries
     status: published
 
@@ -176,11 +208,11 @@ entries:
     questions:
       en: ["Do you install solar pumps?", "Can I get a solar pump under PM-KUSUM?"]
     facts:
+      - "Solar water pumps for farmers under PM-KUSUM are one of Grid Nova's programmes."
       - "Grid Nova's team and branches have installed 2,350+ solar pumps under PM-KUSUM."
-      - "Agricultural solar pumps under PM-KUSUM are part of Grid Nova's government and institutional delivery."
-      - "Eligibility and subsidy under PM-KUSUM are decided under the scheme; a team member follows up."
-    do_not_say: ["PM-KUSUM subsidy percentages or amounts (registry PRO-10 open)"]
-    source: messages/en.json nova.faq[2]; app/llm/company_facts.py
+      - "Eligibility and subsidy are decided under the scheme by the state agency; a team member follows up."
+    do_not_say: ["PM-KUSUM subsidy percentages or amounts"]
+    source: "messages/en.json nova.faq[2]; app/llm/company_facts.py; Grid Nova, 27 Oct 2026"
     status: published
 
   - id: street-lighting
@@ -194,17 +226,17 @@ entries:
     source: messages/en.json services.government
     status: published
 
-# ── 3. Process, engineering and standards ───────────────────────────────────────
+# ── 3. Process, timelines, documents ────────────────────────────────────────────
   - id: process-stages
     topic: process
     audience: [customer, associate]
     questions:
-      en: ["What is the process?", "What happens after I enquire?", "How do you install solar?"]
+      en: ["How do you install solar?", "What is your engineering process?"]
     facts:
-      - "Every project follows six stages: feasibility analysis, system design, procurement, construction, commissioning, operation and maintenance."
-      - "Feasibility checks sunlight, shading, the roof's structural condition, the grid connection point and financial inputs."
+      - "Every project follows six stages: feasibility, system design, procurement, construction, commissioning, operation and maintenance."
+      - "Feasibility checks sunlight, shading, the roof's structural condition and the grid connection point."
       - "Design covers module layout, strings, inverter, cable sizing, AC switchgear, single-line diagram and protection."
-      - "Commissioning includes insulation resistance tests, string checks, inverter tests, protection checks and DISCOM synchronisation; the system is handed over with a test report and operating manual."
+      - "Commissioning includes insulation tests, string checks, inverter tests, protection checks and DISCOM synchronisation; the system is handed over with a test report and operating manual."
     source: messages/en.json technology.steps
     status: published
 
@@ -212,38 +244,76 @@ entries:
     topic: process
     audience: [customer, associate]
     questions:
-      en: ["What are the steps to get solar at home?", "How does buying from you work?"]
+      en: ["What are the steps to get solar at home?", "What happens after I enquire?", "How does buying from you work?"]
+      hi: ["घर पर सोलर लगवाने की प्रक्रिया क्या है?"]
+      bn: ["বাড়িতে সোলার লাগানোর ধাপগুলো কী?"]
     facts:
-      - "1. Enquiry or Solar Calculator estimate. 2. A team member follows up. 3. Site survey. 4. Formal proposal with the system, bill of quantity and payment terms. 5. Acceptance. 6. Payments in milestones. 7. Installation and commissioning. 8. Net-metering and subsidy paperwork with the DISCOM and national portal. 9. Handover with warranty, then O&M."
-    source: system workflow (backend app/proposals, app/payments, app/execution, app/handover)
-    status: unconfirmed   # Grid Nova to confirm the customer-facing order and wording — data request R3
+      - "1. Enquiry — website form, Solar Calculator, phone, or a Grid Nova associate."
+      - "2. A team member calls back within 48 business hours."
+      - "3. Free site survey: roof, shading, structure and electrical connection."
+      - "4. Formal proposal: system, equipment, bill of quantity, price with GST, payment terms, warranty."
+      - "5. The customer accepts the proposal and pays the first milestone."
+      - "6. Grid Nova files the DISCOM / PM Surya Ghar portal application with the customer's documents."
+      - "7. Materials are delivered and the system is installed."
+      - "8. DISCOM inspection, net meter installation and commissioning."
+      - "9. Handover with test report, warranty and the first year's free O&M."
+      - "10. For PM Surya Ghar customers, the subsidy is claimed on the portal and paid by the government into the customer's bank account."
+    source: "Highline (delegated by Grid Nova, 27 Oct 2026); system workflow app/proposals, app/payments, app/handover"
+    status: verified
 
-  - id: standards
+  - id: timelines
     topic: process
-    audience: [customer]
+    audience: [customer, associate]
     questions:
-      en: ["Are your panels certified?", "Do you follow government standards?"]
+      en: ["How long does installation take?", "When will my system be ready?", "How long does the whole process take?"]
+      hi: ["सोलर लगने में कितना समय लगता है?"]
+      bn: ["সোলার লাগাতে কত সময় লাগে?"]
     facts:
-      - "Modules come from certified manufacturers with BIS/IEC certifications."
-      - "Designs comply with MNRE guidelines, Central Electricity Authority regulations and state DISCOM interconnection standards."
-      - "Equipment is procured against agreed specifications; no substitutions without the client's sign-off."
-    do_not_say: ["that a specific make is DCR compliant", "model numbers"]
-    source: messages/en.json technology.standards
-    status: published
+      - "The site survey is usually arranged within a few working days of the enquiry."
+      - "The formal proposal usually follows within a few working days of the survey."
+      - "Installing a home rooftop system on site usually takes 1 to 3 days once materials are delivered; larger commercial systems take longer."
+      - "Most waiting time is for DISCOM steps (approval, inspection, net meter), which vary by DISCOM and season."
+      - "The team gives a project-specific timeline after the survey."
+    do_not_say: ["a guaranteed completion date", "a fixed number of days for subsidy credit"]
+    source: "Highline research (delegated by Grid Nova, 27 Oct 2026); WBERC Rooftop Solar Regulations 2025"
+    status: verified
 
   - id: site-survey
     topic: process
     audience: [customer]
     questions:
-      en: ["Do you visit the site?", "What happens in the site survey?", "How much roof space do I need?"]
+      en: ["Is the site survey free?", "What happens in the site survey?", "How much roof space do I need?"]
+      hi: ["क्या साइट सर्वे फ्री है?"]
+      bn: ["সাইট সার্ভে কি বিনামূল্যে?"]
     facts:
-      - "A site survey confirms shadow-free roof area, roof type and structure, the electrical connection and the final system size before a formal proposal."
-      - "A significantly shaded roof needs a site visit before size is confirmed."
-      - "Roof space needed is roughly 100 sq ft of shadow-free area per kW, confirmed at the survey."
-    source: app/survey; app/pricing/instant_estimate.py SIGNIFICANT_SHADING_NOTE; config/solar_estimate.yaml
-    status: unconfirmed   # roof area per kW is PRO-17/EST registry; survey charge unknown — R5
+      - "The site survey is free."
+      - "It confirms shadow-free roof area, roof type and structure, the electrical connection and the final system size before a formal proposal."
+      - "Keep a recent electricity bill ready and give access to the roof and the meter."
+      - "A rooftop system needs roughly 80 to 100 sq ft of shadow-free roof per kW; the survey confirms the exact figure."
+      - "A heavily shaded roof needs the survey before any size is confirmed."
+    source: "Grid Nova via Tanmoy, 26 Oct 2026 (free survey); config/solar_estimate.yaml; proposal 83–100 sq ft/kWp (C5 settled as a range)"
+    status: verified
 
-# ── 4. Pricing, calculator and proposals ────────────────────────────────────────
+  - id: documents
+    topic: process
+    audience: [customer, associate]
+    questions:
+      en: ["What documents do I need?", "Documents for PM Surya Ghar?", "What papers are needed for net metering?"]
+      hi: ["पीएम सूर्य घर के लिए कौन से दस्तावेज़ चाहिए?"]
+      bn: ["কোন কোন কাগজপত্র লাগবে?"]
+    facts:
+      - "A recent electricity bill in the applicant's name (it shows the consumer number)."
+      - "Aadhaar card of the applicant."
+      - "Bank account details for the subsidy: a cancelled cheque or the passbook front page; the account should be in the applicant's name."
+      - "Proof of ownership or right to use the roof (for example a property tax receipt or deed)."
+      - "A mobile number and email linked to the application."
+      - "Photographs of the roof are taken by the team at the survey."
+      - "The team confirms the exact list for the customer's DISCOM before applying."
+    do_not_say: ["that a document can be skipped", "asking the customer to send documents in chat"]
+    source: "PM Surya Ghar national portal process (pmsuryaghar.gov.in); Highline research (delegated, 27 Oct 2026)"
+    status: external
+
+# ── 4. Pricing, proposals and payments ──────────────────────────────────────────
   - id: how-to-get-price
     topic: pricing
     audience: [customer]
@@ -253,8 +323,8 @@ entries:
       bn: ["3 kW সোলারের দাম কত?"]
     facts:
       - "Nova does not quote prices in chat."
-      - "The Solar Calculator on www.gridnova.in shows both packages' prices for supported states, the subsidy and the net cost."
-      - "A Grid Nova associate or team member can also prepare a quote."
+      - "The Solar Calculator on www.gridnova.in shows both packages' prices for West Bengal and Bihar, the subsidy and the net cost."
+      - "After the free site survey, Grid Nova sends a formal proposal with the exact price."
     do_not_say: ["any amount, per-kW rate, discount or EMI"]
     source: app/llm/company_facts.py; evals/customer_nova.yaml price cases
     status: verified
@@ -265,9 +335,9 @@ entries:
     questions:
       en: ["How does your calculator work?", "Is the calculator accurate?"]
     facts:
-      - "It asks state, electricity company, monthly units (most accurate) or bill amount or roof area, and optionally phase, sanctioned load and shading."
+      - "It asks the state, electricity company, and monthly units (most accurate) or bill amount or roof area; optionally phase, sanctioned load and shading."
       - "It recommends a size, and sometimes a smaller option, with how much of the usage each covers."
-      - "It shows the government subsidy, generation, savings and payback, marked with how confident the estimate is."
+      - "It shows the central subsidy and the expected generation, with how confident the estimate is."
       - "State subsidies that are only announced are shown separately and not deducted."
       - "It is an estimate; final figures come after the site survey."
     source: docs/api/solar_estimate.md; FE-14
@@ -281,36 +351,98 @@ entries:
     facts:
       - "Two packages: {config:price_list.packages} — Nova Assured is standard; Nova Signature on request."
       - "Makes per package as in Grid Nova's master data, always with 'or equivalent': {config:price_list.equipment}."
+      - "'Or equivalent' means a same-tier make is used if the listed make is out of stock."
+      - "Both packages use the same approved cables."
       - "Panel technology: Mono PERC or TOPCon; wattage options 550 / 560 / 580 / 600 Wp."
     do_not_say: ["model numbers", "that a make is DCR compliant", "prices"]
-    source: config/price_list.yaml; app/llm/company_facts.py _packages_block
+    source: "config/price_list.yaml; Grid Nova, 14 Oct 2026"
     status: verified
 
   - id: proposal
     topic: pricing
     audience: [customer, associate]
     questions:
-      en: ["What will the proposal include?", "How long is the quote valid?"]
+      en: ["What will the proposal include?", "How long is the quote valid?", "Who signs the proposal?"]
     facts:
       - "The formal proposal includes the system configuration, bill of quantity, customer scope, price with GST, payment terms and warranty."
-      - "A proposal is valid for {config:sales_policy.proposal_validity_days} days."
-      - "Payment is made in milestones set out in the proposal."
+      - "A proposal is valid for {config:sales_policy.proposal_validity_days} days from its date."
       - "Proposals are signed by Raju Paul, Authorised Signatory."
-    do_not_say: ["milestone percentages in chat (percent pattern trips the savings guard)"]
-    source: config/proposal_document.yaml; config/sales_policy.yaml; BE-13
+      - "Every proposal carries a QR code; scanning it on www.gridnova.in confirms it is a genuine Grid Nova proposal."
+      - "The customer can accept online from the proposal link or in person."
+    do_not_say: ["milestone percentages in chat"]
+    source: "config/proposal_document.yaml; config/sales_policy.yaml; BE-13, BE-18"
     status: verified
+
+  - id: payment-methods
+    topic: pricing
+    audience: [customer, associate]
+    questions:
+      en: ["How can I pay?", "Do you accept UPI?", "Can I pay cash?", "Do you take cheques?"]
+      hi: ["भुगतान कैसे करें?", "क्या UPI से पैसे दे सकते हैं?"]
+      bn: ["কীভাবে টাকা দেব?", "UPI তে পেমেন্ট করা যাবে?"]
+    facts:
+      - "Grid Nova accepts payment only by cheque, NEFT, RTGS or IMPS."
+      - "Grid Nova does not accept cash, UPI or demand drafts, at any stage."
+      - "Pay only into Grid Nova's own current account: GRID NOVA ENERGY, HDFC Bank, Ruby More Branch, Kolkata; IFSC HDFC0005385. The full account number is on the proposal, invoice and receipts."
+      - "Cheques are made payable to \"GRID NOVA ENERGY\"."
+      - "Before the first transfer, check that the bank shows the payee name as GRID NOVA ENERGY."
+      - "Payment is made in milestones set out in the proposal."
+    do_not_say: ["the full account number", "any other account or payee"]
+    source: "Customer Payment Policy 5.1–5.2, www.gridnova.in, 23 Oct 2026; config/execution_payments.yaml enabled_modes"
+    status: published
 
   - id: payment-safety
     topic: pricing
     audience: [customer, associate]
     questions:
-      en: ["Can I pay the associate in cash?", "Where do I pay?"]
+      en: ["Can I pay the associate?", "Someone asked me to pay a different account", "Where do I pay?"]
     facts:
-      - "Associates cannot accept money, quote prices or sign contracts on Grid Nova's behalf."
-      - "Payments go to Grid Nova's own bank account as stated in the proposal."
-      - "Customers can check an associate on the Verify page by scanning the QR code on their Grid Nova ID card."
-    source: messages/en.json careers.faq; app/(site)/[lang]/verify
+      - "No associate or employee may accept payment in their own name or account."
+      - "Grid Nova never changes its bank details by phone, WhatsApp or email."
+      - "If anyone asks for payment to a different account or in cash, do not pay; call {config:proposal_content.company.phone}."
+      - "Customers can check an associate by scanning the QR code on the associate's Grid Nova ID card."
+    source: "Customer Payment Policy 5.2–5.3 (23 Oct 2026); messages/en.json careers.faq"
     status: published
+
+  - id: receipts
+    topic: pricing
+    audience: [customer]
+    questions:
+      en: ["Will I get a receipt?", "I paid but have no receipt"]
+    facts:
+      - "An official receipt from Grid Nova is issued once the payment is confirmed in Grid Nova's account."
+      - "Keep the payment reference (cheque number or UTR) until the receipt arrives."
+    source: "Customer Payment Policy 5.4 (23 Oct 2026)"
+    status: published
+
+  - id: cheque-refund
+    topic: pricing
+    audience: [customer]
+    questions:
+      en: ["What if my cheque bounces?", "Can I cancel after paying?", "What is your refund policy?"]
+    facts:
+      - "If a cheque is dishonoured, the related stage of work may be paused until payment is received, and bank charges may be recovered as set out in the agreement."
+      - "Refunds, where due under the agreement, are paid only to the account the payment came from."
+      - "Cancellation terms are set out in the customer's proposal and agreement; a team member can explain them."
+    do_not_say: ["refund amounts, percentages or days"]
+    source: "Customer Payment Policy 5.6–5.7 (23 Oct 2026)"
+    status: published
+
+  - id: finance-loans
+    topic: pricing
+    audience: [customer]
+    questions:
+      en: ["Do you offer EMI?", "Can I get a loan for solar?"]
+      hi: ["क्या सोलर के लिए लोन मिलेगा?"]
+      bn: ["সোলারের জন্য লোন পাওয়া যায়?"]
+    facts:
+      - "Grid Nova does not offer EMI itself."
+      - "Under PM Surya Ghar, banks offer loans for residential rooftop solar; the customer applies to the bank, and the loan can be chosen on the national portal."
+      - "If the system is financed, the subsidy may be credited to the loan account."
+      - "A team member can explain what the bank will need from Grid Nova (proposal and invoice)."
+    do_not_say: ["interest rates", "that a loan will be approved", "names of partner banks"]
+    source: "PM Surya Ghar national portal (pmsuryaghar.gov.in) — bank loan option; Grid Nova payment policy"
+    status: external
 
 # ── 5. Subsidy (rules, never a ruling) ──────────────────────────────────────────
   - id: subsidy-central
@@ -322,12 +454,11 @@ entries:
       bn: ["পিএম সূর্য ঘর ভর্তুকি কত?"]
     facts:
       - "PM Surya Ghar: Muft Bijli Yojana gives Central Financial Assistance for grid-connected rooftop solar on an individual house with made-in-India (DCR) panels."
-      - "{config:subsidies.central.residential.general} — first 2 kW, the 3rd kW, maximum for 3 kW or more (most states)."
-      - "{config:subsidies.central.residential.special} in special-category states: {config:subsidies.central.special_category_states}."
+      - "{config:subsidies.central.residential.general} — first 2 kW, the 3rd kW, maximum for 3 kW or more."
       - "Part-kW sizes get a proportional amount; nothing extra above 3 kW."
       - "Eligibility is decided under the scheme, not by Grid Nova or the chat; the Solar Calculator shows a customer's own figure."
     do_not_say: ["'you will get', 'you are eligible', 'guaranteed subsidy'"]
-    source: config/subsidies.yaml (MNRE guidelines 7 Jun 2024; PIB Aug 2024)
+    source: config/subsidies.yaml (MNRE guidelines 7 Jun 2024)
     status: external
 
   - id: subsidy-society
@@ -348,7 +479,6 @@ entries:
       en: ["Is there subsidy for my shop?", "Can a factory get PM Surya Ghar?", "Off-grid subsidy?"]
     facts:
       - "No residential PM Surya Ghar subsidy for commercial, industrial or government connections, non-DCR panels, or off-grid systems."
-      - "Grid-connected systems with a battery or hybrid inverter can still qualify, on the panel capacity only."
     source: config/subsidies.yaml; MNRE operational guidelines
     status: external
 
@@ -358,11 +488,12 @@ entries:
     questions:
       en: ["How do I receive the subsidy?", "Who pays the subsidy?", "How long does subsidy take?"]
     facts:
-      - "The customer applies on the national PM Surya Ghar portal; Grid Nova handles the documentation."
-      - "After installation the DISCOM inspects the system and approves it on the portal."
-      - "The subsidy is paid by the government directly into the customer's bank account (or loan account, if the system is financed)."
-      - "MNRE guidelines target release within 15 days of DISCOM approval; actual time depends on the portal and DISCOM."
-    source: MNRE PM Surya Ghar operational guidelines (7 Jun 2024)
+      - "The application is made on the national PM Surya Ghar portal; Grid Nova handles the documentation with the customer."
+      - "After installation the DISCOM inspects the system, installs the net meter and records commissioning on the portal."
+      - "The subsidy is then paid by the government directly into the customer's bank account (or loan account, if financed)."
+      - "The time depends on the portal and the DISCOM; Grid Nova follows it up."
+    do_not_say: ["a fixed number of days", "that Grid Nova pays or deducts the subsidy"]
+    source: MNRE PM Surya Ghar operational guidelines (7 Jun 2024); pmsuryaghar.gov.in
     status: external
 
   - id: subsidy-state
@@ -374,7 +505,7 @@ entries:
       - "Extra state support has been announced in {config:subsidies.state_top_ups[status!=confirmed].state} but is not confirmed by an official order."
       - "It is not guaranteed; the Solar Calculator shows it separately, marked 'Announced'."
     do_not_say: ["any state top-up amount", "that the customer will receive it"]
-    source: config/subsidies.yaml; app/llm/company_facts.py
+    source: config/subsidies.yaml
     status: external
 
   - id: dcr-meaning
@@ -385,23 +516,45 @@ entries:
     facts:
       - "DCR (domestic content requirement) means panels made in India from India-made solar cells."
       - "PM Surya Ghar subsidy requires DCR panels; a customer who does not take the subsidy is not bound by DCR."
-    do_not_say: ["that any specific make or model is DCR compliant (not confirmed by Grid Nova)"]
-    source: MNRE operational guidelines; config/price_list.yaml dcr_status null
+      - "The proposal states which panels are offered for a subsidy project."
+    do_not_say: ["that any specific make or model is DCR compliant"]
+    source: MNRE operational guidelines
     status: external
 
-# ── 6. Net metering and generation ──────────────────────────────────────────────
+# ── 6. Net metering, load and generation ────────────────────────────────────────
   - id: net-metering
     topic: technical
     audience: [customer]
     questions:
-      en: ["What is net metering?", "Will you apply for net metering?"]
+      en: ["What is net metering?", "Can I sell extra electricity?", "Will you apply for net metering?"]
+      hi: ["नेट मीटरिंग क्या है?"]
+      bn: ["নেট মিটারিং কী?"]
     facts:
-      - "Net metering lets the electricity company record power the system exports to the grid against power taken from it."
-      - "Grid Nova handles the net-metering application with the DISCOM for residential customers."
-      - "Rules and settlement for surplus units differ by state electricity regulator."
-    do_not_say: ["export rates or credit values (EST registry open)"]
-    source: messages/en.json industries.residential; services.green
-    status: published
+      - "Net metering records the power the system sends to the grid against the power taken from it, so exported units reduce the bill."
+      - "Grid Nova handles the net-metering application with the DISCOM."
+      - "DISCOMs: in West Bengal WBSEDCL, CESC (Kolkata area) and others; in Bihar NBPDCL (north) and SBPDCL (south)."
+      - "West Bengal (WBERC Rooftop Solar Regulations 2025): consumers choose net metering, net billing or gross metering; under net metering, unused surplus units at the end of the settlement year lapse."
+      - "Bihar (BERC net and gross metering regulations): domestic PM Surya Ghar consumers on net metering do not pay the DISCOM's application fee or meter testing charges (BERC, 2026)."
+      - "A system is sized mainly to cover the customer's own use, not to sell power."
+    do_not_say: ["export rates, feed-in tariffs or credit values", "that the bill will become zero"]
+    source: "WBERC Grid Interactive Rooftop Solar PV Regulations 2025 (energetica-india.net, 12 Aug 2025); BERC waiver (energetica-india.net, 15 Jul 2026)"
+    status: external
+
+  - id: phase-load
+    topic: technical
+    audience: [customer]
+    questions:
+      en: ["Do I need three-phase?", "My sanctioned load is 2 kW, can I put 3 kW?"]
+      hi: ["मेरा लोड 2 kW है, क्या 3 kW लगा सकते हैं?"]
+      bn: ["আমার লোড 2 kW, 3 kW লাগানো যাবে?"]
+    facts:
+      - "Systems can be single-phase or three-phase; the supply on the electricity bill decides which."
+      - "The DISCOM normally allows a rooftop system up to the sanctioned load; in West Bengal the cap is the sanctioned load or 500 kW, whichever is lower."
+      - "A system larger than the sanctioned load needs a load increase from the DISCOM first; Grid Nova's team helps with the application."
+      - "In West Bengal, systems up to 10 kW need no separate DISCOM feasibility study."
+    do_not_say: ["load-increase charges"]
+    source: "WBERC Rooftop Solar Regulations 2025; Highline (delegated by Grid Nova, 27 Oct 2026)"
+    status: external
 
   - id: generation
     topic: technical
@@ -410,31 +563,111 @@ entries:
       en: ["How many units will 3 kW produce?", "How much electricity does 1 kW generate?"]
     facts:
       - "Grid Nova's design basis is about 120 units per kW per month on average."
-      - "Actual generation depends on sunlight, weather, shading, orientation, tilt and panel cleanliness."
-    source: config/solar_estimate.yaml (Grid Nova, 15 Oct 2026); config/proposal_document.yaml generation_note
+      - "Actual generation depends on sunlight, season, weather, shading, orientation, tilt and panel cleanliness."
+    source: config/solar_estimate.yaml (Grid Nova, 15 Oct 2026)
     status: verified
 
-  - id: phase-load
-    topic: technical
+# ── 7. Customer FAQs (delegated by Grid Nova to Highline, 27 Oct 2026) ──────────
+  - id: faq-power-cut
+    topic: faq
     audience: [customer]
     questions:
-      en: ["Do I need three-phase?", "My sanctioned load is 2 kW, can I put 3 kW?"]
+      en: ["Will solar work during a power cut?", "Does on-grid solar give backup?"]
+      hi: ["क्या बिजली कटने पर सोलर चलेगा?"]
+      bn: ["লোডশেডিংয়ে সোলার চলবে?"]
     facts:
-      - "Systems can be single-phase or three-phase; the phase on the electricity bill decides which."
-      - "A system larger than the sanctioned load may need a load increase from the DISCOM; Grid Nova handles this."
-    source: config/price_list.yaml phase_ranges; BE-14 above_sanctioned_load warning
-    status: unconfirmed   # confirm wording and DISCOM rules per state — R9
+      - "A grid-connected system without a battery switches off automatically during a power cut; this is a safety rule so no power flows to the line while it is being repaired."
+      - "It restarts by itself when grid power returns."
+      - "Grid Nova does not offer battery backup yet."
+    source: "Highline (delegated, 27 Oct 2026); anti-islanding requirement in CEA connectivity standards"
+    status: verified
 
-# ── 7. Warranty, O&M, after-sales ───────────────────────────────────────────────
+  - id: faq-monsoon-night
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["Does solar work on cloudy days?", "What about monsoon?", "Does it work at night?"]
+    facts:
+      - "Panels produce less on cloudy and rainy days and nothing at night; the grid supplies power then."
+      - "The 120 units per kW per month figure is an average over the year, including monsoon months."
+    source: "Highline (delegated, 27 Oct 2026); config/solar_estimate.yaml"
+    status: verified
+
+  - id: faq-bill-zero
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["Will my electricity bill become zero?", "How much will I save?"]
+    facts:
+      - "Savings depend on the system size, the customer's own usage and the DISCOM's tariff and metering rules."
+      - "Fixed charges on the electricity bill usually continue."
+      - "The Solar Calculator gives an estimate; the proposal shows the expected generation."
+    do_not_say: ["savings percentages", "payback periods", "'zero bill'"]
+    source: "Highline (delegated, 27 Oct 2026)"
+    status: verified
+
+  - id: faq-roof
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["Is my roof strong enough?", "Will panels damage my roof?", "Can you install on a tin roof?"]
+    facts:
+      - "The free site survey checks the roof's type and structure before sizing."
+      - "Panels are fixed on a mounting structure designed for the roof type; RCC and metal-sheet roofs are both common."
+      - "Shaded parts of the roof are avoided in the layout."
+    do_not_say: ["wind-speed ratings or structure specifications not in the proposal"]
+    source: "Highline (delegated, 27 Oct 2026); messages/en.json technology"
+    status: verified
+
+  - id: faq-move-house
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["What if I move house?", "Can the system be shifted?"]
+    facts:
+      - "A rooftop system can usually be dismantled and reinstalled at a new site; the team assesses it, and DISCOM paperwork is needed again."
+    do_not_say: ["shifting charges", "that the subsidy transfers"]
+    source: "Highline (delegated, 27 Oct 2026)"
+    status: verified
+
+  - id: faq-cleaning
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["How do I clean the panels?", "Do panels need maintenance?"]
+      hi: ["पैनल कैसे साफ़ करें?"]
+      bn: ["প্যানেল কীভাবে পরিষ্কার করব?"]
+    facts:
+      - "Clean panels with plain water and a soft cloth or sponge, early morning or evening when they are cool."
+      - "Do not use detergent, hard brushes or high-pressure jets, and do not stand on the panels."
+      - "In dusty months clean every one to two weeks; rain helps but does not remove all dust."
+      - "Keep the area around the inverter dry and ventilated; never open the inverter or wiring."
+      - "If the inverter shows an error or generation drops sharply, contact Grid Nova."
+    source: "Highline (delegated, 27 Oct 2026); common manufacturer guidance"
+    status: verified
+
+  - id: faq-panel-life
+    topic: faq
+    audience: [customer]
+    questions:
+      en: ["How long do solar panels last?"]
+    facts:
+      - "Panels are expected to last about {config:price_list.commercial_terms.solar_panel_life_span}; output reduces slowly with age."
+      - "This is a life span, not a warranty period."
+    do_not_say: ["degradation percentages", "component warranty years"]
+    source: "config/price_list.yaml (Grid Nova, 14 Oct 2026)"
+    status: verified
+
+# ── 8. Warranty, O&M, after-sales ───────────────────────────────────────────────
   - id: warranty
     topic: after_sales
     audience: [customer, associate]
     questions:
-      en: ["What is the warranty?", "How long do panels last?"]
+      en: ["What is the warranty?", "Is there a warranty on the system?"]
     facts:
-      - "Standard warranty: {config:price_list.commercial_terms.standard_warranty}."
-      - "Panel life span: {config:price_list.commercial_terms.solar_panel_life_span} — how long panels are expected to last, not a warranty period."
-    do_not_say: ["component warranty years for panels or inverters (not confirmed — registry)"]
+      - "Standard system warranty: {config:price_list.commercial_terms.standard_warranty}."
+      - "Manufacturers' product warranties on panels and inverters pass to the customer as stated in the handover documents."
+    do_not_say: ["component warranty years for panels or inverters (R13 open)"]
     source: config/price_list.yaml; config/handover_warranty.yaml
     status: verified
 
@@ -455,13 +688,15 @@ entries:
     topic: after_sales
     audience: [customer]
     questions:
-      en: ["My system is not working", "How do I raise a complaint?"]
+      en: ["My system is not working", "How do I raise a complaint?", "Who do I call for service?"]
     facts:
-      - "Customers with a handed-over system can raise a service request through their handover link or by contacting Grid Nova."
-    source: app/handover; config/handover_warranty.yaml (service contact null)
-    status: needs_grid_nova   # service phone/email and SLA not supplied — R12
+      - "Customers with a handed-over system can raise a service request from their handover link."
+      - "Or contact Grid Nova on {config:proposal_content.company.phone} or {config:proposal_content.company.email}, with the customer name and site address."
+    do_not_say: ["a response or repair time (SLA not set)"]
+    source: "app/handover; config/handover_warranty.yaml (service contact defaults to company contact)"
+    status: verified
 
-# ── 8. Associate Network (portal Nova and careers) ──────────────────────────────
+# ── 9. Associate Network (portal Nova and careers) ──────────────────────────────
   - id: associate-fee
     topic: associates
     audience: [customer, associate]
@@ -478,7 +713,7 @@ entries:
     questions:
       en: ["Am I a Grid Nova employee?"]
     facts:
-      - "Associates are independent and work on their own account; they cannot sign contracts, quote prices or accept money on Grid Nova's behalf."
+      - "Associates are independent and work on their own account; they cannot sign contracts, quote final prices or accept money on Grid Nova's behalf."
     source: messages/en.json careers.faq[1]
     status: published
 
@@ -490,10 +725,10 @@ entries:
     facts:
       - "Commission is earned when the customer's payment is verified in Grid Nova's bank account."
       - "Approved commission is paid monthly, by the 10th of the following month."
-      - "The portal shows the commission rate that applies, and any upcoming change."
-    do_not_say: ["commission percentages (Phase 2 inputs pending Sirs' approval)"]
-    source: messages/en.json careers.faq[2]; FE-12
-    status: conflict   # payout schedule is registry C5-10 (draft) — conflicts.md C4
+      - "The portal shows the commission rate that applies."
+    do_not_say: ["commission percentages"]
+    source: messages/en.json careers.faq[2]
+    status: conflict   # C4 — payout date to be confirmed before the Associate Network opens
 
   - id: associate-verify
     topic: associates
@@ -512,7 +747,7 @@ entries:
       en: ["What if two associates bring the same customer?"]
     facts:
       - "The customer belongs to the first associate whose complete submission Grid Nova verifies, until the project is completed or closed."
-    source: messages/en.json careers.faq[4]; BE-11
+    source: messages/en.json careers.faq[4]
     status: published
 
   - id: associate-exit
@@ -545,28 +780,28 @@ entries:
     source: NEXT_PUBLIC_ASSOCIATE_PORTAL_OPEN behaviour
     status: verified
 
-# ── 9. Questions Nova cannot answer yet (routes to the team) ────────────────────
-  - id: unknown-timeline
-    topic: process
+# ── 10. Still with Grid Nova (Nova routes to the team; gap is logged) ───────────
+  - id: unknown-component-warranty
+    topic: after_sales
     audience: [customer]
-    questions: {en: ["How long does installation take?", "When will my system be ready?"]}
-    facts: ["A team member confirms the timeline after the site survey."]
-    status: needs_grid_nova   # R4
-  - id: unknown-finance
-    topic: pricing
-    audience: [customer]
-    questions: {en: ["Do you offer EMI?", "Can I get a loan for solar?"]}
-    facts: ["A team member follows up about payment options."]
-    status: needs_grid_nova   # R6
-  - id: unknown-documents
+    questions: {en: ["What is the panel warranty?", "Inverter warranty how many years?"]}
+    facts: ["The proposal and handover documents state the manufacturers' warranties; a team member can confirm."]
+    status: needs_grid_nova   # R13
+  - id: unknown-dcr-makes
     topic: subsidy
     audience: [customer]
-    questions: {en: ["What documents do I need?"]}
-    facts: ["A team member shares the document list."]
-    status: needs_grid_nova   # R7
-  - id: unknown-cancellation
-    topic: pricing
+    questions: {en: ["Are your panels DCR?", "Is Waaree DCR?"]}
+    facts: ["The proposal states which panels are offered for a subsidy project; a team member can confirm."]
+    status: needs_grid_nova   # R14
+  - id: unknown-insurance
+    topic: after_sales
     audience: [customer]
-    questions: {en: ["Can I cancel after paying?", "What is your refund policy?"]}
-    facts: ["The payment policy page and the proposal set out the terms; a team member can explain."]
-    status: needs_grid_nova   # R8
+    questions: {en: ["Is the system insured?", "Do you provide insurance?"]}
+    facts: ["A team member follows up about insurance."]
+    status: needs_grid_nova   # R17
+  - id: unknown-certifications
+    topic: company
+    audience: [customer]
+    questions: {en: ["Are you MNRE empanelled?", "Are you a registered PM Surya Ghar vendor?", "Are you ISO certified?"]}
+    facts: ["A team member confirms Grid Nova's registrations."]
+    status: needs_grid_nova   # R18
