@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 
 from app.memory.models import (
-    Lead, LeadSource, PaymentMilestone, Proposal, ProposalStatus, StudioEvent, StudioProposal, StudioProposalVersion,
+    Lead, LeadSource, Proposal, ProposalStatus, StudioEvent, StudioProposal, StudioProposalVersion,
 )
 from tests.proposal_document_support import require_weasyprint
 from tests.studio_support import (
@@ -532,12 +532,10 @@ class TestConvert:
         total = payments.money(found.total_value)
         amounts = payments.split(total, [Decimal(20), Decimal(60), Decimal(20)])
         assert amounts == [Decimal("40293.00"), Decimal("120879.00"), Decimal("40293.00")]
-        for n, (pct, amount) in enumerate(zip((20, 60, 20), amounts), 1):
-            db_session.add(PaymentMilestone(project_id=lead.project_id, proposal_id=found.id, number=n, label=f"M{n}",
-                                            percent=Decimal(pct), amount_due=amount, trigger="accepted",
-                                            created_by="test"))
-        db_session.commit()
+        # BE-20: conversion makes the schedule itself, from the accepted document's terms.
         rows = payments.milestones(db_session, lead.project_id)
+        assert [(r.percent, r.amount_due) for r in rows] == list(zip((Decimal(20), Decimal(60), Decimal(20)), amounts))
+        assert all(r.lead_id == lead.id and r.proposal_id == found.id and r.onboarding_id is None for r in rows)
         assert sum(r.amount_due for r in rows) == Decimal("201465.00")
 
     def test_converted_before_acceptance_then_accepted_online(self, client, db_session):

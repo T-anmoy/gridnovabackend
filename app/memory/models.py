@@ -140,6 +140,10 @@ class TimelineEventType(str, enum.Enum):
     # A chat visitor gave contact details that belong to another customer. Never
     # merged from the anonymous chat; staff decide (BE-1 S2).
     possible_returning_customer = "possible_returning_customer"
+    # BE-20: a direct customer's payment (no associate) — recorded, verified, dishonoured.
+    payment_recorded = "payment_recorded"
+    payment_verified = "payment_verified"
+    payment_dishonoured = "payment_dishonoured"
 
 
 class MeetingStatus(str, enum.Enum):
@@ -1798,14 +1802,20 @@ class PaymentMilestone(Base):
     schedule always sums to the total exactly."""
     __tablename__ = "payment_milestones"
     __table_args__ = (UniqueConstraint("project_id", "number", name="uq_payment_milestones_number"),
-                      CheckConstraint("amount_due >= 0", name="ck_payment_milestones_amount"))
+                      CheckConstraint("amount_due >= 0", name="ck_payment_milestones_amount"),
+                      # BE-20 (migration 0058): a schedule belongs to an associate's customer or
+                      # to a direct lead, never both.
+                      CheckConstraint("onboarding_id IS NULL OR lead_id IS NULL",
+                                      name="ck_payment_milestones_one_owner"))
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # project_id is the key; onboarding_id is set for associate-sourced projects (the only
-    # kind with payments today) and stays NULL for a project sold another way.
+    # project_id is the key; onboarding_id is set for associate-sourced projects, lead_id
+    # (BE-20) for a direct customer's lead — the lead whose accepted proposal it schedules.
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True,
                                                          index=True)
+    lead_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("leads.id", name="fk_payment_milestones_lead_id"), nullable=True, index=True)
     proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     label: Mapped[str] = mapped_column(String, nullable=False)
@@ -1832,12 +1842,17 @@ class Payment(Base):
         Index("uq_payments_instrument", "mode", "reference_normalized", "bank_name_normalized", unique=True,
               sqlite_where=text("status NOT IN ('cancelled', 'dishonoured')"),
               postgresql_where=text("status NOT IN ('cancelled', 'dishonoured')")),
+        # BE-20 (migration 0058): an associate's customer or a direct lead, never both.
+        CheckConstraint("onboarding_id IS NULL OR lead_id IS NULL", name="ck_payments_one_owner"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     onboarding_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customer_onboardings.id"), nullable=True,
                                                          index=True)
+    # BE-20: set for a direct customer's payment (no associate) — the lead it was recorded on.
+    lead_id: Mapped[Optional[int]] = mapped_column(ForeignKey("leads.id", name="fk_payments_lead_id"),
+                                                   nullable=True, index=True)
     milestone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payment_milestones.id"), nullable=True)
     # Set when this payment re-presents an instrument whose earlier payment was dishonoured.
     previous_payment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("payments.id"), nullable=True)

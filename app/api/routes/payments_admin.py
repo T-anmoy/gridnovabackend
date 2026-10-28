@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.associate_payments import PaymentIn, ReasonIn, proof_link, store_proof
@@ -52,6 +52,9 @@ def _payment(db: Session, employee: AuthenticatedEmployee, payment_id: int) -> P
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.onboarding_id is not None:
         _onboarding(db, employee, payment.onboarding_id)
+    elif payment.lead_id is not None:   # BE-20: a direct customer's payment, scoped by its lead
+        from app.api.routes.direct_payments import lead_for_payments
+        lead_for_payments(db, employee, payment.lead_id)
     elif _sales_scoped(employee):   # no lead to scope it by: not Sales' to see
         raise HTTPException(status_code=403, detail="Your role cannot view this payment.")
     return payment
@@ -84,9 +87,12 @@ def _act(db: Session, fn):
 # ── Queue ────────────────────────────────────────────────────────────────────────
 
 def _visible(db: Session, employee: AuthenticatedEmployee, q):
+    """Sales: payments on its own or unassigned leads — through the customer record, or
+    (BE-20) the direct customer's lead."""
     if _sales_scoped(employee):
-        q = q.join(CustomerOnboarding, CustomerOnboarding.id == Payment.onboarding_id) \
-             .join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
+        q = q.outerjoin(CustomerOnboarding, CustomerOnboarding.id == Payment.onboarding_id) \
+             .join(Lead, Lead.id == func.coalesce(CustomerOnboarding.lead_id, Payment.lead_id)) \
+             .where(lead_scope(employee).condition())
     return q
 
 
@@ -143,12 +149,14 @@ def _rows_json(db: Session, rows: list) -> list[dict]:
 @router.get("/payments")
 def list_payments(status: Optional[PaymentStatus] = None, mode: Optional[PaymentMode] = None,
                   needs_attention: Optional[bool] = None, onboarding_id: Optional[int] = None,
+                  lead_id: Optional[int] = None,
                   date_from: Optional[date] = None, date_to: Optional[date] = None,
                   q: Optional[str] = Query(default=None, max_length=100),
                   page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
                   db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """`needs_attention=true`: awaiting verification past the threshold, a cheque past
     its hold, proof missing, or a receipt held / not emailed / failed / waiting too long.
+    `lead_id`: a direct customer's payments (BE-20).
     date_from/date_to filter on recorded_at (inclusive, UTC dates). `q`: customer name,
     payment reference, project reference (GNE-…) or receipt number (GNR-…).
     Filtering, counting and paging happen in SQL — except `needs_attention`, which is
@@ -164,6 +172,8 @@ def list_payments(status: Optional[PaymentStatus] = None, mode: Optional[Payment
         q_filter = q_filter.where(Payment.mode == mode)
     if onboarding_id:
         q_filter = q_filter.where(Payment.onboarding_id == onboarding_id)
+    if lead_id:
+        q_filter = q_filter.where(Payment.lead_id == lead_id)
     if date_from:
         q_filter = q_filter.where(Payment.recorded_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
     if date_to:
@@ -193,24 +203,40 @@ def list_milestones(needs_attention: Optional[bool] = None, page: int = Query(de
     if not employee.can_view_payments():
         raise HTTPException(status_code=403, detail="Your role cannot view payments.")
     from app.memory.models import PaymentMilestone
-    scoped = select(PaymentMilestone)
+    from app.payments import direct
+    scoped = select(PaymentMilestone).where(or_(PaymentMilestone.onboarding_id.is_not(None),
+                                                PaymentMilestone.lead_id.is_not(None)))
     if _sales_scoped(employee):
-        scoped = scoped.join(CustomerOnboarding, CustomerOnboarding.id == PaymentMilestone.onboarding_id) \
-                       .join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
-    ordered = scoped.order_by(PaymentMilestone.onboarding_id, PaymentMilestone.number)
+        scoped = scoped.outerjoin(CustomerOnboarding, CustomerOnboarding.id == PaymentMilestone.onboarding_id) \
+                       .join(Lead, Lead.id == func.coalesce(CustomerOnboarding.lead_id, PaymentMilestone.lead_id)) \
+                       .where(lead_scope(employee).condition())
+    # Associate customers first (as before BE-20), then direct customers by lead.
+    ordered = scoped.order_by(PaymentMilestone.onboarding_id.is_(None), PaymentMilestone.onboarding_id,
+                              PaymentMilestone.lead_id, PaymentMilestone.number)
     if needs_attention is None:
         total = db.execute(select(func.count()).select_from(scoped.subquery())).scalar_one()
         page_rows = list(db.execute(ordered.offset((page - 1) * page_size).limit(page_size)).scalars())
         wanted = {m.id for m in page_rows}
-        onboarding_ids = list(dict.fromkeys(m.onboarding_id for m in page_rows))
     else:
         total, wanted = None, None
-        onboarding_ids = list(dict.fromkeys(m.onboarding_id for m in db.execute(ordered).scalars()))
+        page_rows = list(db.execute(ordered).scalars())
+    owners = list(dict.fromkeys(("onboarding", m.onboarding_id) if m.onboarding_id is not None
+                                else ("lead", m.lead_id) for m in page_rows))
+    onboarding_ids = [i for kind, i in owners if kind == "onboarding"]
     onboardings = {o.id: o for o in db.execute(select(CustomerOnboarding).where(
         CustomerOnboarding.id.in_(onboarding_ids))).scalars()} if onboarding_ids else {}
-    who = _who_many(db, [o.project_id for o in onboardings.values()])
+    leads = {lead.id: lead for lead in db.execute(select(Lead).where(
+        Lead.id.in_([i for kind, i in owners if kind == "lead"]))).scalars()}
+    who = _who_many(db, [o.project_id for o in onboardings.values()] + [x.project_id for x in leads.values()])
     items = []
-    for oid in onboarding_ids:
+    for kind, oid in owners:
+        if kind == "lead":
+            lead = leads[oid]
+            for m in direct.milestone_status(db, lead):
+                if wanted is None or m["milestone_id"] in wanted:
+                    items.append({**m, "onboarding_id": None, "lead_id": lead.id, **who[lead.project_id],
+                                  "needs_attention": m["overdue"]})
+            continue
         onboarding = onboardings[oid]
         for m in payments.milestone_status(db, onboarding):
             if wanted is None or m["milestone_id"] in wanted:
@@ -241,6 +267,8 @@ def upload_proof(payment_id: int, file: UploadFile = File(...), db: Session = De
     if not employee.can_record_payment():
         raise HTTPException(status_code=403, detail="Your role cannot record payments.")
     payment = _payment(db, employee, payment_id)
+    if payment.lead_id is not None:   # BE-20: a direct customer's payments are Accounts' / Admin's
+        _processor(employee)
     store_proof(db, payment, file, employee.employee_id)
     return _detail(db, payment)
 
@@ -449,9 +477,13 @@ def work_queues(db: Session = Depends(get_db), employee: AuthenticatedEmployee =
         receipts_rows = list(db.execute(select(PaymentReceipt).where(PaymentReceipt.payment_id.in_(ids))).scalars()) \
             if ids else []
         overdue = 0
-        for onboarding_id in {p.onboarding_id for p in visible} | _scheduled_onboardings(db, employee):
+        for onboarding_id in {p.onboarding_id for p in visible if p.onboarding_id is not None} \
+                | _scheduled_onboardings(db, employee):
             overdue += sum(1 for m in payments.milestone_status(db, db.get(CustomerOnboarding, onboarding_id), now)
                            if m["overdue"])
+        from app.payments import direct
+        for lead in _scheduled_direct_leads(db, employee):   # BE-20
+            overdue += sum(1 for m in direct.milestone_status(db, lead, now) if m["overdue"])
         out["payments"] = {
             "awaiting_verification": sum(1 for p in visible if "awaiting_verification" in payments.attention(p, now)),
             "dishonoured": sum(1 for p in visible if p.status == PaymentStatus.dishonoured),
@@ -468,3 +500,12 @@ def _scheduled_onboardings(db: Session, employee: AuthenticatedEmployee) -> set[
     if _sales_scoped(employee):
         q = q.join(Lead, Lead.id == CustomerOnboarding.lead_id).where(lead_scope(employee).condition())
     return set(db.execute(q).scalars())
+
+
+def _scheduled_direct_leads(db: Session, employee: AuthenticatedEmployee) -> list:
+    """Direct customers' leads with a payment schedule, in the caller's payment scope."""
+    from app.memory.models import PaymentMilestone
+    q = select(Lead).where(Lead.id.in_(select(PaymentMilestone.lead_id).where(PaymentMilestone.lead_id.is_not(None))))
+    if _sales_scoped(employee):
+        q = q.where(lead_scope(employee).condition())
+    return list(db.execute(q).scalars())

@@ -147,12 +147,17 @@ def _matches(db: Session, *, mobile: str, consumer_number_key: Optional[str],
     return out
 
 
-def _refuse_own_duplicate(matches, associate: Associate) -> None:
+def _refuse_own_duplicate(matches, associate: Associate, db: Session) -> None:
+    """Only the associate's OWN earlier record refuses a new one (another associate's match
+    is flagged for attribution review instead, never refused or named). BE-20: the refusal
+    names that record — `existing_onboarding_id` and `client_code` — since it is theirs."""
     for other, on in matches:
         if other.owner_associate_id == associate.id:
+            extra = {"existing_onboarding_id": other.id, "client_code": project_reference(db, other)}
             raise DuplicateOnboardingError(
                 f"You have already onboarded this customer (same {' and '.join(on).replace('_', ' ')}). "
                 "Update that record instead.", field="customer_mobile" if on == ["mobile"] else "consumer_number",
+                extra=extra,
             )
 
 
@@ -277,7 +282,7 @@ def create(db: Session, associate: Associate, data: dict) -> tuple[CustomerOnboa
     place = _place(db, data)
     key = consumer_key(data.get("consumer_number"))
     matches = _matches(db, mobile=data["customer_mobile"], consumer_number_key=key)
-    _refuse_own_duplicate(matches, associate)
+    _refuse_own_duplicate(matches, associate, db)
 
     email = data.get("customer_email")
     customer = memory.get_or_create_customer(
@@ -380,7 +385,7 @@ def update(db: Session, onboarding: CustomerOnboarding, associate: Associate, ch
     matches = []
     if identity_changed:
         matches = _matches(db, mobile=mobile, consumer_number_key=key, exclude_id=onboarding.id)
-        _refuse_own_duplicate(matches, associate)
+        _refuse_own_duplicate(matches, associate, db)
 
     for field in WRITABLE_INPUT_FIELDS:
         if field in changes and getattr(inputs, field) != changes[field]:

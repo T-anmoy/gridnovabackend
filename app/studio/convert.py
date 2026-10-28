@@ -76,6 +76,9 @@ def convert(db: Session, p: StudioProposal, actor: str) -> dict:
                         document_reference=v.document_reference, document_date=v.document_date)
     db.add(proposal)
     db.flush()
+    if accepted:   # BE-20: accepted on the Studio page before conversion — the schedule now
+        from app.payments import direct
+        direct.on_accepted(db, proposal, who)
     memory.add_timeline_event(lead_id=lead.id, event_type=TimelineEventType.proposal_sent, created_by=who,
                               description=f"Created from Proposal Studio {p.code} ({v.document_reference})")
     memory.advance_lead_stage(lead.id, PipelineStage.won if accepted else PipelineStage.proposal_sent,

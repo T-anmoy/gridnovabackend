@@ -43,6 +43,11 @@ def _validate(data: dict) -> dict:
          "required_documents keys must be unique, non-empty strings")
     need(all(d.get("required_when") in REQUIRED_WHEN for d in docs),
          f"required_when must be one of {REQUIRED_WHEN}")
+    from app.memory.models import INSTALLATION_PHOTO_SLOTS
+    slot_labels = data.get("photo_slot_labels") or {}
+    need(set(slot_labels) == set(INSTALLATION_PHOTO_SLOTS)
+         and all(isinstance(v, str) and v.strip() for v in slot_labels.values()),
+         "photo_slot_labels needs an English label for exactly the INSTALLATION_PHOTO_SLOTS")
     sanity = data.get("sanity") or {}
     for key in ("max_kw_to_sanctioned_load_ratio", "kwh_per_kw_per_month", "max_generation_to_consumption_ratio"):
         need(isinstance(sanity.get(key), (int, float)) and sanity[key] > 0, f"sanity.{key} must be a positive number")
@@ -131,6 +136,13 @@ def required_document_keys(*, scheme_linked: bool, all_in_customer_name: bool) -
 
 def document_keys() -> list[str]:
     return [d["key"] for d in load()["required_documents"]]
+
+
+def photo_slot_items() -> list[dict]:
+    """[{code, label}] for the site-photo slots, in INSTALLATION_PHOTO_SLOTS order (BE-20)."""
+    from app.memory.models import INSTALLATION_PHOTO_SLOTS
+    labels = load()["photo_slot_labels"]
+    return [{"code": slot, "label": labels[slot]} for slot in INSTALLATION_PHOTO_SLOTS]
 
 
 def agreement_is_placeholder() -> bool:

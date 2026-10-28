@@ -69,6 +69,24 @@ execution:
   # E5 — execution documents.
   document_types: [dispatch_challan, feasibility_acknowledgement, inspection_report, net_meter_report, commissioning_report, oem_dcr_declaration, handover_checklist]   # [PLACEHOLDER]
 
+  # BE-20 — the English label shown for each photo slot and document type above. The code
+  # is the stable key the apps translate by; every listed slot and type needs a label.
+  labels:
+    photo_slots:
+      array_installed: "Solar array installed"
+      inverter_installed: "Inverter installed"
+      earthing: "Earthing"
+      meter_and_net_meter: "Meter and net meter"
+      completion_overview: "Completed installation (overview)"
+    document_types:
+      dispatch_challan: "Dispatch challan"
+      feasibility_acknowledgement: "DISCOM feasibility acknowledgement"
+      inspection_report: "Inspection report"
+      net_meter_report: "Net meter report"
+      commissioning_report: "Commissioning report"
+      oem_dcr_declaration: "OEM DCR declaration"
+      handover_checklist: "Handover checklist"
+
   gates:
     # E6 — when enabled, material_dispatched cannot be recorded until every payment
     # milestone up to and including `through_milestone` is fully verified. Keep it

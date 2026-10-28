@@ -383,7 +383,10 @@ alerts:
   handover_blocked: {roles: [operations]}
   service_request_raised: {roles: [operations]}
   service_requests_overdue: {roles: [operations, admin]}
-  payment_recorded: {roles: [accounts]}
+  # BE-20: assigned_employee reaches the lead's owner for a direct customer's payment (its
+  # alert names the lead); an associate customer's payment alert names no lead, as before.
+  payment_recorded: {roles: [accounts], assigned_employee: true}
+  payment_verified: {roles: [accounts], assigned_employee: true}
   payment_dishonoured: {roles: [accounts, admin], assigned_employee: true}
   receipt_blocked: {roles: [accounts]}
   payments_attention: {roles: [accounts]}

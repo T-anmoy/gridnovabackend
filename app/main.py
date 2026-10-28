@@ -31,6 +31,7 @@ from app.api.routes.execution_register_admin import router as execution_register
 from app.api.routes.health import router as health_router
 from app.api.routes.onboarding_admin import router as onboarding_admin_router
 from app.api.routes.payments_admin import router as payments_admin_router
+from app.api.routes.direct_payments import router as direct_payments_router
 from app.api.routes.commissions_admin import router as commissions_admin_router
 from app.api.routes.associate_commissions import router as associate_commissions_router
 from app.api.routes.associate_referrals import router as associate_referrals_router
@@ -198,6 +199,7 @@ app.include_router(execution_register_admin_router)
 app.include_router(execution_admin_router)
 app.include_router(associate_payments_router)
 app.include_router(payments_admin_router)
+app.include_router(direct_payments_router)
 app.include_router(commissions_admin_router)
 app.include_router(associate_commissions_router)
 app.include_router(associate_referrals_router)

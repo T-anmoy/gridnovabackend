@@ -846,6 +846,23 @@ entries:
     needed_from_grid_nova: Must the "Before Commissioning" payment be received before Grid Nova commissions a system?
     blocking: tunable
     probe: yaml_contains_marker
+  # BE-20: direct customers (no associate) pay against their accepted proposal's own terms.
+  - id: DP-1
+    area: payments
+    location: {file: app/payments/direct.py, symbols: [record]}
+    description: "Refund and cancellation of a direct customer's order are not built: a payment can be cancelled (entered by mistake) or dishonoured (bounced), never refunded, and an accepted proposal cannot be cancelled. The policy draft's refund and cancellation rules (M8 in the policies) were never supplied to the backend."
+    dummy_value: no refund or order-cancellation handling
+    needed_from_grid_nova: "When a customer who came to Grid Nova directly cancels after paying, what is refunded (all, less costs incurred, by milestone?), within how many days, by which mode, and who approves it?"
+    blocking: blocks_feature
+    probe: manual
+  - id: DP-2
+    area: payments
+    location: {file: app/payments/direct.py, symbols: [_trigger]}
+    description: "A direct customer's milestone falls due by the same reading as P9 (milestone n takes the template's trigger n). Only the advance can become due and overdue — from the proposal's acceptance — because projects sold without an associate have no execution stage log; later milestones show not_due until paid."
+    dummy_value: {1: accepted (from accepted_at), 2: material_dispatched (never recorded), 3: inspection_net_meter (never recorded)}
+    needed_from_grid_nova: "For customers who come to Grid Nova directly, when should the material and final payments be requested — and will their installations be tracked stage by stage like associate customers' are?"
+    blocking: tunable
+    probe: manual
   - id: D2
     area: execution
     location: {file: config/price_list.yaml, key: equipment.dcr_status}

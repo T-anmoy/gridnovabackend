@@ -1090,6 +1090,10 @@ class MemoryManager:
         record_automatically(self._db, lead_id=proposal.lead_id, stage=ProjectStage.accepted, recorded_by=recorded_by,
                              evidence={"proposal_id": proposal.id, "version": proposal.version,
                                        "via": via, "accepted_at": when.isoformat(), **(details or {})})
+        # BE-20: a direct customer (no associate) gets their payment schedule now; an
+        # associate's customer got it from the `accepted` stage just recorded.
+        from app.payments import direct
+        direct.on_accepted(self._db, proposal, recorded_by)
         return proposal
 
     def adjust_proposal_pricing(
@@ -1342,7 +1346,12 @@ class MemoryManager:
         `metadata` (e.g. the server's received_at and client-supplied GPS on an
         associate's upload) is stored alongside filename/storage_key in the ref.
         """
-        inputs = self._db.get(ProposalInputs, inputs_id)
+        # Read-modify-write of a JSON column: re-read the row under a lock first, or two
+        # overlapping uploads each append to the same old list and the later commit drops
+        # the other's file (BE-20, FE-19 slow connections). SELECT … FOR UPDATE on
+        # PostgreSQL; SQLite serialises writers.
+        inputs = self._db.execute(select(ProposalInputs).where(ProposalInputs.id == inputs_id).with_for_update()
+                                  .execution_options(populate_existing=True)).scalar_one_or_none()
         if inputs is None:
             return None
 

@@ -145,6 +145,9 @@ def _ledger_position(db: Session, payment: Payment) -> tuple[Decimal, Optional[D
     total_paid = money(sum(upto, Decimal(0)))
     onboarding = db.get(CustomerOnboarding, payment.onboarding_id) if payment.onboarding_id is not None else None
     total = accepted_total(db, onboarding) if onboarding is not None else None
+    if payment.lead_id is not None:   # BE-20: a direct customer's total is their schedule's
+        from app.payments import direct
+        total = direct.scheduled_total(db, payment.project_id)
     return total_paid, (total - total_paid if total is not None else None)
 
 

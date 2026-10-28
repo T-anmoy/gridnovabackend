@@ -10853,7 +10853,10 @@
           "survey_reviewed",
           "survey_correction_requested",
           "survey_corrected",
-          "possible_returning_customer"
+          "possible_returning_customer",
+          "payment_recorded",
+          "payment_verified",
+          "payment_dishonoured"
         ],
         "title": "TimelineEventType",
         "type": "string"
@@ -16438,6 +16441,59 @@
         "summary": "Set Associate Commission Rate"
       }
     },
+    "/api/v1/dashboard/associates/{associate_id}/customers": {
+      "get": {
+        "description": "BE-20: the associate's open customers (all of them with `include_closed=true`), so\nstaff can choose which to move: [{onboarding_id, client_code, customer_name, status,\nproject_stage, open}]. The same permission and region rule as reassign-customers.",
+        "operationId": "associate_customers_api_v1_dashboard_associates__associate_id__customers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "associate_id",
+            "required": true,
+            "schema": {
+              "title": "Associate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_closed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Closed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Associate Customers"
+      }
+    },
     "/api/v1/dashboard/associates/{associate_id}/documents/regenerate": {
       "post": {
         "description": "Render and store the ID card and welcome letter again (after a failure, or\nonce the welcome-letter text has been supplied). The associate ID never changes.",
@@ -19541,6 +19597,195 @@
         "summary": "Update Lead Fields Manual"
       }
     },
+    "/api/v1/dashboard/leads/{lead_id}/payment-schedule": {
+      "get": {
+        "description": "The shape of GET /onboardings/{id}/payment-schedule, with lead_id.",
+        "operationId": "lead_schedule_api_v1_dashboard_leads__lead_id__payment_schedule_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lead Schedule"
+      }
+    },
+    "/api/v1/dashboard/leads/{lead_id}/payments": {
+      "get": {
+        "description": "Milestones, payments (staff view, newest first), totals and the project summary —\nthe shape of GET /onboardings/{id}/payments, with lead_id. Before acceptance the\nschedule is empty and the totals null.",
+        "operationId": "lead_payments_api_v1_dashboard_leads__lead_id__payments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lead Payments"
+      },
+      "post": {
+        "description": "Accounts / Admin. 409 not_accepted before the customer accepted; 409\nexceeds_outstanding above the accepted total (cumulative, partial payments allowed);\n422 date_in_future, mode_not_enabled, reference_required, instrument_details_required.",
+        "operationId": "record_lead_payment_api_v1_dashboard_leads__lead_id__payments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Lead Payment"
+      }
+    },
+    "/api/v1/dashboard/leads/{lead_id}/payments/{payment_id}/receipt": {
+      "get": {
+        "description": "The receipt of one verified payment (staff view) with a short-lived link to its PDF\n(`pdf_url`, null while it is held or not rendered yet). The customer's own link is\n`url` (the public token route); it stays null while the receipt is held or void.",
+        "operationId": "lead_receipt_api_v1_dashboard_leads__lead_id__payments__payment_id__receipt_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "title": "Lead Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "payment_id",
+            "required": true,
+            "schema": {
+              "title": "Payment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lead Receipt"
+      }
+    },
     "/api/v1/dashboard/leads/{lead_id}/reflect": {
       "post": {
         "description": "Force a reflection on a lead now, instead of waiting for a milestone.\n\nSynchronous on purpose — the caller asked for it and wants the result, unlike\nthe automatic path where a customer is waiting on a reply.",
@@ -22561,7 +22806,7 @@
     },
     "/api/v1/dashboard/payments": {
       "get": {
-        "description": "`needs_attention=true`: awaiting verification past the threshold, a cheque past\nits hold, proof missing, or a receipt held / not emailed / failed / waiting too long.\ndate_from/date_to filter on recorded_at (inclusive, UTC dates). `q`: customer name,\npayment reference, project reference (GNE-…) or receipt number (GNR-…).\nFiltering, counting and paging happen in SQL — except `needs_attention`, which is\ncomputed per payment, so with it set the filtered rows are checked in Python.",
+        "description": "`needs_attention=true`: awaiting verification past the threshold, a cheque past\nits hold, proof missing, or a receipt held / not emailed / failed / waiting too long.\n`lead_id`: a direct customer's payments (BE-20).\ndate_from/date_to filter on recorded_at (inclusive, UTC dates). `q`: customer name,\npayment reference, project reference (GNE-…) or receipt number (GNR-…).\nFiltering, counting and paging happen in SQL — except `needs_attention`, which is\ncomputed per payment, so with it set the filtered rows are checked in Python.",
         "operationId": "list_payments_api_v1_dashboard_payments_get",
         "parameters": [
           {
@@ -22626,6 +22871,22 @@
                 }
               ],
               "title": "Onboarding Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lead_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lead Id"
             }
           },
           {

@@ -250,9 +250,11 @@ def _all_operations() -> dict[str, set]:
 
 
 def test_every_router_is_covered_by_a_matrix_or_listed_as_uncovered():
+    from tests import test_direct_payments_permissions as direct_payments
     from tests import test_permission_matrix as original
     from tests import test_studio_permissions as studio
-    covered = set(original.COVERED_ROUTERS) | set(COVERED_ROUTERS) | set(studio.COVERED_ROUTERS)
+    covered = set(original.COVERED_ROUTERS) | set(COVERED_ROUTERS) | set(studio.COVERED_ROUTERS) \
+        | set(direct_payments.COVERED_ROUTERS)
     routers = set(_all_operations())
     assert routers - covered - set(UNCOVERED_ROUTERS) == set(), \
         "a router no permission matrix covers — add it to a matrix's COVERED_ROUTERS"

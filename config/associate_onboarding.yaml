@@ -70,6 +70,18 @@ required_documents:
     label: "No-objection certificate (connection or property not in the customer's name)"
     required_when: not_in_customer_name
 
+# BE-20 — the English label for each site-photo slot (the slot codes are fixed:
+# app/memory/models.py INSTALLATION_PHOTO_SLOTS). The code is the stable key the apps
+# translate by; every slot needs a label.
+photo_slot_labels:
+  panel_installation_area: "Panel installation area"
+  acdb_dcdb_placement: "ACDB / DCDB placement"
+  earthing_location: "Earthing location"
+  inverter_installation_area: "Inverter installation area"
+  wiring_path: "Wiring path"
+  panel_to_inverter_distance: "Panel to inverter distance"
+  inverter_to_lt_panel_distance: "Inverter to LT panel distance"
+
 # Sanity checks on what the associate entered. They produce WARNINGS only — never a
 # rejection. [PLACEHOLDER] values are the code author's working assumptions for Grid
 # Nova to confirm or replace.

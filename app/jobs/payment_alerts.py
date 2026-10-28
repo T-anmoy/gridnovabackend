@@ -54,16 +54,53 @@ def check_payment_alerts(db: Session, now: datetime) -> dict:
                 row.overdue_alerted_at = now
                 overdue.append({"onboarding_id": onboarding.id, "customer_name": customer.name if customer else None,
                                 "label": m["label"], "outstanding": m["outstanding"], "due_since": m["due_since"]})
+    overdue += _direct_overdue(db, now)
     for payment in db.execute(select(Payment).where(
             Payment.status.in_([PaymentStatus.recorded, PaymentStatus.deposited]),
             Payment.alerted_at.is_(None))).scalars():
         if "awaiting_verification" in payments.attention(payment, now):
             payment.alerted_at = now
-            waiting.append({"onboarding_id": payment.onboarding_id, "payment_id": payment.id,
-                            "amount": payments.s(payment.amount), "mode": payment.mode.value})
+            item = {"onboarding_id": payment.onboarding_id, "payment_id": payment.id,
+                    "amount": payments.s(payment.amount), "mode": payment.mode.value}
+            if payment.lead_id is not None:   # BE-20: a direct customer — linked by lead
+                item["lead_id"] = payment.lead_id
+            waiting.append(item)
     if overdue or waiting:
         payload = {"overdue_milestones": overdue, "awaiting_verification": waiting}
         MemoryManager(db).notify_after_commit(lambda: notifier_module.notifier.notify("payments_attention", payload),
                                               "payments_attention")
     db.commit()
     return {"overdue_milestones": len(overdue), "awaiting_verification": len(waiting)}
+
+
+def _direct_overdue(db: Session, now: datetime) -> list[dict]:
+    """BE-20: a direct customer's overdue milestone (in practice the advance — app/payments/
+    direct.py), once per milestone, for leads whose verified money does not yet cover
+    their schedule."""
+    from app.memory.models import Lead
+    from app.payments import direct
+
+    scheduled = (select(PaymentMilestone.project_id.label("project_id"),
+                        func.sum(PaymentMilestone.amount_due).label("due"))
+                 .where(PaymentMilestone.lead_id.is_not(None)).group_by(PaymentMilestone.project_id).subquery())
+    received = (select(PaymentLedgerEntry.project_id.label("project_id"),
+                       func.sum(PaymentLedgerEntry.amount).label("paid"))
+                .group_by(PaymentLedgerEntry.project_id).subquery())
+    lead_ids = list(db.execute(
+        select(PaymentMilestone.lead_id).distinct()
+        .join(scheduled, scheduled.c.project_id == PaymentMilestone.project_id)
+        .outerjoin(received, received.c.project_id == PaymentMilestone.project_id)
+        .where(PaymentMilestone.lead_id.is_not(None), PaymentMilestone.overdue_alerted_at.is_(None),
+               func.coalesce(received.c.paid, 0) < scheduled.c.due)
+        .order_by(PaymentMilestone.lead_id)).scalars())
+    out = []
+    for lead in (db.get(Lead, i) for i in lead_ids):
+        customer = db.get(Customer, lead.customer_id)
+        for m in direct.milestone_status(db, lead, now):
+            row = db.get(PaymentMilestone, m["milestone_id"])
+            if m["overdue"] and row.overdue_alerted_at is None:
+                row.overdue_alerted_at = now
+                out.append({"onboarding_id": None, "lead_id": lead.id,
+                            "customer_name": customer.name if customer else None, "label": m["label"],
+                            "outstanding": m["outstanding"], "due_since": m["due_since"]})
+    return out

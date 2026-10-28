@@ -49,6 +49,11 @@ def _validate(data: dict) -> dict:
     docs = ex.get("document_types") or []
     need(slots and len(set(slots)) == len(slots), "execution.photo_slots must list unique slots")
     need(docs and len(set(docs)) == len(docs), "execution.document_types must list unique types")
+    labels = ex.get("labels") or {}
+    for group, names in (("photo_slots", slots), ("document_types", docs)):
+        given = labels.get(group) or {}
+        need(set(names) <= set(given) and all(isinstance(given[n], str) and given[n].strip() for n in names),
+             f"execution.labels.{group} needs an English label for every one of execution.{group}")
     evidence = ex.get("evidence") or {}
     need(set(evidence) == stage_names, "execution.evidence must describe every execution stage")
     for stage, rule in evidence.items():
@@ -137,6 +142,12 @@ def photo_slots() -> list[str]:
 
 def document_types() -> list[str]:
     return list(execution()["document_types"])
+
+
+def labelled(group: str) -> list[dict]:
+    """[{code, label}] for execution.photo_slots or execution.document_types (BE-20)."""
+    labels = execution()["labels"][group]
+    return [{"code": code, "label": labels[code]} for code in execution()[group]]
 
 
 def photo_policy() -> dict:

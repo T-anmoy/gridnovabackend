@@ -106,6 +106,10 @@ def attach_file(db: Session, execution: ProjectExecution, *, kind: str, name: st
     type. Earlier files stay referenced by any submission that snapshotted them."""
     item = {"file_ref": uuid.uuid4().hex, "filename": filename, "storage_key": storage_key,
             "content_type": content_type, "received_at": _now().isoformat(), "uploaded_by": uploaded_by, **extra}
+    # Re-read `files` under a row lock: two overlapping uploads must not each write back
+    # their own copy of the old dict (BE-20 — the later commit dropped the other's file).
+    execution = db.execute(select(ProjectExecution).where(ProjectExecution.id == execution.id).with_for_update()
+                           .execution_options(populate_existing=True)).scalar_one()
     files = {"photos": dict((execution.files or {}).get("photos") or {}),
              "documents": dict((execution.files or {}).get("documents") or {})}
     files["photos" if kind == "photo" else "documents"][name] = item
@@ -490,6 +494,8 @@ def status(db: Session, onboarding: CustomerOnboarding, staff: bool = False) -> 
         "pending_submission": submission_json(pending[0]) if pending else None,
         "stages": items,
         "photo_slots": config.photo_slots(), "document_types": config.document_types(),
+        # BE-20: the same names as {code, label}, for translating by code.
+        "photo_slot_items": config.labelled("photo_slots"), "document_type_items": config.labelled("document_types"),
         "files": {"photos": {k: _public_file(v) for k, v in (files.get("photos") or {}).items()},
                   "documents": {k: _public_file(v) for k, v in (files.get("documents") or {}).items()}},
         "flags": extras["register"]["flags"],

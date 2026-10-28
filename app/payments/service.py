@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 from app.associates.service import AssociateError
 from app.execution import config
 from app.memory.models import (
-    INSTRUMENT_MODES, AuditLog, Customer, CustomerOnboarding, LedgerEntryKind, OnboardingStatus, Payment,
+    INSTRUMENT_MODES, AuditLog, Customer, CustomerOnboarding, Lead, LedgerEntryKind, OnboardingStatus, Payment,
     PaymentLedgerEntry, PaymentMilestone, PaymentMode, PaymentStatus, Project, ProjectStage, Proposal,
     ProposalStatus,
 )
@@ -233,10 +233,18 @@ def milestone_status(db: Session, onboarding: CustomerOnboarding, now: Optional[
     amount. Amounts as decimal strings."""
     from app.onboarding import progress
 
-    now = now or _now()
-    rows = milestones(db, onboarding.project_id)
     done = progress.recorded(db, onboarding.project_id)
-    remaining = paid(db, onboarding.project_id)
+    return status_rows(milestones(db, onboarding.project_id), paid(db, onboarding.project_id),
+                       lambda stage: done[stage].recorded_at if stage in done else None, now)
+
+
+def status_rows(rows: list[PaymentMilestone], received: Decimal, reached, now: Optional[datetime] = None) -> list[dict]:
+    """The milestones' computed statuses: `received` (the verified total) is applied in
+    milestone order, and `reached(stage)` says when a trigger stage was reached (None:
+    not yet). Shared by associate customers (stages from the project's stage log) and
+    direct customers (app/payments/direct.py)."""
+    now = now or _now()
+    remaining = received
     overdue_days = _cfg()["thresholds"]["milestone_overdue_days"]
     out = []
     for m in rows:
@@ -246,16 +254,16 @@ def milestone_status(db: Session, onboarding: CustomerOnboarding, now: Optional[
             trigger = ProjectStage(m.trigger)
         except ValueError:
             trigger = None
-        event = done.get(trigger) if trigger else None
+        reached_at = reached(trigger) if trigger else None
         if toward >= m.amount_due:
             state = "paid"
-        elif event is None:
+        elif reached_at is None:
             state = "not_due"
         elif toward > 0:
             state = "partially_paid"
         else:
             state = "due"
-        due_since = _aware(event.recorded_at) if event else None
+        due_since = _aware(reached_at) if reached_at else None
         overdue = state in ("due", "partially_paid") and due_since is not None and \
             now - due_since > timedelta(days=overdue_days)
         out.append({"milestone_id": m.id, "number": m.number, "label": m.label, "percent": str(m.percent),
@@ -313,6 +321,17 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
         raise AssociateError("The accepted proposal has no total yet; ask Grid Nova to set it.",
                              code="no_accepted_total", status_code=409)
     ensure_schedule(db, onboarding, actor)
+    return record_payment(db, project_id=onboarding.project_id, total=total, data=data, actor=actor,
+                          owner={"onboarding_id": onboarding.id}, by_associate=by_associate)
+
+
+def record_payment(db: Session, *, project_id: int, total: Decimal, data: dict, actor: str, owner: dict,
+                   by_associate: bool, overpayment_code: str = "exceeds_project_total",
+                   check_instrument_date=None) -> Payment:
+    """Validate and insert one payment on a project whose accepted total and schedule
+    exist — the part shared by associate customers (`record`) and direct customers
+    (app/payments/direct.py). `owner` is {"onboarding_id": …} or {"lead_id": …}.
+    `check_instrument_date(date)`, when given, may refuse the date (AssociateError)."""
     amount = parse_amount(data.get("amount"))
     try:
         mode = PaymentMode(data.get("mode"))
@@ -338,24 +357,28 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
         raise AssociateError("A cheque or demand draft needs the bank name and its date.",
                              code="instrument_details_required", status_code=422,
                              field="bank_name" if not bank else "instrument_date")
+    if check_instrument_date is not None and instrument_date:
+        check_instrument_date(instrument_date)
     milestone_id = data.get("milestone_id")
-    if milestone_id is not None and not any(m.id == milestone_id for m in milestones(db, onboarding.project_id)):
+    if milestone_id is not None and not any(m.id == milestone_id for m in milestones(db, project_id)):
         raise AssociateError("That milestone is not on this project.", code="unknown_milestone", status_code=422,
                              field="milestone_id")
     tolerance = Decimal(str(_cfg()["thresholds"]["overpayment_tolerance_inr"]))
     # Lock the project row before summing: two payments recorded at the same moment
     # must not both pass the overpayment check (SELECT … FOR UPDATE on PostgreSQL;
     # SQLite serialises writers anyway). Held until this transaction ends.
-    db.execute(select(Project.id).where(Project.id == onboarding.project_id).with_for_update())
-    counted = sum((p.amount for p in _live_payments(db, onboarding.project_id)
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
+    counted = sum((p.amount for p in _live_payments(db, project_id)
                    if p.status != PaymentStatus.dishonoured), Decimal(0))
     if counted + amount > total + tolerance:
+        extra = {"accepted_total": s(total), "already_recorded": s(counted)}
+        if overpayment_code != "exceeds_project_total":
+            extra["outstanding"] = s(max(total - counted, Decimal(0)))
         raise AssociateError("This payment would take the total received above the accepted proposal total.",
-                             code="exceeds_project_total", status_code=409,
-                             extra={"accepted_total": s(total), "already_recorded": s(counted)})
-    previous_id = _previous_dishonoured(db, onboarding.project_id, mode, ref_norm, normalize_bank(bank))
-    payment = Payment(project_id=onboarding.project_id, onboarding_id=onboarding.id, milestone_id=milestone_id,
-                      previous_payment_id=previous_id,
+                             code=overpayment_code, status_code=409, extra=extra)
+    previous_id = _previous_dishonoured(db, project_id, mode, ref_norm, normalize_bank(bank))
+    payment = Payment(project_id=project_id, onboarding_id=owner.get("onboarding_id"), lead_id=owner.get("lead_id"),
+                      milestone_id=milestone_id, previous_payment_id=previous_id,
                       amount=amount, mode=mode, reference=reference[:100], reference_normalized=ref_norm,
                       bank_name=bank, bank_name_normalized=normalize_bank(bank), instrument_date=instrument_date or None,
                       payer_name=((data.get("payer_name") or "").strip() or None), status=PaymentStatus.recorded,
@@ -368,9 +391,9 @@ def record(db: Session, onboarding: CustomerOnboarding, data: dict, actor: str, 
         raise AssociateError("This payment (same mode, reference and bank) is already recorded.",
                              code="duplicate_payment_reference", status_code=409, field="reference")
     db.add(AuditLog(entity_type="payment", entity_id=str(payment.id), action="recorded", performed_by=actor,
-                    after_value={"onboarding_id": onboarding.id, "amount": s(amount), "mode": mode.value,
+                    after_value={**owner, "amount": s(amount), "mode": mode.value,
                                  "by_associate": by_associate, "previous_payment_id": previous_id}))
-    _notify(db, "payment_recorded", payment)
+    notify(db, "payment_recorded", payment)
     return payment
 
 
@@ -470,6 +493,9 @@ def verify(db: Session, payment_id: int, actor: str, *, is_admin: bool = False,
     # this payment's row lock (app/commissions/service.py).
     from app.commissions import service as commissions
     commissions.on_payment_verified(db, payment, actor)
+    if payment.lead_id is not None:
+        from app.payments import direct
+        direct.on_verified(db, payment, actor)
     return payment
 
 
@@ -509,7 +535,10 @@ def dishonour(db: Session, payment_id: int, actor: str, reason: str) -> Payment:
                     after_value={"status": "dishonoured", "reason": reason,
                                  "reversal_entry_id": reversal.id if reversal else None}))
     db.flush()
-    _notify(db, "payment_dishonoured", payment)
+    if payment.lead_id is not None:
+        from app.payments import direct
+        direct.on_dishonoured(db, payment, actor)
+    notify(db, "payment_dishonoured", payment)
     return payment
 
 
@@ -567,7 +596,8 @@ def payment_json(db: Session, payment: Payment, *, staff: bool = True, receipt=_
     if receipt is _LOOKUP:
         receipt = receipts.for_payment(db, payment.id)
     body = {
-        "payment_id": payment.id, "onboarding_id": payment.onboarding_id, "milestone_id": payment.milestone_id,
+        "payment_id": payment.id, "onboarding_id": payment.onboarding_id, "lead_id": payment.lead_id,
+        "milestone_id": payment.milestone_id,
         "previous_payment_id": payment.previous_payment_id,
         "amount": s(payment.amount), "mode": payment.mode.value, "reference": payment.reference,
         "bank_name": payment.bank_name,
@@ -597,6 +627,9 @@ def payment_project_summary(db: Session, payment: Payment) -> dict:
     onboarding = onboarding_of(db, payment)
     if onboarding is not None:
         return project_summary(db, onboarding)
+    if payment.lead_id is not None:
+        from app.payments import direct
+        return direct.project_summary(db, db.get(Lead, payment.lead_id))
     customer, project = customer_of(db, payment), db.get(Project, payment.project_id)
     received = paid(db, payment.project_id)
     return {"onboarding_id": None, "customer_name": customer.name if customer else None,
@@ -619,7 +652,7 @@ def project_summary(db: Session, onboarding: CustomerOnboarding) -> dict:
             "current_stage": timeline["current_stage"], **totals(db, onboarding)}
 
 
-def _notify(db: Session, event: str, payment: Payment) -> None:
+def notify(db: Session, event: str, payment: Payment) -> None:
     from app.memory.memory_manager import MemoryManager
     from app.notifications import notifier as notifier_module
 
@@ -627,4 +660,8 @@ def _notify(db: Session, event: str, payment: Payment) -> None:
     payload = {"payment_id": payment.id, "onboarding_id": payment.onboarding_id, "amount": s(payment.amount),
                "mode": payment.mode.value, "customer_name": customer.name if customer else None,
                "recorded_by": payment.recorded_by, "reason": payment.dishonour_reason}
+    if payment.lead_id is not None:
+        # A direct customer: the lead routes the alert to its assigned employee too
+        # (config/access_control.yaml alerts). Associate customers' payloads are unchanged.
+        payload["lead_id"] = payment.lead_id
     MemoryManager(db).notify_after_commit(lambda: notifier_module.notifier.notify(event, payload), event)

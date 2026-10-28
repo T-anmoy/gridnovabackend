@@ -31,6 +31,7 @@ from app.memory.models import (
     ShadingCondition, SiteType, SocietyNocStatus, SurveyVariant,
 )
 from app.onboarding import config, serialize, service, site_location
+from app.pricing.engine import KNOWN_SEGMENTS
 from app.survey import config as survey_config
 
 router = APIRouter(prefix="/api/v1/associate/onboardings")
@@ -230,9 +231,12 @@ def options(current: AuthenticatedAssociate = Depends(get_current_associate)):
         "notice": {"version": version, "text": text},
         "equipment_packages": [{"key": k, "label": v["label"], "equipment_tier": v["equipment_tier"]}
                                for k, v in cfg["equipment_packages"].items()],
-        "documents": [{"key": d["key"], "label": d["label"], "required_when": d["required_when"]}
+        # `code` (BE-20) is `key` again: every name the app translates comes as {code, label}.
+        "documents": [{"key": d["key"], "code": d["key"], "label": d["label"], "required_when": d["required_when"]}
                       for d in cfg["required_documents"]],
         "photo_slots": list(INSTALLATION_PHOTO_SLOTS),
+        "photo_slot_items": config.photo_slot_items(),
+        "estimate_segments": list(KNOWN_SEGMENTS),
         "customer_timelines": [t.value for t in CustomerTimeline],
         "site_location": site_location.options(),
         "survey": survey_config.options(),

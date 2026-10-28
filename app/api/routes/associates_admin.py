@@ -442,6 +442,19 @@ class ReassignCustomersRequest(BaseModel):
     onboarding_ids: Optional[list[int]] = Field(default=None, max_length=500)
 
 
+@router.get("/associates/{associate_id}/customers")
+def associate_customers(associate_id: str, include_closed: bool = False, db: Session = Depends(get_db),
+                        employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """BE-20: the associate's open customers (all of them with `include_closed=true`), so
+    staff can choose which to move: [{onboarding_id, client_code, customer_name, status,
+    project_stage, open}]. The same permission and region rule as reassign-customers."""
+    _require(employee.can_review_associate_applications(), "see an associate's customers")
+    associate = _load_associate(db, associate_id, employee)
+    items = reassignment.customers(db, associate, include_closed=include_closed)
+    return {"associate_id": associate.associate_id, "items": items,
+            "open_customers": sum(1 for i in items if i["open"])}
+
+
 @router.post("/associates/{associate_id}/reassign-customers")
 def reassign_customers(associate_id: str, body: ReassignCustomersRequest, db: Session = Depends(get_db),
                        employee: AuthenticatedEmployee = Depends(get_current_employee)):

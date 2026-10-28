@@ -123,3 +123,116 @@ page that does not exist).
 
 `GET /associate/onboardings/options` → the notice is now Grid Nova's text (version
 `approved-v1`, the drafted notice used as written); onboardings record that version.
+
+---
+
+# BE-20 additions
+
+## 9. Documents and photos
+
+### Rules
+
+- **Site-assessment documents:** one per `document_type`, taken from `GET /associate/onboardings/options`
+  → `documents[].key`. Which are required depends on `required_when`:
+  - `always`;
+  - `scheme_linked` — the site assessment says the project is scheme-linked;
+  - `not_in_customer_name` — the connection or the property is not in the customer's name.
+- **The checklist:** `checklist: {required, present, missing}` on the onboarding. Submitting
+  with a missing document answers 422 `incomplete` with `missing_documents`.
+- **Site photos:** one per `photo_slot`; a new upload replaces the slot.
+- **Execution photos and documents:** one per slot or type. The latest is kept; a submission keeps
+  the files it used.
+- **Upload limits:** documents JPEG/PNG/WEBP/PDF, photos JPEG/PNG/WEBP; each ≤ 10 MB.
+
+Upload: `POST /associate/onboardings/{id}/files` (multipart).
+- Fields: `kind` (`document` | `photo`), `document_type` or `photo_slot`, and for photos
+  `capture_method`, `latitude`/`longitude`, `captured_at`, `accuracy_m`.
+- Response: the onboarding.
+
+### Names, as `{code, label}` (additive; the old fields stay)
+
+| Where | Old field (unchanged) | New field |
+|---|---|---|
+| `GET /associate/onboardings/options` | `documents: [{key, label, required_when}]` | each document also has `code` (= `key`) |
+| `GET /associate/onboardings/options` | `photo_slots: ["panel_installation_area", …]` | `photo_slot_items: [{code, label}]` |
+| `GET /associate/onboardings/{id}/execution` (and the staff view) | `photo_slots`, `document_types` (lists of codes) | `photo_slot_items`, `document_type_items: [{code, label}]` |
+
+Translate by `code`. `label` is the English text (from `config/associate_onboarding.yaml`
+`photo_slot_labels` and `config/execution_payments.yaml` `execution.labels`).
+
+| Site-photo code | Label |
+|---|---|
+| `panel_installation_area` | Panel installation area |
+| `acdb_dcdb_placement` | ACDB / DCDB placement |
+| `earthing_location` | Earthing location |
+| `inverter_installation_area` | Inverter installation area |
+| `wiring_path` | Wiring path |
+| `panel_to_inverter_distance` | Panel to inverter distance |
+| `inverter_to_lt_panel_distance` | Inverter to LT panel distance |
+
+| Document code | Label |
+|---|---|
+| `electricity_bill` | Latest electricity bill |
+| `id_proof` | Customer ID proof |
+| `ownership_proof` | Property ownership proof |
+| `subsidy_bank_details` | Bank details for subsidy credit |
+| `photo` | Customer / site photo |
+| `noc` | No-objection certificate (connection or property not in the customer's name) |
+
+### Response shapes
+
+On the onboarding:
+- `documents: [{document_type, file_ref, filename, received_at, latitude, longitude, client_captured_at}]`;
+- `photos: [{photo_slot, file_ref, filename, received_at, latitude, longitude, client_captured_at,
+  capture_method, …provenance, accuracy_m}]`.
+
+Coordinates are given only to the owner and staff.
+
+**Fixed:** two uploads made at the same time (slow connections) no longer lose one of the
+files, for site-assessment documents and photos and for execution files.
+
+### The estimate's `segment`
+
+`segment` is one of `residential`, `commercial`, `industrial`, `government`. They are also served
+as `estimate_segments` on `/options`.
+- Rooftop-residential and rooftop-commercial sites set it themselves.
+- Any other site type needs it chosen (422 `segment_required`).
+- Anything else is 422 `invalid_segment`.
+
+## 10. `GET /dashboard/associates/{associate_id}/customers`
+
+Permission: `associates.applications.review` (Admin, Network Manager), the same as
+reassign-customers. The associate's state must be in the caller's regions.
+
+Query `include_closed=true` includes closed customers. Response:
+
+```json
+{"associate_id": "GNA-WB-26-00007", "open_customers": 2,
+ "items": [{"onboarding_id": 31, "client_code": "GNE-WB-RES-2026-00031", "customer_name": "…",
+            "status": "verified", "project_stage": "accepted", "open": true}, …]}
+```
+
+- **Order:** oldest first.
+- **`open`:** "not closed", the same test the move uses.
+- **`project_stage`:** the last stage recorded, or null.
+
+## 11. `duplicate_onboarding`
+
+`POST /associate/onboardings` and a `PATCH` that changes the mobile or consumer number answer
+**409** `duplicate_onboarding` when **the same associate** already has an open record for that
+customer (same mobile or consumer number). **New:** it names that record:
+
+```json
+{"code": "duplicate_onboarding", "message": "You have already onboarded this customer (same mobile). Update that record instead.",
+ "field": "customer_mobile", "existing_onboarding_id": 31, "client_code": "GNE-WB-RES-2026-00031"}
+```
+
+Another associate's match is never refused and never named. The record is created and flagged
+for attribution review (warning `attribution_review`), exactly as before.
+
+## 12. `GET /public/verify/{associate_id}` — unchanged
+
+It still returns only `{name, photo_url, type, level, status: "active" | "inactive"}`. No
+`status_detail` was added: telling suspended from deactivated would publish a disciplinary state
+that the public `inactive` deliberately does not reveal.
+

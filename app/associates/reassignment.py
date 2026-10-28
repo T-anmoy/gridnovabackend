@@ -90,3 +90,27 @@ def open_customer_count(db: Session, associate: Associate) -> int:
     return db.execute(select(func.count()).select_from(CustomerOnboarding).where(
         CustomerOnboarding.owner_associate_id == associate.id,
         CustomerOnboarding.status != OnboardingStatus.closed)).scalar_one()
+
+
+def customers(db: Session, associate: Associate, *, include_closed: bool = False) -> list[dict]:
+    """The associate's customers, oldest first — open ones only unless `include_closed` —
+    for staff choosing which to move (POST …/reassign-customers). `open` is "not closed",
+    the same test the move applies."""
+    from app.memory.models import Customer, Project
+    from app.onboarding import preload, progress
+
+    q = select(CustomerOnboarding).where(CustomerOnboarding.owner_associate_id == associate.id)
+    if not include_closed:
+        q = q.where(CustomerOnboarding.status != OnboardingStatus.closed)
+    rows = list(db.execute(q.order_by(CustomerOnboarding.id)).scalars())
+    if not rows:
+        return []
+    projects = {p.id: p for p in db.execute(select(Project).where(
+        Project.id.in_([o.project_id for o in rows]))).scalars()}
+    names = dict(db.execute(select(Customer.id, Customer.name).where(
+        Customer.id.in_([o.customer_id for o in rows]))).all())
+    with preload.preloaded(db, rows):
+        return [{"onboarding_id": o.id, "client_code": projects[o.project_id].reference_id,
+                 "customer_name": names.get(o.customer_id), "status": o.status.value,
+                 "project_stage": progress.timeline(db, o)["current_stage"],
+                 "open": o.status != OnboardingStatus.closed} for o in rows]

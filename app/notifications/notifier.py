@@ -170,7 +170,8 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked", "proposal_
                       "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
                       "survey_review_overdue",
                       "catalogue_unmatched",
-                      "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
+                      "payment_recorded", "payment_verified", "payment_dishonoured", "receipt_blocked",
+                      "payments_attention",
                       "commission_queries_overdue", "handover_blocked", "service_request_raised",
                       "service_requests_overdue", "associate_application_submitted",
                       "studio_approval_requested", "studio_converted", "studio_viewed", "studio_accepted",
@@ -183,7 +184,7 @@ OWNER_ONLY_EVENTS = ("studio_viewed", "studio_accepted", "studio_declined", "stu
 # (ACCOUNTS_NOTIFY_EMAILS / OPERATIONS_NOTIFY_EMAILS), else to STAFF_NOTIFY_EMAILS.
 EVENT_AUDIENCE = {"stage_submitted": ("operations",), "execution_stuck": ("operations",),
                   "dcr_mismatch": ("operations", "staff"), "catalogue_unmatched": ("operations",),
-                  "payment_recorded": ("accounts",),
+                  "payment_recorded": ("accounts",), "payment_verified": ("accounts",),
                   "payment_dishonoured": ("accounts", "staff"), "receipt_blocked": ("accounts",),
                   "payments_attention": ("accounts",), "commission_queries_overdue": ("accounts",),
                   "handover_blocked": ("operations",), "service_request_raised": ("operations",),
@@ -278,17 +279,28 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
                  "Match each unit to a catalogue item (or add the item first). The serial register cannot be "
                  "verified until every unit is matched."],
                 "Open the customer", lead_url)
-    if event_type in ("payment_recorded", "payment_dishonoured"):
+    if event_type in ("payment_recorded", "payment_verified", "payment_dishonoured"):
         who = payload.get("customer_name") or "a customer"
         amount = f"INR {payload.get('amount')} by {str(payload.get('mode', '')).replace('_', ' ').upper()}"
+        # BE-20: a direct customer's payment carries lead_id and no onboarding_id.
+        direct = payload.get("onboarding_id") is None and payload.get("lead_id") is not None
         if event_type == "payment_recorded":
             return (f"Payment to verify: {who} — {amount}",
                     [f"{payload.get('recorded_by')} recorded a payment of {amount} for {who} "
-                     f"(associate-sourced customer #{payload.get('onboarding_id')}).",
+                     + (f"(direct customer, lead #{payload.get('lead_id')})." if direct
+                        else f"(associate-sourced customer #{payload.get('onboarding_id')})."),
                      "Confirm it has reached Grid Nova's bank, then verify it."],
                     "Open the customer", lead_url)
+        if event_type == "payment_verified":
+            return (f"Payment verified: {who} — {amount}",
+                    [f"A payment of {amount} for {who} (direct customer, lead #{payload.get('lead_id')}) is "
+                     "verified: the funds are in Grid Nova's bank.",
+                     "The receipt is numbered now and sent to the customer once its wording is final."],
+                    "Open the customer", lead_url)
         return (f"Payment dishonoured: {who} — {amount}",
-                [f"A payment of {amount} for {who} (customer #{payload.get('onboarding_id')}) was dishonoured.",
+                [f"A payment of {amount} for {who} "
+                 + (f"(direct customer, lead #{payload.get('lead_id')})" if direct
+                    else f"(customer #{payload.get('onboarding_id')})") + " was dishonoured.",
                  f"Reason: {payload.get('reason')}"],
                 "Open the customer", lead_url)
     if event_type == "receipt_blocked":
@@ -455,14 +467,19 @@ def _render_payments_attention(payload: dict, base_url: str) -> tuple[str, str, 
     overdue, waiting = payload.get("overdue_milestones") or [], payload.get("awaiting_verification") or []
     subject = f"Payments needing attention: {len(overdue)} overdue, {len(waiting)} awaiting verification"
     rows_html, rows_text = [], []
+    def customer_url(item: dict) -> str:   # BE-20: a direct customer has a lead, not an onboarding
+        if item.get("onboarding_id") is None and item.get("lead_id") is not None:
+            return f"{base_url}/dashboard/leads/{item.get('lead_id')}"
+        return f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+
     for item in overdue:
-        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        url = customer_url(item)
         line = (f"{item.get('customer_name') or 'Customer'} — {item.get('label')} overdue, INR "
                 f"{item.get('outstanding')} outstanding")
         rows_html.append(f'<li><a href="{_esc(url)}">{_esc(line)}</a></li>')
         rows_text.append(f"- {line}\n  {url}")
     for item in waiting:
-        url = f"{base_url}/dashboard/onboardings/{item.get('onboarding_id')}"
+        url = customer_url(item)
         line = f"Payment #{item.get('payment_id')} — INR {item.get('amount')} by {item.get('mode')}, not yet verified"
         rows_html.append(f'<li><a href="{_esc(url)}">{_esc(line)}</a></li>')
         rows_text.append(f"- {line}\n  {url}")
