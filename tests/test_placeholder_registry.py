@@ -162,11 +162,13 @@ class TestProbes:
         entry = registry.load().by_id["ONB-1"]
         shutil.copytree(registry.REPO_ROOT / "config", tmp_path / "config")
         path = tmp_path / "config" / "associate_onboarding.yaml"
-        text = path.read_text(encoding="utf-8").replace(
-            'current_notice_version: "placeholder-v0"\nnotice_versions:\n',
-            'current_notice_version: "v1"\nnotice_versions:\n  v1:\n    text: >-\n      Real notice.\n')
-        path.write_text(text, encoding="utf-8")
+        live = path.read_text(encoding="utf-8")
         monkeypatch.setattr(registry, "REPO_ROOT", tmp_path)
+        # BE-19: the live file points at approved-v1; pointed back at the placeholder it is open.
+        path.write_text(live.replace('current_notice_version: "approved-v1"', 'current_notice_version: "placeholder-v0"'),
+                        encoding="utf-8")
+        assert registry.evaluate(entry)["resolved"] is False
+        path.write_text(live, encoding="utf-8")
         assert registry.evaluate(entry)["resolved"] is True   # the old version keeps its marker, as history
 
     def test_constant_probe(self, monkeypatch):

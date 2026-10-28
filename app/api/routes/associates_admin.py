@@ -14,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import app.notifications.notifier as notifier_module
-from app.associates import issuance, service
+from app.associates import issuance, reassignment, service
+from app.notifications import associate_emails
 from app.auth.dependencies import AuthenticatedEmployee, get_current_employee
 from app.auth.scoping import region_state_ids, require_region
 from app.memory.db import get_db
@@ -133,10 +134,14 @@ def _serialize_application(db: Session, application, application_type: Associate
     return data
 
 
-def _load_application(db: Session, application_type: AssociateType, application_id: int):
+def _load_application(db: Session, application_type: AssociateType, application_id: int,
+                      employee: AuthenticatedEmployee):
+    """The application, refused outside the employee's regions (BE-17; BE-19 applies it to
+    every per-application route, not only the detail)."""
     application = service.get_application(db, application_type, application_id)
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
+    require_region(db, employee, application.state_id)
     return application
 
 
@@ -184,8 +189,7 @@ def list_applications(
 def get_application(application_type: AssociateType, application_id: int, db: Session = Depends(get_db),
                     employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "review associate applications")
-    application = _load_application(db, application_type, application_id)
-    require_region(db, employee, application.state_id)
+    application = _load_application(db, application_type, application_id, employee)
     body = _serialize_application(db, application, application_type, full=True, reviewer=employee.employee_id)
     db.commit()   # the PAN-decryption audit row
     return body
@@ -197,7 +201,7 @@ def application_document_link(application_type: AssociateType, application_id: i
                               employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """A short-lived signed link to one uploaded KYC document."""
     _require(employee.can_review_associate_applications(), "review associate applications")
-    application = _load_application(db, application_type, application_id)
+    application = _load_application(db, application_type, application_id, employee)
     meta = (application.documents or {}).get(document) if document in APPLICATION_DOCUMENTS else None
     if not meta:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -224,13 +228,18 @@ def change_application_status(application_type: AssociateType, application_id: i
     """submitted → under_review; under_review → needs_info (note required) or
     rejected (reason required, as `note`); needs_info → under_review."""
     _require(employee.can_review_associate_applications(), "review associate applications")
-    application = _load_application(db, application_type, application_id)
+    application = _load_application(db, application_type, application_id, employee)
     try:
         service.change_application_status(db, application, application_type, ApplicationStatus(body.status),
                                           employee.employee_id, body.note)
     except service.AssociateError as exc:
         db.rollback()
         raise _error(exc)
+    # BE-19: the applicant is told what is needed, or why it was refused.
+    if application.status == ApplicationStatus.needs_info:
+        associate_emails.application_needs_info(db, application, application.needs_info_note)
+    elif application.status == ApplicationStatus.rejected:
+        associate_emails.application_rejected(db, application, application.rejection_reason)
     db.commit()
     body = _serialize_application(db, application, application_type, full=True, reviewer=employee.employee_id)
     db.commit()   # the PAN-decryption audit row
@@ -272,7 +281,7 @@ def approve_application(application_type: AssociateType, application_id: int, bo
             "code": "verification_call_required", "field": "verification_call_completed",
             "message": "Complete the verification call before approving.",
         })
-    _load_application(db, application_type, application_id)
+    _load_application(db, application_type, application_id, employee)
     # Lock the application row: a second, simultaneous approval waits here and then
     # sees it approved (invalid_transition) instead of racing to insert a duplicate.
     model = service.APPLICATION_MODELS[application_type]
@@ -353,10 +362,12 @@ def serialize_associate(db: Session, associate: Associate) -> dict:
     }
 
 
-def _load_associate(db: Session, associate_id: str) -> Associate:
+def _load_associate(db: Session, associate_id: str, employee: AuthenticatedEmployee) -> Associate:
+    """The associate, refused outside the employee's regions (every per-associate route)."""
     associate = service.get_associate(db, associate_id)
     if associate is None:
         raise HTTPException(status_code=404, detail="Associate not found")
+    require_region(db, employee, associate.state_id)
     return associate
 
 
@@ -385,8 +396,7 @@ def list_associates(status: Optional[AssociateStatus] = None, associate_type: Op
 def get_associate(associate_id: str, db: Session = Depends(get_db),
                   employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "view associates")
-    associate = _load_associate(db, associate_id)
-    require_region(db, employee, associate.state_id)
+    associate = _load_associate(db, associate_id, employee)
     return serialize_associate(db, associate)
 
 
@@ -399,9 +409,17 @@ class AssociateStatusRequest(BaseModel):
 def change_associate_status(associate_id: str, body: AssociateStatusRequest, db: Session = Depends(get_db),
                             employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """active ⇄ suspended → deactivated. Suspending or deactivating needs a reason.
-    Deactivation is final and releases the associate's seat; suspension keeps it."""
+    Deactivation is final and releases the associate's seat; suspension keeps it.
+
+    BE-19: after the change commits, Clerk access follows it — suspending or
+    deactivating bans the associate's Clerk user (every session ends) or revokes an
+    unaccepted invitation; reinstating unbans. The database refuses a non-active
+    associate on every request regardless, so a Clerk failure is reported (`access`)
+    and the change stands. `open_customers` says how many customers still need moving
+    (POST …/reassign-customers); a suspended associate's commission is frozen."""
     _require(employee.can_review_associate_applications(), "change an associate's status")
-    associate = _load_associate(db, associate_id)
+    associate = _load_associate(db, associate_id, employee)
+    before = associate.status
     try:
         service.change_associate_status(db, associate, AssociateStatus(body.status), employee.employee_id,
                                         body.reason)
@@ -409,17 +427,52 @@ def change_associate_status(associate_id: str, body: AssociateStatusRequest, db:
         db.rollback()
         raise _error(exc)
     db.commit()
-    return serialize_associate(db, associate)
+    if associate.status == AssociateStatus.active:
+        access = issuance.restore_access(db, associate, employee.employee_id) if before != associate.status else None
+    else:
+        access = issuance.revoke_access(db, associate, employee.employee_id)
+    return {**serialize_associate(db, associate), "access": access,
+            "open_customers": reassignment.open_customer_count(db, associate)}
+
+
+class ReassignCustomersRequest(BaseModel):
+    to_associate_id: str = Field(min_length=1, max_length=32)
+    reason: str = Field(max_length=2000)
+    # Omitted: every open customer of the associate.
+    onboarding_ids: Optional[list[int]] = Field(default=None, max_length=500)
+
+
+@router.post("/associates/{associate_id}/reassign-customers")
+def reassign_customers(associate_id: str, body: ReassignCustomersRequest, db: Session = Depends(get_db),
+                       employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """BE-19: move a suspended or deactivated associate's open customers to an active
+    associate (app/associates/reassignment.py). Both associates must be in the caller's
+    regions. Audited per customer."""
+    _require(employee.can_review_associate_applications(), "move an associate's customers")
+    source = _load_associate(db, associate_id, employee)
+    target = _load_associate(db, body.to_associate_id, employee)
+    try:
+        result = reassignment.reassign_customers(db, source, target, employee.employee_id, body.reason,
+                                                 body.onboarding_ids)
+    except service.AssociateError as exc:
+        db.rollback()
+        raise _error(exc)
+    associate_emails.customers_assigned(db, target, len(result["onboarding_ids"]))
+    db.commit()
+    return result
 
 
 @router.post("/associates/{associate_id}/clerk-invite")
 def retry_clerk_invite(associate_id: str, db: Session = Depends(get_db),
                        employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Send (or re-send after a failure) the associate's Clerk invitation."""
+    """Send the associate's Clerk invitation — or send it again: after a failure, or
+    (BE-19) when the one sent was never accepted (expired, lost, wrong address since
+    corrected), which revokes the old invitation first. Refused once the associate has
+    signed in (409 invalid_transition)."""
     _require(employee.can_review_associate_applications(), "invite associates")
-    associate = _load_associate(db, associate_id)
+    associate = _load_associate(db, associate_id, employee)
     try:
-        issuance.send_clerk_invite(db, associate, employee.employee_id)
+        issuance.send_clerk_invite(db, associate, employee.employee_id, resend=True)
     except service.AssociateError as exc:
         db.rollback()
         raise _error(exc)
@@ -432,7 +485,7 @@ def regenerate_documents(associate_id: str, db: Session = Depends(get_db),
     """Render and store the ID card and welcome letter again (after a failure, or
     once the welcome-letter text has been supplied). The associate ID never changes."""
     _require(employee.can_review_associate_applications(), "issue associate documents")
-    associate = _load_associate(db, associate_id)
+    associate = _load_associate(db, associate_id, employee)
     issuance.generate_documents(db, associate, employee.employee_id, service.today_ist())
     db.refresh(associate)
     return serialize_associate(db, associate)
@@ -457,7 +510,7 @@ def associate_document_link(associate_id: str, document: Literal["id_card", "wel
                             db: Session = Depends(get_db),
                             employee: AuthenticatedEmployee = Depends(get_current_employee)):
     _require(employee.can_review_associate_applications(), "view associate documents")
-    return document_link(_load_associate(db, associate_id), document)
+    return document_link(_load_associate(db, associate_id, employee), document)
 
 
 # ── Territories ──────────────────────────────────────────────────────────────────

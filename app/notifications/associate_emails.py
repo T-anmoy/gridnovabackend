@@ -5,7 +5,12 @@
   * a payment was verified, with the receipt link;
   * an Engineer reviewed the customer's site survey (S1), with what to do next;
   * BE-12: an Admin changed the associate's own commission rate (the rates and the date
-    only — never the reason, which is internal).
+    only — never the reason, which is internal);
+  * BE-19: to an APPLICANT (not yet an associate) — the application was received, Grid
+    Nova needs more information, or it was rejected (with the reason the reviewer gave).
+
+An associate who is no longer active (suspended or deactivated) is not emailed about
+customers: their customers are being looked after by someone else.
 
 Sent after the commit, never raising. Skipped cleanly when NOTIFY_ASSOCIATES is off or
 the associate has no email. Each email names only that customer and links to that
@@ -21,7 +26,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.memory.models import Associate, AssociateType, Customer, CustomerOnboarding
+from app.memory.models import Associate, AssociateStatus, AssociateType, Customer, CustomerOnboarding
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,7 @@ def _target(db: Session, onboarding: CustomerOnboarding) -> Optional[tuple[str, 
     if not settings.notify_associates:
         return None
     associate = db.get(Associate, onboarding.owner_associate_id)
-    if associate is None or not (associate.email or "").strip():
+    if associate is None or associate.status != AssociateStatus.active or not (associate.email or "").strip():
         return None
     customer = db.get(Customer, onboarding.customer_id)
     section = "preferred" if associate.associate_type == AssociateType.preferred_associate else "associates"
@@ -160,3 +165,67 @@ def commission_rate_changed(db: Session, associate: Associate, before, after, ef
                "Open your earnings", url)
     except Exception:
         logger.exception("associate commission-rate email not queued")
+
+
+def customers_assigned(db: Session, associate: Associate, count: int) -> None:
+    """BE-19: customers of a suspended or deactivated associate were moved to this one."""
+    from app.config import settings
+    try:
+        if not settings.notify_associates or not (associate.email or "").strip() or count <= 0:
+            return
+        section = "preferred" if associate.associate_type == AssociateType.preferred_associate else "associates"
+        url = f"{(settings.frontend_base_url or '').rstrip('/')}/{section}/portal/customers"
+        noun = "customer" if count == 1 else "customers"
+        _queue(db, "associate_customers_assigned", associate.email.strip(),
+               f"{count} {noun} assigned to you",
+               [f"Grid Nova has assigned {count} {noun} to you. They are now in your customer list in the portal."],
+               "Open your customers", url)
+    except Exception:
+        logger.exception("associate customers-assigned email not queued")
+
+
+# ── Applicants (BE-19) ───────────────────────────────────────────────────────────
+
+_PROGRAMME = {AssociateType.associate: "an Associate", AssociateType.preferred_associate: "a Preferred Associate"}
+
+
+def _contact_line() -> str:
+    """Grid Nova's own email and phone, from the company block every receipt prints."""
+    from app.execution import config as execution_config
+    company = execution_config.payments()["receipt"]["company"]
+    return f"You can also write to {company['email']} or call {company['phone']}."
+
+
+def _applicant(db: Session, event: str, application, subject: str, lines: list[str]) -> None:
+    from app.config import settings
+    try:
+        to = (application.email or "").strip()
+        if not settings.notify_associates or not to:
+            return
+        _queue(db, event, to, subject, lines)
+    except Exception:
+        logger.exception("applicant email %s not queued", event)
+
+
+def application_received(db: Session, application, application_type: AssociateType) -> None:
+    _applicant(db, "associate_application_received", application, "We have received your application",
+               [f"Thank you, {application.full_name}. Grid Nova has received your application to join the "
+                f"Associate Network as {_PROGRAMME[application_type]} (application #{application.id}).",
+                "We will check your details and documents and call you on the mobile number you gave us. "
+                "We will email you when there is a decision.",
+                _contact_line()])
+
+
+def application_needs_info(db: Session, application, note: str) -> None:
+    _applicant(db, "associate_application_needs_info", application,
+               "Grid Nova needs more information for your application",
+               [f"Grid Nova is reviewing your application #{application.id} and needs more information:",
+                note,
+                "Grid Nova will call you on the mobile number you gave us about this. " + _contact_line()])
+
+
+def application_rejected(db: Session, application, reason: str) -> None:
+    _applicant(db, "associate_application_rejected", application, "Your Grid Nova application",
+               [f"Grid Nova has reviewed your application #{application.id} and cannot approve it.",
+                f"Reason: {reason}",
+                _contact_line()])

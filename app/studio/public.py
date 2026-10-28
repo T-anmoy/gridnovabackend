@@ -219,8 +219,26 @@ def whatsapp_link(db: Session, p: StudioProposal, actor: str) -> dict:
     return {"url": url, "text": text, "link": link}
 
 
-def email(db: Session, p: StudioProposal, actor: str, to: Optional[str]) -> dict:
-    """Email the customer the PDF and the online link from NOTIFY_FROM_EMAIL, reply-to the owner."""
+MESSAGE_MAX = 1500
+SUBJECT_MAX = 200
+
+
+def _message_lines(message: Optional[str]) -> list[str]:
+    """Staff's own words, plain text: one email paragraph per non-empty line. The email
+    renderer HTML-escapes every line."""
+    text = (message or "").replace("\r\n", "\n").replace("\r", "\n")
+    if len(text) > MESSAGE_MAX:
+        raise StudioError("invalid_value", f"The message must be at most {MESSAGE_MAX} characters.", 422, "message")
+    if any(ord(ch) < 32 and ch not in "\n\t" for ch in text):
+        raise StudioError("invalid_value", "The message must be plain text.", 422, "message")
+    return [line.strip() for line in text.split("\n") if line.strip()]
+
+
+def email(db: Session, p: StudioProposal, actor: str, to: Optional[str], message: Optional[str] = None,
+          subject: Optional[str] = None) -> dict:
+    """Email the customer the PDF and the online link from NOTIFY_FROM_EMAIL, reply-to the owner.
+    BE-19: `message` (plain text, ≤ 1,500 characters) goes after the greeting, above the fixed
+    lines and the link; `subject` replaces the configured subject."""
     from app.notifications.notifier import notifier
     from app.storage import r2
     v = _issued_version(db, p)
@@ -228,21 +246,28 @@ def email(db: Session, p: StudioProposal, actor: str, to: Optional[str]) -> dict
     address = (to or (customer.email if customer else None) or "").strip()
     if not address:
         raise StudioError("no_customer_email", "The customer has no email address; add one or give `to`.", 422, "to")
+    extra = _message_lines(message)
+    custom_subject = " ".join((subject or "").split())
+    if len(custom_subject) > SUBJECT_MAX:
+        raise StudioError("invalid_value", f"The subject must be at most {SUBJECT_MAX} characters.", 422, "subject")
     link = service.public_url(service.link_token(v))
     ctx = _message_ctx(db, p, v, link)
     msgs = studio_config.load()["messages"]
+    lines = [_fill(x, ctx) for x in msgs["email_lines"]]
+    lines = lines[:1] + extra + lines[1:]
     try:
         pdf = r2.download_bytes(v.pdf_storage_key)
     except r2.StorageNotConfiguredError as exc:
         raise StudioError("storage_unavailable", "File storage is not configured.", 503) from exc
     sent, reason = notifier.send_studio_email(
-        to=address, subject=_fill(msgs["email_subject"], ctx), lines=[_fill(x, ctx) for x in msgs["email_lines"]],
+        to=address, subject=custom_subject or _fill(msgs["email_subject"], ctx), lines=lines,
         link_label="Read and accept the proposal", link_url=link, reply_to=service.owner_email(db, p),
         attachment=(v.pdf_filename, base64.b64encode(pdf).decode()), event_type="studio_proposal_email")
     if not sent:
         raise StudioError(reason or "send_failed", "The email could not be sent: " + (reason or "send failed") + ".",
                           503 if reason == "email_not_configured" else 502)
-    service.event(db, p, "emailed", version=v.version, actor=actor, detail={"to": address})
+    service.event(db, p, "emailed", version=v.version, actor=actor,
+                  detail={"to": address, "subject": custom_subject or None, "message": "\n".join(extra) or None})
     db.flush()
     return {"sent": True, "to": address}
 

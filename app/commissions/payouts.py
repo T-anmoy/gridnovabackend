@@ -12,6 +12,11 @@ batch while another is still a draft. Unrated entries never reach a batch, and w
 any entry of the month is still waiting for confirmed rates the batch is refused
 (placeholder_rates) — no money under unconfirmed rates.
 
+BE-19: a SUSPENDED associate's commission is frozen — their approved entries stay out of
+every batch (still approved, still unbatched) and are paid in the first batch prepared
+after reinstatement. A deactivated associate's earned commission is settled as usual
+(Network Terms A11: commission earned before termination stays payable).
+
 TDS (4.6) is ONE function, tds_due, with the draft rule from the policy; a Chartered
 Accountant must confirm it (placeholder registry C5-11).
 """
@@ -29,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.associates.service import AssociateError
 from app.commissions import config, periods
 from app.memory.models import (
-    Associate, AssociateApplication, AuditLog, CommissionEntry, CommissionEntryKind, CommissionEntryStatus,
+    Associate, AssociateApplication, AssociateStatus, AuditLog, CommissionEntry, CommissionEntryKind, CommissionEntryStatus,
     PayoutBatch, PayoutBatchStatus, PayoutLine, PreferredAssociateApplication,
 )
 
@@ -155,13 +160,19 @@ def create(db: Session, period: str, actor: str, today: date) -> PayoutBatch:
     if waiting:
         raise AssociateError("Commission rates are not confirmed yet: entries of this month have no amount.",
                              code="placeholder_rates", status_code=409, extra={"pending_entries": waiting})
+    suspended = select(Associate.id).where(Associate.status == AssociateStatus.suspended)
     entries = list(db.execute(select(CommissionEntry).where(
         CommissionEntry.status == CommissionEntryStatus.approved, CommissionEntry.batch_id.is_(None),
-        CommissionEntry.amount.is_not(None), CommissionEntry.created_at < cutoff)
+        CommissionEntry.amount.is_not(None), CommissionEntry.created_at < cutoff,
+        CommissionEntry.associate_id.not_in(suspended))
         .order_by(CommissionEntry.id).with_for_update()).scalars())
+    frozen = db.execute(select(CommissionEntry.id).where(
+        CommissionEntry.status == CommissionEntryStatus.approved, CommissionEntry.batch_id.is_(None),
+        CommissionEntry.amount.is_not(None), CommissionEntry.created_at < cutoff,
+        CommissionEntry.associate_id.in_(suspended)).order_by(CommissionEntry.id)).scalars().all()
     if not entries:
         raise AssociateError("There is no approved commission to pay for this month.", code="no_approved_entries",
-                             status_code=409)
+                             status_code=409, extra={"frozen_entries": len(frozen)} if frozen else None)
     fy = periods.fy_of_period(period)
     batch = PayoutBatch(period=period, financial_year=fy, status=PayoutBatchStatus.draft, prepared_by=actor,
                         prepared_at=_now())
@@ -202,6 +213,7 @@ def create(db: Session, period: str, actor: str, today: date) -> PayoutBatch:
     db.flush()
     _audit(db, batch.id, "prepared", actor,
            after={"period": period, "financial_year": fy, "entries": [e.id for e in entries],
+                  "frozen_entries": list(frozen),
                   "lines": [{"associate_id": ln.associate_id, "gross": _s(ln.gross), "recoveries": _s(ln.recoveries),
                              "carried_in": _s(ln.carried_in), "tds": _s(ln.tds), "net": _s(ln.net)}
                             for ln in lines]})

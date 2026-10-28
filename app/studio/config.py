@@ -37,6 +37,25 @@ def _dec(value, where: str) -> Decimal:
         raise StudioConfigError(f"{_PATH.name}: {where} is not a number") from None
 
 
+PRESET_SOURCES = ("price_list", "detailed")
+
+
+def payment_term_presets() -> list[dict]:
+    """[{id, label, terms: [{percent, label}]}] — the figures read from each preset's source."""
+    from app.pricing import price_list
+    from app.proposals import document_config
+    out = []
+    for x in load()["payment_term_presets"]:
+        if x["source"] == "price_list":
+            terms = [{"percent": str(m["percent"]), "label": m["label"]}
+                     for m in price_list.commercial_terms()["payment_schedule"]]
+        else:
+            terms = [{"percent": str(t["percent"]), "label": t["label"]}
+                     for t in document_config.load()["detailed"]["payment_terms"]]
+        out.append({"id": x["id"], "label": x["label"], "terms": terms})
+    return out
+
+
 def _validate(data: dict) -> dict:
     def need(cond, message: str) -> None:
         if not cond:
@@ -57,6 +76,13 @@ def _validate(data: dict) -> dict:
         need(sum(_dec(t["percent"], f"payment_terms.{key}") for t in terms) == 100,
              f"payment_terms.{key} must total 100")
     need(set(data.get("payment_terms") or {}) == {"itemised"}, "payment_terms must define itemised (only)")
+    presets = data.get("payment_term_presets") or []
+    need(isinstance(presets, list) and presets, "payment_term_presets must list at least one preset")
+    need(len({x.get("id") for x in presets}) == len(presets), "payment_term_presets ids must be distinct")
+    for x in presets:
+        need(isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("label"), str)
+             and x.get("source") in PRESET_SOURCES,
+             f"payment_term_presets: each needs an id, a label and a source in {PRESET_SOURCES}")
     rem = data.get("reminders") or {}
     for key in ("not_viewed_after_days", "expiring_within_days", "summary_expiring_within_days"):
         need(isinstance(rem.get(key), int) and rem[key] > 0, f"reminders.{key} must be a positive integer")

@@ -111,11 +111,12 @@ class TestWarnings:
 
 
     def test_placeholder_associate_texts_warn(self):
-        """The KYC notice and welcome letter are approved copy now; the rest is still placeholder."""
+        """The KYC notice, welcome letter and (BE-19) customer notice are approved copy now;
+        the agreement is still a placeholder."""
         _, warnings = production_config_problems(_settings())
         assert not any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
         assert not any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
-        assert any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
+        assert not any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
         assert any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
 
     def test_unresolved_launch_blocking_placeholders_warn_once(self, caplog):

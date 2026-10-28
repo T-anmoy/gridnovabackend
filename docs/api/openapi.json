@@ -3731,6 +3731,30 @@
       },
       "EmailIn": {
         "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "maxLength": 1500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
           "to": {
             "anyOf": [
               {
@@ -9074,6 +9098,42 @@
         "title": "RateNotice",
         "type": "object"
       },
+      "ReassignCustomersRequest": {
+        "properties": {
+          "onboarding_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onboarding Ids"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "to_associate_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "To Associate Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to_associate_id",
+          "reason"
+        ],
+        "title": "ReassignCustomersRequest",
+        "type": "object"
+      },
       "ReassignIn": {
         "properties": {
           "to_employee_id": {
@@ -9337,6 +9397,20 @@
           }
         },
         "title": "RegionsIn",
+        "type": "object"
+      },
+      "ResetIn": {
+        "properties": {
+          "base_revision": {
+            "minimum": 0.0,
+            "title": "Base Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "base_revision"
+        ],
+        "title": "ResetIn",
         "type": "object"
       },
       "ResolveFlagRequest": {
@@ -14656,9 +14730,31 @@
         "summary": "Chat Message"
       }
     },
+    "/api/v1/dashboard/access/admins": {
+      "get": {
+        "description": "BE-19: the active Admins, so \"ask an Admin\" can name them. Any staff member;\n`email` only for a viewer who is an Admin (null otherwise).",
+        "operationId": "access_admins_api_v1_dashboard_access_admins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Access Admins"
+      }
+    },
     "/api/v1/dashboard/access/alerts": {
       "get": {
-        "description": "Which roles receive each staff alert, and whether each currently reaches anyone.\nAny staff member. Fixed shared addresses are counted, never listed.",
+        "description": "Which roles receive each staff alert, and whether each currently reaches anyone.\nAny staff member sees counts; a viewer with staff.manage also gets `addresses` (BE-19).",
         "operationId": "access_alerts_api_v1_dashboard_access_alerts_get",
         "responses": {
           "200": {
@@ -14889,7 +14985,7 @@
     },
     "/api/v1/dashboard/approvals": {
       "get": {
-        "description": "Requests you asked for or could decide.",
+        "description": "Requests you asked for, or that you could decide (BE-19: a staff change only when\nyou may assign every role it touches). `{items: [...]}`, newest first; each item\ncarries `requested_by_name`.",
         "operationId": "list_approvals_api_v1_dashboard_approvals_get",
         "parameters": [
           {
@@ -16200,7 +16296,7 @@
     },
     "/api/v1/dashboard/associates/{associate_id}/clerk-invite": {
       "post": {
-        "description": "Send (or re-send after a failure) the associate's Clerk invitation.",
+        "description": "Send the associate's Clerk invitation — or send it again: after a failure, or\n(BE-19) when the one sent was never accepted (expired, lost, wrong address since\ncorrected), which revokes the old invitation first. Refused once the associate has\nsigned in (409 invalid_transition).",
         "operationId": "retry_clerk_invite_api_v1_dashboard_associates__associate_id__clerk_invite_post",
         "parameters": [
           {
@@ -16519,9 +16615,62 @@
         "summary": "Associate Performance"
       }
     },
+    "/api/v1/dashboard/associates/{associate_id}/reassign-customers": {
+      "post": {
+        "description": "BE-19: move a suspended or deactivated associate's open customers to an active\nassociate (app/associates/reassignment.py). Both associates must be in the caller's\nregions. Audited per customer.",
+        "operationId": "reassign_customers_api_v1_dashboard_associates__associate_id__reassign_customers_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "associate_id",
+            "required": true,
+            "schema": {
+              "title": "Associate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignCustomersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reassign Customers"
+      }
+    },
     "/api/v1/dashboard/associates/{associate_id}/status": {
       "post": {
-        "description": "active ⇄ suspended → deactivated. Suspending or deactivating needs a reason.\nDeactivation is final and releases the associate's seat; suspension keeps it.",
+        "description": "active ⇄ suspended → deactivated. Suspending or deactivating needs a reason.\nDeactivation is final and releases the associate's seat; suspension keeps it.\n\nBE-19: after the change commits, Clerk access follows it — suspending or\ndeactivating bans the associate's Clerk user (every session ends) or revokes an\nunaccepted invitation; reinstating unbans. The database refuses a non-active\nassociate on every request regardless, so a Clerk failure is reported (`access`)\nand the change stands. `open_customers` says how many customers still need moving\n(POST …/reassign-customers); a suspended associate's commission is frozen.",
         "operationId": "change_associate_status_api_v1_dashboard_associates__associate_id__status_post",
         "parameters": [
           {
@@ -25212,7 +25361,7 @@
     },
     "/api/v1/dashboard/studio/options": {
       "get": {
-        "description": "Everything the wizard's drop-downs need: project types, packages, phases, categories,\nDISCOMs, titles, technologies, item units and categories, sections and limits.",
+        "description": "Everything the wizard's drop-downs need: project types, packages, phases, categories,\nDISCOMs, titles, technologies, item units and categories, sections and limits; BE-19:\n`payment_term_presets` and `boq_makes` (the makes per BOQ row kind).",
         "operationId": "studio_options_api_v1_dashboard_studio_options_get",
         "responses": {
           "200": {
@@ -25234,7 +25383,7 @@
     },
     "/api/v1/dashboard/studio/proposals": {
       "get": {
-        "description": "Filters: status, project type, owner, created date range, search on customer name /\nmobile / reference / code. Without studio.view_all only your own proposals.",
+        "description": "Filters: status, project type, owner, customer (BE-19), created date range, search on\ncustomer name / mobile / reference / code. Without studio.view_all only your own proposals.",
         "operationId": "list_proposals_api_v1_dashboard_studio_proposals_get",
         "parameters": [
           {
@@ -25334,6 +25483,23 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
             }
           },
           {
@@ -26047,6 +26213,66 @@
         "summary": "Issued Pdf"
       }
     },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/pdf-link": {
+      "get": {
+        "description": "BE-19: the issued PDF as JSON — `{url, expires_at, filename}`, a short-lived signed link\n(recorded as a staff download), so the dashboard needs no bucket CORS. 409 not_issued.",
+        "operationId": "issued_pdf_link_api_v1_dashboard_studio_proposals__proposal_id__pdf_link_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issued Pdf Link"
+      }
+    },
     "/api/v1/dashboard/studio/proposals/{proposal_id}/preview.pdf": {
       "get": {
         "description": "The version rendered now, never stored: stamped \"DRAFT — NOT FOR CUSTOMER\" until issued.\nAn issued version: use /pdf for the stored file.",
@@ -26251,6 +26477,68 @@
           }
         ],
         "summary": "Save As Template"
+      }
+    },
+    "/api/v1/dashboard/studio/proposals/{proposal_id}/sections/{section}/reset": {
+      "post": {
+        "description": "BE-19: put `boq`, `customer_scope`, `payment_terms` or `system` back to its default.\nSame rules as PATCH …/document: 409 proposal_locked / stale_version, 422\nfield_not_resettable. Returns the view plus `changes` and `regenerated_sections`.",
+        "operationId": "reset_section_api_v1_dashboard_studio_proposals__proposal_id__sections__section__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "title": "Section",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reset Section"
       }
     },
     "/api/v1/dashboard/studio/proposals/{proposal_id}/spelling/ignore": {

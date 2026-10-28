@@ -184,3 +184,42 @@ def unban_user(user_id: str) -> bool:
         return False
     _call("POST", f"/users/{user_id}/unban", "unban")
     return True
+
+
+# ── Sign-in activity for the staff list (BE-19) ─────────────────────────────────
+# GET /v1/users?user_id=… — last sign-in and whether two-step is on, per Clerk user,
+# cached for ACTIVITY_TTL_SECONDS so listing staff does not call Clerk every time.
+ACTIVITY_TTL_SECONDS = 600
+_activity_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _activity_of(user: dict) -> dict:
+    from datetime import datetime, timezone
+    ms = user.get("last_sign_in_at")
+    at = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat() if isinstance(ms, (int, float)) else None
+    two = user.get("two_factor_enabled")
+    return {"last_sign_in_at": at, "two_factor_enabled": two if isinstance(two, bool) else None}
+
+
+def user_activity(user_ids: list[str]) -> dict[str, dict]:
+    """{user_id: {last_sign_in_at (ISO, UTC) | None, two_factor_enabled | None}} for the
+    users Clerk knows. Empty when no key is configured or Clerk cannot be reached (the
+    caller shows null: unknown) — never raises."""
+    import time
+    if not settings.clerk_secret_key or not user_ids:
+        return {}
+    now = time.monotonic()
+    out = {u: v for u, (t, v) in _activity_cache.items() if u in user_ids and now - t < ACTIVITY_TTL_SECONDS}
+    missing = [u for u in user_ids if u not in out]
+    for start in range(0, len(missing), 100):
+        chunk = missing[start:start + 100]
+        try:
+            response = _call("GET", "/users", "user activity",
+                             params=[("user_id", u) for u in chunk] + [("limit", str(len(chunk)))])
+        except ClerkSyncError:
+            return out
+        for user in response.json() or []:
+            if isinstance(user, dict) and user.get("id") in chunk:
+                out[user["id"]] = _activity_of(user)
+                _activity_cache[user["id"]] = (now, out[user["id"]])
+    return out

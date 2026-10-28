@@ -127,7 +127,7 @@ class TestOverdueJob:
             {"queries": [{"query_id": 1, "entry_id": 2, "associate_name": "<b>A</b>", "due_at": "2026-11-06"}]},
             "https://app.gridnova.test")
         assert subject == "Commission queries past their response date: 1"
-        assert "&lt;b&gt;A&lt;/b&gt;" in html and "<b>A</b>" not in html and "/dashboard/commission-queries" in text
+        assert "&lt;b&gt;A&lt;/b&gt;" in html and "<b>A</b>" not in html and "/dashboard/commissions/queries" in text
 
 
 class TestPayoutOnTheHomeFeed:

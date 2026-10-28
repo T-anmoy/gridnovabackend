@@ -191,6 +191,8 @@ def prepare_formal_proposal(db: Session, onboarding: CustomerOnboarding, employe
         db.commit()
         raise AssociateError(reason + " Nothing else changed; retry once it is resolved.",
                              code="draft_failed", status_code=409)
+    from app.notifications.notifier import announce_proposal_ready
+    announce_proposal_ready(db, outcome["proposal_id"], lead_id, employee_id, onboarding_id=onboarding_id)
     status = outcome.get("proposal_status")
     return {"proposal_id": outcome["proposal_id"], "version": outcome.get("proposal_version"),
             "status": status.value if hasattr(status, "value") else status,

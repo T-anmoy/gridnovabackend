@@ -19,7 +19,8 @@ OPEN_ISSUED = (StudioStatus.issued, StudioStatus.viewed)
 
 def proposals(db: Session, *, status: Optional[str] = None, project_type: Optional[str] = None,
               owner_id: Optional[str] = None, date_from: Optional[date] = None, date_to: Optional[date] = None,
-              q: Optional[str] = None, page: int = 1, page_size: int = 25) -> dict:
+              q: Optional[str] = None, page: int = 1, page_size: int = 25,
+              customer_id: Optional[int] = None) -> dict:
     cur = and_(StudioProposalVersion.proposal_id == StudioProposal.id,
                StudioProposalVersion.version == StudioProposal.current_version)
     stmt = (select(StudioProposal, StudioProposalVersion).join(StudioProposalVersion, cur)
@@ -30,6 +31,8 @@ def proposals(db: Session, *, status: Optional[str] = None, project_type: Option
         stmt = stmt.where(StudioProposal.project_type == project_type)
     if owner_id:
         stmt = stmt.where(StudioProposal.owner_id == owner_id)
+    if customer_id is not None:
+        stmt = stmt.where(StudioProposal.customer_id == customer_id)
     if date_from:
         stmt = stmt.where(StudioProposal.created_at >= datetime.combine(date_from, datetime.min.time(), timezone.utc))
     if date_to:
@@ -47,7 +50,8 @@ def proposals(db: Session, *, status: Optional[str] = None, project_type: Option
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
     rows = db.execute(stmt.order_by(StudioProposal.updated_at.desc(), StudioProposal.id.desc())
                       .offset((page - 1) * page_size).limit(page_size)).all()
-    return {"items": [service.proposal_json(db, p, v) for p, v in rows], "total": total, "page": page,
+    names = service.owner_names(db, (p.owner_id for p, _ in rows))
+    return {"items": [service.proposal_json(db, p, v, names) for p, v in rows], "total": total, "page": page,
             "page_size": page_size}
 
 

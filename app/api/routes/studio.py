@@ -75,9 +75,10 @@ def _run(db: Session, fn):
 # ── Options ──────────────────────────────────────────────────────────────────────
 
 @router.get("/studio/options")
-def studio_options(employee: AuthenticatedEmployee = Depends(get_current_employee)):
+def studio_options(db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Everything the wizard's drop-downs need: project types, packages, phases, categories,
-    DISCOMs, titles, technologies, item units and categories, sections and limits."""
+    DISCOMs, titles, technologies, item units and categories, sections and limits; BE-19:
+    `payment_term_presets` and `boq_makes` (the makes per BOQ row kind)."""
     _need(employee, "studio.view", "open the Proposal Studio")
     from app.pricing import price_list
     from app.proposals import document as d
@@ -98,6 +99,10 @@ def studio_options(employee: AuthenticatedEmployee = Depends(get_current_employe
         "sections": list(service.SECTIONS), "validity_days_default": studio_config.validity_days(),
         "price_modes": ["price_list", "staff_basic", "staff_total", "none"],
         "assistant_enabled": __import__("app.studio.assistant", fromlist=["enabled"]).enabled(),
+        "payment_term_presets": studio_config.payment_term_presets(),
+        "resettable_sections": list(service.RESETTABLE),
+        "boq_makes": d.makes_by_kind(db),
+        "email_message_max": 1500,
     }
 
 
@@ -181,10 +186,11 @@ class ProposalIn(BaseModel):
 def list_proposals(status: Optional[str] = Query(default=None), project_type: Optional[str] = Query(default=None),
                    owner_id: Optional[str] = Query(default=None), date_from: Optional[date] = Query(default=None),
                    date_to: Optional[date] = Query(default=None), q: Optional[str] = Query(default=None, max_length=100),
+                   customer_id: Optional[int] = Query(default=None, ge=1),
                    page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
                    db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Filters: status, project type, owner, created date range, search on customer name /
-    mobile / reference / code. Without studio.view_all only your own proposals."""
+    """Filters: status, project type, owner, customer (BE-19), created date range, search on
+    customer name / mobile / reference / code. Without studio.view_all only your own proposals."""
     _need(employee, "studio.view", "open the Proposal Studio")
     from app.studio import queries
     if status and status not in {s.value for s in StudioStatus}:
@@ -192,7 +198,7 @@ def list_proposals(status: Optional[str] = Query(default=None), project_type: Op
     if not employee.holds("studio.view_all"):
         owner_id = employee.employee_id
     return queries.proposals(db, status=status, project_type=project_type, owner_id=owner_id, date_from=date_from,
-                             date_to=date_to, q=q, page=page, page_size=page_size)
+                             date_to=date_to, q=q, page=page, page_size=page_size, customer_id=customer_id)
 
 
 @router.post("/studio/proposals", status_code=201)
@@ -244,6 +250,23 @@ def edit_document(proposal_id: int, body: SectionEdit, db: Session = Depends(get
     result = _run(db, lambda: service.edit(db, p, section=body.section, value=body.value,
                                            base_revision=body.base_revision, actor=employee.employee_id,
                                            can_price=body.section != "price" or employee.holds("studio.price")))
+    return _commit_view(db, p, employee, result)
+
+
+class ResetIn(BaseModel):
+    base_revision: int = Field(ge=0)
+
+
+@router.post("/studio/proposals/{proposal_id}/sections/{section}/reset")
+def reset_section(proposal_id: int, section: str, body: ResetIn, db: Session = Depends(get_db),
+                  employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """BE-19: put `boq`, `customer_scope`, `payment_terms` or `system` back to its default.
+    Same rules as PATCH …/document: 409 proposal_locked / stale_version, 422
+    field_not_resettable. Returns the view plus `changes` and `regenerated_sections`."""
+    _need(employee, "studio.edit", "edit Studio proposals")
+    p = _proposal(db, employee, proposal_id, lock=True)
+    result = _run(db, lambda: service.reset_section(db, p, section=section, base_revision=body.base_revision,
+                                                    actor=employee.employee_id))
     return _commit_view(db, p, employee, result)
 
 
@@ -366,8 +389,30 @@ def issued_pdf(proposal_id: int, version: Optional[int] = Query(default=None, ge
     return RedirectResponse(url, status_code=302)
 
 
+@router.get("/studio/proposals/{proposal_id}/pdf-link")
+def issued_pdf_link(proposal_id: int, version: Optional[int] = Query(default=None, ge=1),
+                    db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """BE-19: the issued PDF as JSON — `{url, expires_at, filename}`, a short-lived signed link
+    (recorded as a staff download), so the dashboard needs no bucket CORS. 409 not_issued."""
+    from app.storage import r2
+    p = _proposal(db, employee, proposal_id)
+    v = _run(db, lambda: service.version_of(db, p, version))
+    if not v.pdf_storage_key:
+        raise HTTPException(status_code=409, detail={"code": "not_issued", "message": "This version is not issued."})
+    try:
+        url, expires_at = r2.signed_get_url(v.pdf_storage_key, filename=v.pdf_filename, as_attachment=True)
+    except r2.StorageNotConfiguredError:
+        raise HTTPException(status_code=503, detail={"code": "storage_unavailable", "message": "Storage unavailable."})
+    service.event(db, p, "downloaded", version=v.version, actor=employee.employee_id, detail={"by": "staff"})
+    db.commit()
+    return {"url": url, "expires_at": expires_at.isoformat(), "filename": v.pdf_filename}
+
+
 class EmailIn(BaseModel):
     to: Optional[str] = Field(default=None, max_length=254)
+    # BE-19: staff's own words (plain text) above the fixed lines and link; a subject of their own.
+    message: Optional[str] = Field(default=None, max_length=1500)
+    subject: Optional[str] = Field(default=None, max_length=200)
 
 
 @router.post("/studio/proposals/{proposal_id}/email")
@@ -378,7 +423,7 @@ def email(proposal_id: int, body: EmailIn, db: Session = Depends(get_db),
     from app.studio import public
     _need(employee, "studio.edit", "send Studio proposals")
     p = _proposal(db, employee, proposal_id)
-    out = _run(db, lambda: public.email(db, p, employee.employee_id, body.to))
+    out = _run(db, lambda: public.email(db, p, employee.employee_id, body.to, body.message, body.subject))
     db.commit()
     return out
 

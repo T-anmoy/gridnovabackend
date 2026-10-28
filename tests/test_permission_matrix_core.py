@@ -116,6 +116,7 @@ STAFF = {
     # of ROLES here — is covered in tests/test_access_control.py.
     ("GET", f"{D}/access/matrix"): (ALL, {}),
     ("GET", f"{D}/access/alerts"): (ALL, {}),
+    ("GET", f"{D}/access/admins"): (ALL, {}),
     ("POST", f"{D}/staff/invitations"): (ADMIN, {"json": {"name": "Matrix", "email": "matrix-{role}@gmail.com",
                                                          "roles": ["sales"]}}),
     ("GET", f"{D}/staff/invitations"): (ADMIN, {}),

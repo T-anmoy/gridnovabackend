@@ -105,7 +105,26 @@ def basis_for(db: Session, onboarding: CustomerOnboarding, amount: Decimal) -> O
         return amount
     from app.payments import service as payments
     proposal = payments.accepted_proposal(db, onboarding)
-    return basis_of(amount, ((proposal.content or {}).get("pricing") or {}) if proposal is not None else {})
+    return basis_of(amount, accepted_price(proposal) if proposal is not None else {})
+
+
+def accepted_price(proposal) -> dict:
+    """{"basic", "final"} of the price the customer accepted. A proposal with a document
+    (BE-13, and Studio conversions) carries its price there — adjust-pricing writes into the
+    document and the PDF is made from it — so its figures win; an older proposal has only
+    the content engine's `pricing`. BE-19: before this, every formal proposal priced
+    through the document had no basis (pending_reason basis_unavailable) and never paid."""
+    from app.proposals import document as d
+    content = proposal.content or {}
+    try:
+        doc = d.stored(content)
+    except Exception:   # an unreadable document falls back to the legacy pricing
+        doc = None
+    if doc is not None:
+        figs = d.figures(doc)
+        if figs.get("basic") and figs.get("total"):
+            return {"basic": figs["basic"], "final": figs["total"]}
+    return content.get("pricing") or {}
 
 
 def basis_of(amount: Decimal, pricing: dict) -> Optional[Decimal]:

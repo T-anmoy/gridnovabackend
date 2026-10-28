@@ -45,6 +45,8 @@ def _validate(data: dict) -> dict:
          f"commissions.agreement_date_source must be one of {AGREEMENT_DATE_SOURCES}")
     need(c.get("multiple_territory_holders") in MULTIPLE_HOLDERS,
          f"commissions.multiple_territory_holders must be one of {MULTIPLE_HOLDERS}")
+    need(c.get("reassigned_customers_earn") == "owner_at_payment",
+         "commissions.reassigned_customers_earn must be owner_at_payment (the only rule implemented)")
     for key in ("territory_on_own_customers", "deactivated_associates_earn", "individual_rate_increase_needs_notice"):
         need(isinstance(c.get(key), bool), f"commissions.{key} must be true or false")
     bounds = {}

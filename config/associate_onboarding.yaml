@@ -9,16 +9,17 @@
 # records as acknowledged on their behalf. Each onboarding stores the version and the
 # time. New wording = a NEW version + point current_notice_version at it; never edit a
 # version customers have already acknowledged.
-current_notice_version: "placeholder-v0"
+current_notice_version: "approved-v1"
 notice_versions:
   placeholder-v0:
     text: >-
       [PLACEHOLDER — the Customer Information Notice text is to be supplied by Grid Nova.]
   # Grid Nova's drafted notice (content/policies/GridNova_Policies_Draft_v1.md, document 7),
-  # flattened for display with white-space: pre-line. Loaded, NOT current: point
-  # current_notice_version at it once Grid Nova approves the text.
+  # flattened for display with white-space: pre-line. approved-v1 is the SAME wording,
+  # used as written by Grid Nova's decision (BE-19 brief, 28 Oct 2026), and is the version
+  # customers acknowledge. Never edit either: add a new version instead.
   draft-v1.1:
-    text: |-
+    text: &customer_notice_text |-
       Grid Nova Energy — how we use your information
 
       Grid Nova Energy will use the details, documents and photographs collected today to assess your site, prepare your proposal, install your solar system, and — if you choose — apply for government subsidy and grid connection through the national portal and your DISCOM.
@@ -28,6 +29,8 @@ notice_versions:
       Please pay only to Grid Nova's bank account, never in cash and never to any individual.
 
       You can ask Grid Nova to see, correct or delete your information at any time: info@gridnova.in · +91 98747 74440.
+  approved-v1:
+    text: *customer_notice_text
 
 # The attribution lock has no time limit (Associate Terms A7, approved by Grid Nova on
 # 21 Oct 2026: attribution stays with the first verified Associate "until the project is

@@ -29,7 +29,9 @@ from app.api.lead_filters import parse_lead_filters
 from app.associates import referrals
 from app.auth.clerk_client import update_user_role
 from app.auth.dependencies import AuthenticatedEmployee, bearer_scheme, get_current_employee
-from app.auth.scoping import lead_scope, narrowed_to_assigned, require_lead_access
+from app.auth.scoping import (
+    lead_region_condition, lead_scope, narrowed_to_assigned, require_lead_access, require_lead_region,
+)
 from app.config import settings
 from app.governance import policy as gov_policy, registry as gov_registry
 from app.memory import reflection
@@ -197,7 +199,8 @@ def list_leads(
     if employee.technical_only and q and not q.strip().isdigit():
         return {"items": [], "page": page, "page_size": page_size, "total": 0}
     leads, total = memory.paginate_leads(source=source_enum, scope=lead_scope(employee, assigned), q=q, filters=filters,
-                                         page=page, page_size=page_size)
+                                         page=page, page_size=page_size,
+                                         region=lead_region_condition(db, employee))   # BE-19
     referrers = referrals.referrers_by_pk(db, (l.referred_by_associate_id for l in leads))
     items = [
         {
@@ -371,6 +374,7 @@ def get_lead(
     lead = ctx["lead"]
     customer = ctx["customer"]
     require_lead_access(employee, lead)
+    require_lead_region(db, employee, lead)   # BE-19
 
     # Engineers see only technical fields
     if employee.technical_only:
@@ -1422,6 +1426,10 @@ def list_employees(
     if not employee.can_manage_employees():
         raise HTTPException(status_code=403, detail="Only Admin can view employees.")
     memory = memory_of(db)
+    from app.auth.clerk_client import user_activity
+    employees = memory.list_employees()
+    # BE-19: last sign-in and two-step, from Clerk (cached); null when unknown.
+    activity = user_activity([e.id for e in employees])
     return [
         {
             "id": e.id,
@@ -1434,8 +1442,10 @@ def list_employees(
             # Connection state only — the refresh token itself never leaves the database.
             "google_calendar_connected": bool(e.google_calendar_connected),
             "created_at": e.created_at.isoformat() if e.created_at else None,
+            "last_sign_in_at": (activity.get(e.id) or {}).get("last_sign_in_at"),
+            "two_factor_enabled": (activity.get(e.id) or {}).get("two_factor_enabled"),
         }
-        for e in memory.list_employees()
+        for e in employees
     ]
 
 

@@ -793,6 +793,11 @@ def diff(before: Any, after: Any, prefix: str) -> list[dict]:
 def allowed_makes(db) -> set[str]:
     """Names a BOQ make cell may use: the equipment catalogue's brands, the price list's
     makes, the makes in the default rows, and the make-column words of the samples."""
+    return {n.lower() for n in make_names(db)}
+
+
+def make_names(db) -> set[str]:
+    """allowed_makes in display case."""
     from sqlalchemy import select
 
     from app.memory.models import Equipment
@@ -811,7 +816,48 @@ def allowed_makes(db) -> set[str]:
             names |= {part.strip() for part in row["make"].split("/")}
     names |= set(db.execute(select(Equipment.brand).where(Equipment.is_active.is_(True),
                                                           Equipment.is_placeholder.is_(False))).scalars())
-    return {n.lower() for n in names if n}
+    return {n for n in names if n}
+
+
+def makes_by_kind(db) -> dict[str, list[str]]:
+    """BE-19: the makes the BOQ make picker offers per row kind, display case — the price
+    list's makes for that component (both packages), the default rows' makes of that kind,
+    the active catalogue brands of that category, and "Equivalent" where the price list
+    allows an equivalent. `other` is every allowed make (allowed_makes, any kind)."""
+    from sqlalchemy import select
+
+    from app.memory.models import Equipment, EquipmentCategory
+    from app.pricing import price_list
+
+    data = price_list.load()
+    cfg = document_config.load()
+    out: dict[str, set] = {"module": set(), "inverter": set(), "cable": set(), "conduit": set()}
+    component = {"solar_panel": "module", "inverter": "inverter", "cables": "cable"}
+
+    def add(kind, spec):
+        out[kind] |= set(spec.get("makes") or [])
+        if spec.get("or_equivalent"):
+            out[kind].add("Equivalent")
+    for package in price_list.PACKAGES:
+        for name, spec in data["equipment"][package].items():
+            if name in component:
+                add(component[name], spec)
+    for name, spec in data["electrical_spec_up_to_5kw"].items():
+        add("conduit" if name in ("conduit_pipe", "flex_pipe") else "cable", spec)
+    for row in cfg["compact"]["boq"] + cfg["detailed"]["boq"]:
+        if row.get("kind") in out and "make" in row:
+            out[row["kind"]] |= {part.strip() for part in row["make"].split("/") if part.strip()}
+    category = {"module": EquipmentCategory.module, "inverter": EquipmentCategory.inverter}
+    for kind, cat in category.items():
+        out[kind] |= set(db.execute(select(Equipment.brand).where(
+            Equipment.category == cat, Equipment.is_active.is_(True),
+            Equipment.is_placeholder.is_(False))).scalars())
+    every: dict[str, str] = {}
+    for n in sorted(make_names(db)) + sorted(n for names in out.values() for n in names):
+        every.setdefault(n.lower(), n)
+    result = {k: sorted({n for n in v if n}, key=str.lower) for k, v in out.items()}
+    result["other"] = sorted((v for k, v in every.items() if k != "–"), key=str.lower)
+    return result
 
 
 def apply_edit(db, doc: ProposalDocument, section: str, value: Any) -> tuple[ProposalDocument, list[dict], list[str]]:

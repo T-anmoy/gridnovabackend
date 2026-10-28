@@ -505,6 +505,8 @@ entries:
     needed_from_grid_nova: Please supply the Customer Information Notice (what data is collected and why) for associates to show customers.
     blocking: blocks_launch
     probe: yaml_contains_marker
+    # Resolved by its probe since BE-19: Grid Nova decided (28 Oct 2026) the drafted notice
+    # (policies document 7, draft-v1.1) is used as written, as version approved-v1.
   - id: ONB-2
     area: onboarding
     location: {file: config/associate_onboarding.yaml, key: sanity}
@@ -718,6 +720,8 @@ entries:
     needed_from_grid_nova: Which payment methods does Grid Nova accept from customers (cheque, demand draft, NEFT, RTGS, IMPS, UPI)?
     blocking: blocks_feature
     probe: yaml_contains_marker
+    status: resolved
+    status_note: "Grid Nova decision (BE-19 brief, 28 Oct 2026): cheque, NEFT, RTGS and IMPS only. The website's Customer Payment Policy 5.2 still lists demand draft and UPI — a frontend content change."
   - id: P3
     area: payments
     location: {file: config/execution_payments.yaml, key: payments.thresholds}
@@ -1157,6 +1161,14 @@ entries:
     description: "A payment verified after an associate is deactivated earns that associate nothing (engineering reading of Network Terms A11); commission already earned stays payable."
     dummy_value: false
     needed_from_grid_nova: Does an associate whose association has ended earn commission on customer payments verified after the end date?
+    blocking: blocks_feature
+    probe: yaml_contains_marker
+  - id: C5-REASSIGN
+    area: policies
+    location: {file: config/commissions.yaml, key: commissions.reassigned_customers_earn}
+    description: "BE-19: after a suspended or deactivated associate's customers are moved to another associate, payments verified from then on earn the new owner; commission recorded before the move stays with the associate who earned it (engineering reading)."
+    dummy_value: owner_at_payment
+    needed_from_grid_nova: When an associate's customers are moved to another associate, who earns commission on those customers' later payments — the new associate, the original one, or should it be split?
     blocking: blocks_feature
     probe: yaml_contains_marker
   - id: C5-8

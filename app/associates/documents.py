@@ -3,8 +3,10 @@
 Rendered with WeasyPrint, like proposal PDFs (app/pdf/generator.py). Building the
 HTML is pure and separately testable; only render_pdf() needs WeasyPrint's native
 libraries. The ID card's QR code is an inline SVG made by segno, pointing at the
-public verification endpoint (GET /api/v1/public/verify/{associate_id}) on this
-API's own public origin, PUBLIC_API_BASE_URL.
+website's verification page (FRONTEND_BASE_URL/verify/{associate_id}), which reads
+GET /api/v1/public/verify/{associate_id}. BE-19: it used to point at that JSON
+endpoint itself, so a customer scanning a card saw raw JSON; cards printed before
+still work (the endpoint is unchanged).
 """
 from __future__ import annotations
 
@@ -39,12 +41,12 @@ class CardDetails:
 
 
 def verify_url(associate_id: str) -> str:
-    base = settings.public_api_base_url.strip().rstrip("/")
+    base = (settings.frontend_base_url or "").strip().rstrip("/")
     if not base:
         raise DocumentsNotConfiguredError(
-            "PUBLIC_API_BASE_URL is not set — the ID card's QR code has no verification link to point at."
+            "FRONTEND_BASE_URL is not set — the ID card's QR code has no verification page to point at."
         )
-    return f"{base}/api/v1/public/verify/{associate_id}"
+    return f"{base}/verify/{associate_id}"
 
 
 def qr_svg(data: str) -> str:

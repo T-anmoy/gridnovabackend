@@ -373,6 +373,7 @@ alerts:
   manager_signoff_required: {roles: [management, admin]}
   customer_accepted: {roles: [admin, management], assigned_employee: true}
   formal_proposal_requested: {roles: [admin], assigned_employee: true}
+  proposal_ready_for_review: {roles: [admin], assigned_employee: true}   # BE-19: a drafted proposal waits for approval
   survey_review_overdue: {roles: [engineer, admin]}
   onboarding_overdue: {roles: [admin, network_manager]}
   stage_submitted: {roles: [operations]}
@@ -390,6 +391,7 @@ alerts:
   associate_application_submitted: {roles: [network_manager, admin]}
   approval_requested: {roles: []}         # sent to the eligible approvers of that request
   studio_approval_requested: {roles: [admin, management]}   # the holders of studio.approve
+  studio_converted: {roles: [sales]}       # BE-19: an unassigned lead made from a Studio proposal
   studio_viewed: {roles: [], owner: true}
   studio_accepted: {roles: [], owner: true}
   studio_declined: {roles: [], owner: true}

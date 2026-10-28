@@ -459,6 +459,8 @@ def _trigger_auto_draft(
         created_by=performed_by,
     )
     db.commit()
+    from app.notifications.notifier import announce_proposal_ready
+    announce_proposal_ready(db, proposal_id, lead_id, performed_by)
     return {"triggered": True, "proposal_id": proposal_id, "version": version}
 
 

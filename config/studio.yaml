@@ -101,6 +101,17 @@ payment_terms:
     - {percent: "60", label: Against delivery of materials, short_label: against delivery of materials}
     - {percent: "15", label: On completion of installation, short_label: on completion}
 
+# BE-19: payment-term presets the Studio offers in the payment-terms editor
+# (GET /studio/options payment_term_presets). Each names its SOURCE rather than copying
+# the figures, so a preset always matches the document it comes from:
+#   price_list = the price list's payment schedule (20 / 60 / 20, up to 10 kW);
+#   detailed   = config/proposal_document.yaml detailed.payment_terms (25 / 60 / 15, the
+#                52 kWp sample — above 10 kW).
+# Only presets Grid Nova has supplied are listed; add one here when Grid Nova gives another.
+payment_term_presets:
+  - {id: up_to_10_kw, label: "Up to 10 kW — price list (20 / 60 / 20)", source: price_list}
+  - {id: above_10_kw, label: "Above 10 kW (25 / 60 / 15)", source: detailed}
+
 # Messages staff send (never printed on the PDF). {name}, {reference}, {title}, {link}, {valid_until}.
 messages:
   whatsapp: "Dear {name}, please find Grid Nova Energy's proposal {reference} ({title}) here: {link} — valid until {valid_until}."

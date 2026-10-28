@@ -69,16 +69,27 @@ submission or approval sends the version back to `draft`.
 
 ## 5. Proposals
 
-* `GET /studio/proposals?status=&project_type=&owner_id=&date_from=&date_to=&q=&page=&page_size=` → `{items: [ProposalRow], total, page, page_size}`. `q` searches customer name, mobile, reference, code, title. Without `studio.view_all`: own only.
+* `GET /studio/proposals?status=&project_type=&owner_id=&customer_id=&date_from=&date_to=&q=&page=&page_size=` → `{items: [ProposalRow], total, page, page_size}`. `q` searches customer name, mobile, reference, code, title. `customer_id` (BE-19): one Studio customer's proposals. Without `studio.view_all`: own only. Newest change first.
 * `POST /studio/proposals` `{customer_id, project_type, template_id?}` → 201 **View** (version 1, draft, defaults generated: BOQ, customer scope, payment terms — ≤ 10 kW the price list's 20/60/20, above 25/60/15 — validity 15 days).
 * `GET /studio/proposals/{id}?version=` → **View**.
 
+**ProposalRow** (each list item; also `View.proposal`) — written out in full (BE-19):
+```json
+{"id": 7, "code": "SP-000007", "title": "3 kWp Residential rooftop — Test Kumar Das",
+ "project_type": "residential_rooftop", "status": "draft", "current_version": 1,
+ "owner_id": "user_…", "owner_name": "Desk Person",
+ "capacity_kwp": "3",
+ "customer": {"id": 3, "name": "…", "mobile": "98300…"}, "lead_id": null, "lost_reason": null,
+ "total": "201465.00", "document_reference": null, "valid_until": null, "issued_at": null,
+ "created_at": "2026-10-27T10:00:00+00:00", "updated_at": "2026-10-27T10:05:00+00:00"}
+```
+`total` and `capacity_kwp` are the current version's (decimal strings or null). `owner_name` is a
+display name only — never an email — for anyone with `studio.view` (null when the owner has no
+employee row).
+
 **View**
 ```json
-{"proposal": {"id": 7, "code": "SP-000007", "title": "3 kWp Residential rooftop — Test Kumar Das",
-              "project_type": "residential_rooftop", "status": "draft", "current_version": 1, "owner_id": "user_…",
-              "customer": {"id": 3, "name": "…", "mobile": "98300…"}, "lead_id": null, "lost_reason": null,
-              "total": "201465.00", "document_reference": null, "valid_until": null, "issued_at": null, …},
+{"proposal": { … ProposalRow … },
  "version": {"version": 1, "status": "draft", "locked": false, "document_reference": null, "document_date": null,
              "valid_until": null, "total": "201465.00", "verification_code": null, "pdf_sha256": null,
              "pdf_filename": null, "submitted_by": null, "approved_by": null, "approval_comment": null,
@@ -96,9 +107,85 @@ submission or approval sends the version back to `draft`.
  "approval_required": false, "approval_reasons": [],
  "signatory": {"name": "RAJU PAUL", "title": "Authorised Signatory", "for_line": "For Grid Nova Energy"},
  "versions": [{"version": 1, "status": "draft", "document_reference": null}],
+ "public_url": null, "verify_url": null,
  "can": {"edit": true, "price": true, "submit": false, "approve": false, "issue": false, "deliver": false,
          "revise": false, "mark_accepted": false, "mark_lost": true, "convert": false}}
 ```
+`public_url` / `verify_url` (BE-19): set whenever the shown version is issued — the customer's
+page (`FRONTEND_BASE_URL/proposal/{token}`) and the verification page the QR opens; null before
+issue (and `public_url` null if the stored link cannot be read, e.g. a changed encryption key).
+
+**The schema-2 document** (`View.document`, also what a converted lead's proposal carries in
+`content.document`) — the whole object; every section is replaced as a unit by the guided edit:
+```json
+{"schema_version": 2, "revision": 0, "segment": "residential", "coverage": null, "housing_society": false,
+ "mount_type": "rooftop",
+ "addressee": {"customer_type": "individual", "title": "Mr.", "name": "Test Kumar Das", "attention": null,
+               "address_lines": ["12 Example Lane, Habra", "North 24 Parganas, West Bengal – 743263"],
+               "mobile": "9830000001", "aadhaar_last4": "1234", "salutation": "Dear Sir,"},
+ "connection": {"discom": "WBSEDCL", "consumer_number": "100000001", "sub_division": "Habra CCC",
+                "sanctioned_load_kw": "3.52", "category": "Residential", "phase": "single"},
+ "site": {"address_lines": ["…"], "town": "Habra", "state": "West Bengal"},
+ "pm_surya_ghar": {"subsidy_opted": true, "portal_registered": true, "approved_capacity_kwp": "3"},
+ "plant": {"capacity_kwp": "3", "package": "NOVA_ASSURED", "dcr": true},
+ "system": {"module_technology": "Mono PERC", "inverter": null, "mounting": null},
+ "boq": [{"description": "Solar PV Modules – {module_technology}, {dcr_label}", "quantity": "{capacity_kwp} kWp",
+          "standard": null, "make": "Sova Solar / HR Solar / V-Sole / Equivalent", "kind": "module"}, …],
+ "customer_scope": ["Provide shadow-free roof area, …", …],
+ "payment_terms": [{"percent": "20", "label": "On Order", "short_label": null}, …],
+ "notes": [],
+ "price": {"mode": "price_list", "basic": "185000.00", "rate_per_kwp": null, "total": null,
+           "price_list_version": 1, "list_basic": "185000.00", "discount": null, "reason": null},
+ "defaults": {"boq": "v2|compact|pmsg=True|up5=True|package=NOVA_ASSURED", "customer_scope": "…",
+              "payment_terms": "v2|compact|le10=True"},
+ "edited": [],
+ "project": {"project_type": "residential_rooftop", "houses": null, "roof_area_sqft": null},
+ "savings": null,
+ "items": [],
+ "display": {"show_discount_line": false, "show_savings": false, "show_package_comparison": false},
+ "notes_free": [], "cover_highlight": null, "validity_days": 15}
+```
+* Money and sizes are decimal strings. `boq[].kind`: `module` | `inverter` | `cable` | null; `{…}`
+  placeholders in BOQ text are filled when printed. `price.mode`: `price_list` | `staff_basic` |
+  `staff_total` | `none`; `price.discount` `{amount, reason}`. `savings` (inputs) `{monthly_units,
+  monthly_bill, tariff_per_unit, fixed_charges, export_rate}`. `items[]` (itemised layout)
+  `{description, specification, make, quantity, unit, unit_rate, category}`.
+* `edited`: the sections staff own (never regenerated); `defaults`: the key each defaulted section
+  (`boq`, `customer_scope`, `payment_terms`) was generated from.
+
+### `GET /studio/options` (studio.view) — the whole object
+```json
+{"project_types": [{"id": "residential_rooftop", "label": "Residential rooftop", "layout": "compact_or_detailed"}, …],
+ "packages": [{"id": "NOVA_ASSURED", "label": "Nova Assured"}, {"id": "NOVA_SIGNATURE", "label": "Nova Signature"}],
+ "phases": ["single", "three"], "categories": ["Residential", …], "discoms": ["WBSEDCL", …],
+ "titles": ["Mr.", "Ms.", …], "salutations": ["Dear Sir,", …], "module_technologies": ["Mono PERC", "TOPCon"],
+ "item_units": ["Nos", "Sets", …],
+ "item_categories": [{"id": "solar_street_light", "label": "Solar street light", "gst_rate": "0.05"}, …],
+ "sections": ["addressee", "connection", "site", "pm_surya_ghar", "plant", "system", "boq", "customer_scope",
+              "payment_terms", "notes", "project", "items", "display", "savings", "notes_free", "cover_highlight",
+              "validity_days", "price"],
+ "validity_days_default": 15, "price_modes": ["price_list", "staff_basic", "staff_total", "none"],
+ "assistant_enabled": false,
+ "payment_term_presets": [
+   {"id": "up_to_10_kw", "label": "Up to 10 kW — price list (20 / 60 / 20)",
+    "terms": [{"percent": "20", "label": "On Order"}, {"percent": "60", "label": "Against Material Bill"},
+              {"percent": "20", "label": "Before Commissioning"}]},
+   {"id": "above_10_kw", "label": "Above 10 kW (25 / 60 / 15)",
+    "terms": [{"percent": "25", "label": "Advance along with the order"}, …]}],
+ "resettable_sections": ["boq", "customer_scope", "payment_terms", "system"],
+ "boq_makes": {"module": ["Adani", "Equivalent", "HR Solar", …], "inverter": ["Deye", …],
+               "cable": ["Finolex", "Havells", …], "conduit": ["Branded", "Supreme"], "other": [ … every allowed make … ]},
+ "email_message_max": 1500}
+```
+* `payment_term_presets` (BE-19, `config/studio.yaml`): each preset names its source, so its
+  figures always match it — the price list's schedule, and `config/proposal_document.yaml`
+  `detailed.payment_terms`. Only presets Grid Nova supplied; apply one with the ordinary
+  `payment_terms` edit.
+* `boq_makes` (BE-19): per BOQ row `kind` — the price list's makes for that component (both
+  packages, plus "Equivalent" where the price list allows one), the default rows' makes, and the
+  active catalogue brands (modules, inverters). `conduit` is the price list's conduit/flex pipe
+  makes. `other` = every make the BOQ accepts (`make_not_in_catalogue` refuses anything else),
+  for rows with no kind.
 
 ## 6. The guided edit — `PATCH /studio/proposals/{id}/document`
 
@@ -135,6 +222,15 @@ is an event (`priced`) with totals before and after.
 
 Errors: 403 `not_permitted` / `two_factor_required`, 409 `proposal_locked` / `stale_version`
 (`current_revision`), 422 `invalid_value` / `payment_terms_total` / `make_not_in_catalogue`.
+
+### `POST /studio/proposals/{id}/sections/{section}/reset` (studio.edit) — BE-19
+Body `{base_revision}`. `section`: `boq` | `customer_scope` | `payment_terms` | `system`. Puts the
+section back to its generated default (BOQ, scope and terms from the layout, size and package;
+`system` to `{module_technology: "Mono PERC", inverter: null, mounting: null}`) and stops staff
+owning it (it follows the plant again). Same rules as the guided edit: 409 `proposal_locked` /
+`stale_version` (`current_revision`), 422 `field_not_resettable`; a submitted/approved version
+goes back to draft; recorded as an `edited` event with `detail.reset: true`. Returns the View
+plus `changes`, `regenerated_sections`, `approval_cleared`.
 
 ## 7. Figures (schema 2)
 
@@ -198,8 +294,16 @@ STU-5), `roof_area_short`, `state_outside_service` (not West Bengal / Bihar), `s
 
 ## 10. Delivery, tracking, closing
 
-* `POST …/email` `{to?}` → `{sent, to}` — PDF attached, online link, from `NOTIFY_FROM_EMAIL`,
-  reply-to the owner. 422 `no_customer_email`; 503 `email_not_configured`; 502 `send_failed`.
+* `POST …/email` `{to?, subject?, message?}` → `{sent, to}` — PDF attached, online link, from
+  `NOTIFY_FROM_EMAIL`, reply-to the owner. BE-19: `message` is staff's own plain text (≤ 1,500
+  characters; one paragraph per line; HTML-escaped) placed after the greeting, **above** the fixed
+  lines and the link; `subject` (≤ 200) replaces the configured subject. Both are recorded on the
+  `emailed` event. 422 `no_customer_email` / `invalid_value` (message too long or not plain text);
+  503 `email_not_configured`; 502 `send_failed`.
+* `GET …/pdf-link?version=` (studio.view) — BE-19 → `{url, expires_at, filename}`: a short-lived
+  signed link to the issued PDF, as JSON (no bucket CORS needed); recorded as a staff
+  `downloaded` event. 409 `not_issued`; 503 `storage_unavailable`. `GET …/pdf` (302 redirect)
+  stays.
 * `POST …/whatsapp-link` → `{url: "https://wa.me/91XXXXXXXXXX?text=…", text, link}` (no API, no cost).
 * `POST …/revise` → View of the next version (draft, everything carried over).
 * `POST …/duplicate` `{version?, customer_id?}` → 201 View of a new proposal.
@@ -207,7 +311,9 @@ STU-5), `roof_area_short`, `state_outside_service` (not West Bengal / Bihar), `s
   View + `convert_offered`. 409 `proposal_expired`.
 * `POST …/mark-lost` `{reason}` → View.
 * `POST …/convert` (studio.convert) → `{lead_id, proposal_id, created}` — a Lead (source
-  `proposal_studio`, segment from the type, assigned to the owner) and a Proposal on it with the
+  `proposal_studio`, segment from the type, **unassigned** since BE-19 — Sales sees it through
+  "assigned to you or nobody"; a `studio_converted` alert goes to the Sales role; the owner stays
+  on the Studio proposal and in the `converted` event `detail.owner_id`) and a Proposal on it with the
   **same document, reference, PDF and status** (`accepted` or `sent`); idempotent. A later online
   acceptance also accepts the lead's proposal. 409 `not_issued`.
 * `GET …/events` → `{items: [{id, version, type, actor_type, actor, detail, at}]}` — created, edited,

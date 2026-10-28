@@ -307,9 +307,12 @@ def require_payment_access(employee, lead) -> None:
 # ── Staff regions (BE-17) ─────────────────────────────────────────────────────────
 #
 # `employees.regions` lists the states a person works in (empty = every region). It is
-# enforced only where the record already carries a state id: associates and associate
-# applications (`state_id`). Leads are not scoped — their state is free text on the
-# project and often missing (docs/api/access_control.md).
+# enforced where the record carries a state: associates and associate applications
+# (`state_id`), and — BE-19 — leads (list and detail). A lead's state is its associate
+# onboarding's site state when it has one, else the project's free-text state when that
+# text is exactly a state's name (any case). A lead whose state is unknown (no onboarding,
+# and no or unrecognised project state — most chat and web leads) is NOT region-scoped:
+# hiding it would hide it from everyone working a region (docs/api/access_control.md).
 
 OUTSIDE_REGION = "This record is outside the regions you work in."
 
@@ -329,4 +332,53 @@ def region_state_ids(db, employee) -> Optional[list[int]]:
 def require_region(db, employee, state_id) -> None:
     ids = region_state_ids(db, employee)
     if ids is not None and state_id not in ids:
+        raise HTTPException(status_code=403, detail=OUTSIDE_REGION)
+
+
+def _state_names(db) -> dict[str, int]:
+    from sqlalchemy import select
+
+    from app.memory.models import TerritoryState
+    return {name.strip().lower(): sid for sid, name in db.execute(select(TerritoryState.id, TerritoryState.name))}
+
+
+def lead_region_condition(db, employee):
+    """SQL condition for the leads inside the employee's regions (unknown-state leads
+    included), or None when the employee works every region."""
+    from sqlalchemy import select
+
+    from app.memory.models import CustomerOnboarding, Project
+
+    ids = region_state_ids(db, employee)
+    if ids is None:
+        return None
+    names = _state_names(db)
+    outside_names = [n for n, sid in names.items() if sid not in ids]
+    site_state = (select(CustomerOnboarding.state_id).where(CustomerOnboarding.lead_id == Lead.id)
+                  .correlate(Lead).scalar_subquery())
+    project_state = (select(func.lower(func.trim(Project.state))).where(Project.id == Lead.project_id)
+                     .correlate(Lead).scalar_subquery())
+    outside = or_(and_(site_state.is_not(None), site_state.not_in(ids or [-1])),
+                  and_(site_state.is_(None), func.coalesce(project_state, "").in_(outside_names or [""])))
+    return ~outside
+
+
+def lead_state_id(db, lead) -> Optional[int]:
+    from sqlalchemy import select
+
+    from app.memory.models import CustomerOnboarding, Project
+    site = db.execute(select(CustomerOnboarding.state_id).where(CustomerOnboarding.lead_id == lead.id)).scalar()
+    if site is not None:
+        return site
+    project = db.get(Project, lead.project_id) if lead.project_id else None
+    text = (project.state or "").strip().lower() if project else ""
+    return _state_names(db).get(text) if text else None
+
+
+def require_lead_region(db, employee, lead) -> None:
+    ids = region_state_ids(db, employee)
+    if ids is None:
+        return
+    state_id = lead_state_id(db, lead)
+    if state_id is not None and state_id not in ids:
         raise HTTPException(status_code=403, detail=OUTSIDE_REGION)

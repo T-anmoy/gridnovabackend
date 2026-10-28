@@ -140,7 +140,10 @@ holders: `leads.view_all` / `leads.view_assigned` / `leads.view_commercial` /
 `role` stays (primary role). Use `permissions` to show or hide actions.
 
 ### `GET /employees` — `staff.manage` (Admin, Network Manager)
-Each row gains `roles` (list) and `regions` (list; empty = every region).
+Each row gains `roles` (list) and `regions` (list; empty = every region). BE-19 adds
+`last_sign_in_at` (ISO UTC) and `two_factor_enabled` (bool), read from Clerk
+(`GET /v1/users?user_id=…`, cached 10 minutes per user); both **null** when unknown — no Clerk key,
+Clerk unreachable, or a person who never signed in to Clerk.
 
 ---
 
@@ -246,9 +249,18 @@ batch `leads_reassigned`.
 
 ### `PUT /employees/{id}/regions` — `staff.manage`, within scope
 Body `{regions: ["West Bengal", …]}` (TerritoryState names; `[]` = every region).
-422 `unknown_region`. Applied to **associate lists and associate/application detail**
-(`state_id`): outside → 403 `"This record is outside the regions you work in."`. **Leads
-are not region-scoped** — their state is free text on the project and often missing.
+422 `unknown_region`. Applied to associate lists and **every** per-associate and
+per-application route (detail, KYC document links, status, approve, invitation, documents,
+reassign-customers — BE-19) by `state_id`: outside → 403 `"This record is outside the regions
+you work in."`.
+
+**Leads (BE-19):** `GET /leads` and `GET /leads/{id}` are region-scoped too. A lead's state is
+its associate onboarding's site state when it has one, else the project's `state` text when it
+is exactly a state's name (any case, spaces trimmed). A lead whose state is unknown — no
+onboarding and no or unrecognised project state (most chat and web leads) — stays visible to
+everyone, because hiding it would hide it from every regional employee. Outside → the list
+leaves it out (`total` too); the detail answers 403 as above. No change for anyone whose
+`regions` is empty.
 
 ---
 
@@ -275,10 +287,11 @@ the roles in scope for role changes and invitations; `commissions.rates.manage` 
 approver's permissions (scope, Admin floor, commission rules); a refusal leaves the request
 pending. A role change whose target's roles moved on since the request: 409 `approval_stale`.
 
+`GET /approvals` answers `{"items": [ApprovalRequest, …]}` (newest first). Each item:
 ```json
 {"approval_request_id": "…", "action": "staff.set_roles", "summary": "Change Raju Paul's roles from sales to admin, sales",
  "payload": {"employee_id": "…", "roles": ["admin", "sales"], "before": ["sales"], "switches": ["role.admin"]},
- "status": "pending", "requested_by": "user_2ab", "created_at": "…", "expires_at": "…",
+ "status": "pending", "requested_by": "user_2ab", "requested_by_name": "Tanmoy Halder", "created_at": "…", "expires_at": "…",
  "decided_by": null, "decided_at": null, "decision_note": null, "result": null}
 ```
 `action`: `staff.set_roles` | `staff.invite` | `commissions.standard_rate_publish` |
@@ -287,7 +300,7 @@ pending. A role change whose target's roles moved on since the request: 409 `app
 
 | Route | Who | Notes |
 |---|---|---|
-| `GET /approvals?status=` | holders of any approver permission | requests you asked for or could decide |
+| `GET /approvals?status=` | holders of any approver permission | `{items}`: requests you asked for, or that you could decide — BE-19: a staff change (`staff.*`) only when you may assign **every** role it touches, so the Network Manager no longer sees Admin or Accounts grants it would be refused. `requested_by_name` (display name; null if unknown) on every item and in the approve / reject / cancel answers |
 | `POST /approvals/{id}/approve` `{note?}` | a different eligible person | 403 `self_approval` / `not_an_approver`, 409 `approval_not_pending` / `approval_expired` / `approval_stale` |
 | `POST /approvals/{id}/reject` `{note?}` | same | |
 | `POST /approvals/{id}/cancel` | the requester | 403 `not_requester` |
@@ -296,11 +309,25 @@ pending. A role change whose target's roles moved on since the request: 409 `app
 
 ## 6. Alerts by role
 
+`GET /access/admins` — any staff (BE-19): the active Admins, so "ask an Admin" can name them.
+```json
+{"items": [{"id": "user_…", "name": "Ada Admin", "email": null}]}
+```
+Sorted by name. `email` is filled only for a viewer who is an Admin; null for everyone else.
+
 `GET /access/alerts` — any staff:
 ```json
 {"events": [{"event": "payment_recorded", "roles": ["accounts"], "assigned_employee": false, "owner": false,
              "active_holders": {"accounts": 1}, "fixed_addresses": 1, "reaches_someone": true}]}
 ```
+BE-19: a viewer holding `staff.manage` (Admin, Network Manager) also gets, per event,
+`"addresses": {"fixed": ["info@gridnova.in"], "by_role": {"admin": ["a@gridnova.in"], …}}` — the
+addresses actually emailed today (deactivated people left out). The lead's assigned employee and
+a Studio owner vary per record and are not listed. Everyone else sees counts only, as before.
+New events: `proposal_ready_for_review` (Admin + the lead's assigned employee: a drafted proposal
+waits for approval — after a formal proposal is prepared, or a site assessment approve-and-draft)
+and `studio_converted` (Sales: an unassigned lead made from a Studio proposal).
+
 Recipients of a staff email = the fixed addresses configured before (`STAFF_NOTIFY_EMAILS`,
 `ACCOUNTS_NOTIFY_EMAILS`, `OPERATIONS_NOTIFY_EMAILS` — shared mailboxes keep receiving)
 **plus** every active employee holding one of the event's roles **plus** the lead's
@@ -332,7 +359,9 @@ associates.applications.review, associates.attribution.resolve, associates.seats
 territories.manage, execution.mode.switch, execution.admin_override, execution.dcr_override,
 payments.process, payments.segregation_override, commissions.process,
 commissions.rates.manage, payouts.segregation_override, payouts.bank_file.export,
-placeholders.resolve, archive.manage, governance.manage, staff.manage.
+placeholders.resolve, archive.manage, governance.manage, staff.manage, studio.price,
+studio.approve. (`studio.price` and `studio.approve` were already sensitive in
+`config/access_control.yaml` since BE-18; this list now says so.)
 
 Development/test headers count as two-step done; `X-Employee-Two-Factor: off` simulates a
 session without it. `X-Employee-Roles: admin,accounts` signs in with several roles.

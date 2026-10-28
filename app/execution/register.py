@@ -539,6 +539,14 @@ def project_package(db: Session, onboarding: CustomerOnboarding) -> Optional[str
     from app.pricing.price_list import PACKAGE_FOR_TIER
     proposal = accepted_proposal(db, onboarding)
     package = (((proposal.content or {}).get("pricing") or {}).get("package") if proposal else None)
+    if not package and proposal is not None:
+        # BE-19: a BE-13 proposal names its package in the document, not in `pricing`.
+        from app.proposals import document as d
+        try:
+            doc = d.stored(proposal.content)
+        except Exception:
+            doc = None
+        package = doc.plant.package if doc is not None else None
     if package:
         return package
     inputs = db.get(ProposalInputs, onboarding.proposal_inputs_id)

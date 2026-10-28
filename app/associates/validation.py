@@ -10,6 +10,15 @@ from __future__ import annotations
 import re
 from datetime import date
 
+
+class FieldError(ValueError):
+    """A refused value. `code` is stable and language-free (BE-19): the website shows
+    its own English, Hindi or Bengali text for it; the English message is a fallback."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
 # ── Aadhaar: Verhoeff checksum ────────────────────────────────────────────────
 # The standard Verhoeff tables: _D is the multiplication table of the dihedral
 # group D5, _P the position-dependent permutation, _INV the inverse table. UIDAI
@@ -63,9 +72,9 @@ def aadhaar_last4(value: str) -> str:
     hyphens (as printed on the card) are accepted."""
     digits = re.sub(r"[\s-]", "", value or "")
     if not re.fullmatch(r"[2-9]\d{11}", digits):
-        raise ValueError("Aadhaar number must be 12 digits and cannot start with 0 or 1.")
+        raise FieldError("aadhaar_format", "Aadhaar number must be 12 digits and cannot start with 0 or 1.")
     if not verhoeff_valid(digits):
-        raise ValueError("Aadhaar number is not valid (checksum failed). Please check it and try again.")
+        raise FieldError("aadhaar_checksum", "Aadhaar number is not valid (checksum failed). Please check it and try again.")
     return digits[-4:]
 
 
@@ -83,11 +92,11 @@ _PAN_RE = re.compile(r"[A-Z]{5}[0-9]{4}[A-Z]")
 def normalize_pan(value: str) -> str:
     pan = (value or "").strip().upper()
     if not _PAN_RE.fullmatch(pan):
-        raise ValueError("PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCPE1234F).")
+        raise FieldError("pan_format", "PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCPE1234F).")
     if pan[3] not in PAN_ENTITY_TYPES:
-        raise ValueError("PAN is not valid: its 4th character is not a recognised holder type.")
+        raise FieldError("pan_holder_type", "PAN is not valid: its 4th character is not a recognised holder type.")
     if pan[3] != PAN_INDIVIDUAL:
-        raise ValueError("The PAN must be an individual's PAN (4th character 'P').")
+        raise FieldError("pan_not_individual", "The PAN must be an individual's PAN (4th character 'P').")
     return pan
 
 
@@ -101,14 +110,14 @@ _ACCOUNT_RE = re.compile(r"\d{9,18}")
 def normalize_ifsc(value: str) -> str:
     ifsc = (value or "").strip().upper()
     if not _IFSC_RE.fullmatch(ifsc):
-        raise ValueError("IFSC must be 11 characters: 4 letters, then 0, then 6 letters or digits.")
+        raise FieldError("ifsc_format", "IFSC must be 11 characters: 4 letters, then 0, then 6 letters or digits.")
     return ifsc
 
 
 def normalize_bank_account(value: str) -> str:
     account = re.sub(r"\s", "", value or "")
     if not _ACCOUNT_RE.fullmatch(account):
-        raise ValueError("Bank account number must be 9 to 18 digits.")
+        raise FieldError("bank_account_format", "Bank account number must be 9 to 18 digits.")
     return account
 
 
@@ -121,7 +130,7 @@ _GSTIN_RE = re.compile(r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]")
 def normalize_gstin(value: str) -> str:
     gstin = (value or "").strip().upper()
     if not _GSTIN_RE.fullmatch(gstin):
-        raise ValueError("GSTIN must be 15 characters in the standard format (e.g. 19ABCPE1234F1Z5).")
+        raise FieldError("gstin_format", "GSTIN must be 15 characters in the standard format (e.g. 19ABCPE1234F1Z5).")
     return gstin
 
 
@@ -137,21 +146,21 @@ def normalize_mobile(value: str) -> str:
     compact = re.sub(r"[\s()-]", "", value or "")
     m = _MOBILE_RE.fullmatch(compact)
     if not m:
-        raise ValueError("Mobile number must be a 10-digit Indian mobile number starting with 6-9.")
+        raise FieldError("mobile_format", "Mobile number must be a 10-digit Indian mobile number starting with 6-9.")
     return m.group(1)
 
 
 def normalize_pin(value: str) -> str:
     pin = (value or "").strip()
     if not _PIN_RE.fullmatch(pin):
-        raise ValueError("PIN code must be 6 digits and cannot start with 0.")
+        raise FieldError("pin_format", "PIN code must be 6 digits and cannot start with 0.")
     return pin
 
 
 def normalize_email(value: str) -> str:
     email = (value or "").strip()
     if len(email) > 254 or not _EMAIL_RE.fullmatch(email):
-        raise ValueError("Must be a valid email address.")
+        raise FieldError("email_format", "Must be a valid email address.")
     return email.lower()
 
 
@@ -165,11 +174,11 @@ def age_on(born: date, today: date) -> int:
 
 def check_adult(born: date, today: date) -> date:
     if born > today:
-        raise ValueError("Date of birth cannot be in the future.")
+        raise FieldError("dob_future", "Date of birth cannot be in the future.")
     if age_on(born, today) < MINIMUM_AGE_YEARS:
-        raise ValueError(f"Applicants must be at least {MINIMUM_AGE_YEARS} years old.")
+        raise FieldError("underage", f"Applicants must be at least {MINIMUM_AGE_YEARS} years old.")
     if age_on(born, today) > 120:
-        raise ValueError("Date of birth is not plausible.")
+        raise FieldError("dob_implausible", "Date of birth is not plausible.")
     return born
 
 
@@ -177,9 +186,9 @@ def normalize_name(value: str) -> str:
     """Collapse internal whitespace; the stored name is what the applicant typed."""
     name = " ".join((value or "").split())
     if not name:
-        raise ValueError("Full legal name is required.")
+        raise FieldError("name_required", "Full legal name is required.")
     if len(name) > 200:
-        raise ValueError("Full legal name must be at most 200 characters.")
+        raise FieldError("name_too_long", "Full legal name must be at most 200 characters.")
     return name
 
 

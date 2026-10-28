@@ -129,13 +129,13 @@ payments:
       trigger: [inspection_net_meter, installed]      # [UNCONFIRMED] — the stage before commissioning
 
   # P2 — payment modes accepted. There is no cash mode, by design.
+  # Decided by Grid Nova (BE-19 brief, 28 Oct 2026): cheque, NEFT, RTGS and IMPS only —
+  # no demand draft, no UPI.
   enabled_modes:
     - cheque
-    - demand_draft                # [UNCONFIRMED]
     - neft
     - rtgs
     - imps
-    - upi                         # [UNCONFIRMED]
 
   # P3 — accounts timings and tolerance.
   thresholds:

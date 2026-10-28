@@ -360,11 +360,28 @@ def preparers(db: Session, p: StudioProposal, version: int) -> set[str]:
 
 # ── The view ────────────────────────────────────────────────────────────────────
 
-def proposal_json(db: Session, p: StudioProposal, v: Optional[StudioProposalVersion] = None) -> dict:
+def owner_names(db: Session, owner_ids) -> dict:
+    """employee id → display name (never an email) for the given owners, in one query."""
+    from app.memory.models import Employee
+    ids = {i for i in owner_ids if i}
+    if not ids:
+        return {}
+    return dict(db.execute(select(Employee.id, Employee.name).where(Employee.id.in_(ids))).all())
+
+
+def proposal_json(db: Session, p: StudioProposal, v: Optional[StudioProposalVersion] = None,
+                  names: Optional[dict] = None) -> dict:
+    """BE-19 adds `owner_name` (display name only) and `capacity_kwp` (the version's plant
+    size, a decimal string or null). `names` = owner_names(...) for a list, else looked up."""
     v = v or version_of(db, p)
     c = db.get(StudioCustomer, p.customer_id)
+    if names is None:
+        names = owner_names(db, [p.owner_id])
+    capacity = ((v.document or {}).get("plant") or {}).get("capacity_kwp")
     return {"id": p.id, "code": p.code, "title": p.title, "project_type": p.project_type,
             "status": StudioStatus(p.status).value, "current_version": p.current_version, "owner_id": p.owner_id,
+            "owner_name": names.get(p.owner_id),
+            "capacity_kwp": str(capacity) if capacity is not None else None,
             "customer": {"id": c.id, "name": c.name, "mobile": c.mobile} if c else None,
             "lead_id": p.lead_id, "lost_reason": p.lost_reason, "total": str(v.total) if v.total is not None else None,
             "document_reference": v.document_reference, "valid_until": v.valid_until.isoformat() if v.valid_until else None,
@@ -409,6 +426,15 @@ def view(db: Session, p: StudioProposal, v: Optional[StudioProposalVersion] = No
            "signatory": __import__("app.proposals.document_config", fromlist=["load"]).load()["signatory"],
            "versions": [{"version": x.version, "status": StudioStatus(x.status).value,
                          "document_reference": x.document_reference} for x in versions(db, p)]}
+    # BE-19: the customer's links whenever this version is issued (not only in the issue response).
+    out["public_url"] = out["verify_url"] = None
+    if v.issued_at is not None:
+        out["verify_url"] = verify_url(v)
+        try:
+            token = link_token(v)
+        except Exception:   # the key changed or is missing: the link cannot be shown, the view still can
+            token = None
+        out["public_url"] = public_url(token) if token else None
     if employee is not None:
         out["can"] = abilities(db, p, v, employee, items, reasons)
     return out
@@ -543,6 +569,49 @@ def edit(db: Session, p: StudioProposal, *, section: str, value: Any, base_revis
     kind = "priced" if section == "price" else "edited"
     event(db, p, kind, version=v.version, actor=actor,
           detail={"section": section, "revision": new.revision, "changes": changes[:60],
+                  "total_before": before_total, "total_after": figs["total"], "approval_cleared": cleared,
+                  "regenerated_sections": regenerated})
+    db.flush()
+    return {"changes": changes, "regenerated_sections": regenerated, "approval_cleared": cleared}
+
+
+RESETTABLE = ("boq", "customer_scope", "payment_terms", "system")
+
+
+def reset_section(db: Session, p: StudioProposal, *, section: str, base_revision: int, actor: str) -> dict:
+    """BE-19: put one section back to its generated default — the BOQ, customer scope and
+    payment terms regenerate from the document's layout, size and package; `system` returns
+    to the model's defaults. Staff stop owning it (it follows the plant again). Same rules as
+    edit(): editable versions only, base_revision must match, back to draft, audited."""
+    if section not in RESETTABLE:
+        raise StudioError("field_not_resettable", f"'{section}' has no default to reset to; "
+                                                  f"resettable: {', '.join(RESETTABLE)}.", 422, section)
+    v = version_of(db, p)
+    _require_editable(v)
+    doc = doc_of(v)
+    if base_revision != doc.revision:
+        raise StudioError("stale_version", "Someone changed this proposal after you opened it. Reload and apply your "
+                                           "change again.", extra={"current_revision": doc.revision})
+    before = d.dump(doc)
+    before_total = d.figures(doc)["total"]
+    new = doc.model_copy(deep=True)
+    new.edited = [x for x in new.edited if x != section]
+    if section == "system":
+        new.system = d.System()
+        d.requote(new)
+        regenerated = d.refresh_defaults(new) + ["system"]
+    else:
+        new.defaults.pop(section, None)
+        regenerated = d.refresh_defaults(new)
+    new.revision = doc.revision + 1
+    new = d.StudioDocument.model_validate(d.dump(new))
+    figs = _store(v, new)
+    changes = [c for c in d.diff(before, d.dump(new), "") if c["field"] != "revision"
+               and not c["field"].startswith(("defaults.", "edited"))]
+    cleared = _back_to_draft(db, p, v, actor)
+    p.updated_at = now()
+    event(db, p, "edited", version=v.version, actor=actor,
+          detail={"section": section, "reset": True, "revision": new.revision, "changes": changes[:60],
                   "total_before": before_total, "total_after": figs["total"], "approval_cleared": cleared,
                   "regenerated_sections": regenerated})
     db.flush()

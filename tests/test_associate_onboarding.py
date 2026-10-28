@@ -389,4 +389,6 @@ class TestTerritoryVisibility:
     def test_options(self, client, db_session, onboarding_ready):
         body = client.get(f"{BASE}/options", headers=headers(make_associate(db_session))).json()
         assert {p["key"] for p in body["equipment_packages"]} == {"nova_assured", "nova_signature", "as_recommended"}
-        assert "[PLACEHOLDER" in body["notice"]["text"] and "attribution_lock_days" not in body
+        # BE-19: Grid Nova's notice is live (was the placeholder).
+        assert body["notice"]["version"] == "approved-v1" and "[PLACEHOLDER" not in body["notice"]["text"]
+        assert "attribution_lock_days" not in body

@@ -175,7 +175,12 @@ class TestApproval:
         assert [e for e in ready.events if e[0] == "associate_application_submitted"] == [
             ("associate_application_submitted", {"application_id": app_id, "application_type": "associate",
                                                  "name": "Test Applicant 1", "state": "WEST BENGAL"})]
-        assert [e for e in ready.events if e[0] != "associate_application_submitted"] == [("associate_approved", {
+        # BE-19: the applicant is emailed a confirmation too (associate_application_received).
+        assert [e for e in ready.events if e[0] == "associate_application_received"] == [
+            ("associate_application_received", {"to": "applicant1@example.test",
+                                                "subject": "We have received your application"})]
+        assert [e for e in ready.events if e[0] not in ("associate_application_submitted",
+                                                        "associate_application_received")] == [("associate_approved", {
             "associate_id": f"GNA-WB-{yy}-00001", "associate_type": "associate", "name": "Test Applicant 1",
             "level": None, "approved_by": "emp-admin-1"})]
 
@@ -226,7 +231,7 @@ class TestApproval:
         assert calls == [("applicant1@example.test",
                           {"principal": "associate", "associate_id": body["associate_id"]})]
 
-    def test_clerk_failure_keeps_the_approval_and_can_be_retried(self, client, ready, monkeypatch):
+    def test_clerk_failure_keeps_the_approval_and_can_be_retried(self, client, ready, monkeypatch, db_session):
         from app.auth.clerk_client import ClerkSyncError
 
         def _fail(*a, **k):
@@ -239,8 +244,16 @@ class TestApproval:
                             lambda *a, **k: (True, "inv_retry"))
         r = client.post(f"{DASH}/associates/{body['associate']['associate_id']}/clerk-invite", headers=ADMIN)
         assert r.status_code == 200 and r.json()["clerk_invite_status"] == "sent"
+        # BE-19: an invitation sent but never accepted can be sent again (it was a 409 dead end):
+        # the old one is revoked first. Once the associate has signed in there is nothing to send.
+        revoked = []
+        monkeypatch.setattr("app.auth.clerk_client.revoke_invitation", lambda i: revoked.append(i) or True)
         r = client.post(f"{DASH}/associates/{body['associate']['associate_id']}/clerk-invite", headers=ADMIN)
-        assert r.status_code == 409  # already sent
+        assert r.status_code == 200 and r.json()["clerk_invite_status"] == "sent" and revoked == ["inv_retry"]
+        db_session.execute(select(Associate)).scalar_one().clerk_user_id = "user_signed_in"
+        db_session.commit()
+        r = client.post(f"{DASH}/associates/{body['associate']['associate_id']}/clerk-invite", headers=ADMIN)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "invalid_transition"
 
     def test_clerk_api_request_shape(self, monkeypatch):
         """The real client posts to Clerk's invitations endpoint with public_metadata."""
@@ -270,10 +283,10 @@ class TestApproval:
 
     def test_document_failure_keeps_the_approval_and_can_be_regenerated(self, client, ready, monkeypatch):
         from app.config import settings
-        monkeypatch.setattr(settings, "public_api_base_url", "")
+        monkeypatch.setattr(settings, "frontend_base_url", "")
         body = approve_flow(client, "associate", _apply(client)).json()["associate"]
-        assert body["documents"]["id_card"] is False and "PUBLIC_API_BASE_URL" in body["documents"]["error"]
-        monkeypatch.setattr(settings, "public_api_base_url", "https://api.gridnova.test")
+        assert body["documents"]["id_card"] is False and "FRONTEND_BASE_URL" in body["documents"]["error"]
+        monkeypatch.setattr(settings, "frontend_base_url", "https://www.gridnova.test")
         r = client.post(f"{DASH}/associates/{body['associate_id']}/documents/regenerate", headers=ADMIN)
         assert r.json()["documents"]["id_card"] is True and r.json()["documents"]["error"] is None
         link = client.get(f"{DASH}/associates/{body['associate_id']}/documents/id_card", headers=ADMIN)
@@ -296,9 +309,10 @@ class TestDocumentsContent:
     def test_qr_code_encodes_the_verification_url(self, monkeypatch):
         from app.associates import documents
         from app.config import settings
-        monkeypatch.setattr(settings, "public_api_base_url", "https://api.gridnova.test/")
+        monkeypatch.setattr(settings, "frontend_base_url", "https://www.gridnova.test/")
         url = documents.verify_url("GNA-WB-26-00001")
-        assert url == "https://api.gridnova.test/api/v1/public/verify/GNA-WB-26-00001"
+        # BE-19: the website's verification page, not the JSON endpoint it reads.
+        assert url == "https://www.gridnova.test/verify/GNA-WB-26-00001"
         details = documents.CardDetails("GNA-WB-26-00001", "X", "associate", None, None, None, None,
                                         date(2026, 9, 27))
         # The card embeds exactly the QR symbol for that URL.

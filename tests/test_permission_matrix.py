@@ -72,6 +72,8 @@ STAFF = {
     ("POST", "/api/v1/dashboard/associates/{associate_id}/status"):
         (ADMIN_ONLY, {"json": {"status": "suspended", "reason": "x"}}),
     ("POST", "/api/v1/dashboard/associates/{associate_id}/clerk-invite"): (ADMIN_ONLY, {}),
+    ("POST", "/api/v1/dashboard/associates/{associate_id}/reassign-customers"):
+        (ADMIN_ONLY, {"json": {"to_associate_id": "GNA-WB-26-99999", "reason": "x"}}),
     ("POST", "/api/v1/dashboard/associates/{associate_id}/documents/regenerate"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/associates/{associate_id}/documents/{document}"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/territories/{level}"): (ADMIN_ONLY, {}),

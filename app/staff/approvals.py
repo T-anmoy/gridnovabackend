@@ -56,11 +56,14 @@ def status_of(req: ApprovalRequest) -> str:
     return ApprovalRequestStatus.expired.value if is_expired(req) else ApprovalRequestStatus(req.status).value
 
 
-def serialize(req: ApprovalRequest) -> dict:
+def serialize(req: ApprovalRequest, names: Optional[dict] = None) -> dict:
+    """`names` (employee id → display name) fills `requested_by_name` (BE-19); null when
+    not supplied or unknown."""
     def iso(v):
         return v.isoformat() if v else None
     return {"approval_request_id": req.id, "action": req.action, "summary": req.summary, "payload": req.payload,
-            "status": status_of(req), "requested_by": req.requested_by, "created_at": iso(req.created_at),
+            "status": status_of(req), "requested_by": req.requested_by,
+            "requested_by_name": (names or {}).get(req.requested_by), "created_at": iso(req.created_at),
             "expires_at": iso(req.expires_at), "decided_by": req.decided_by, "decided_at": iso(req.decided_at),
             "decision_note": req.decision_note, "result": req.result}
 
@@ -88,6 +91,26 @@ def eligible_approvers(db: Session, req: ApprovalRequest) -> list:
             continue
         out.append(emp)
     return out
+
+
+def could_decide(actor, req: ApprovalRequest) -> bool:
+    """Whether `actor` could approve or reject this request (BE-19, for the list): not the
+    requester, holds the approver permission and — for a staff change — may assign every
+    role it touches (the Network Manager is never shown an Admin or Accounts grant)."""
+    if req.requested_by == actor.employee_id or not actor.holds(KINDS[req.action]):
+        return False
+    if req.action.startswith("staff."):
+        involved = set(req.payload.get("roles") or []) | set(req.payload.get("before") or [])
+        return involved <= access.assignable_roles(actor.role_values)
+    return True
+
+
+def requester_names(db: Session, rows) -> dict:
+    from app.memory.models import Employee
+    ids = {r.requested_by for r in rows}
+    if not ids:
+        return {}
+    return dict(db.execute(select(Employee.id, Employee.name).where(Employee.id.in_(ids))).all())
 
 
 def request(db: Session, actor, action: str, summary: str, payload: dict) -> ApprovalRequest:

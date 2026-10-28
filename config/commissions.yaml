@@ -40,6 +40,13 @@ commissions:
   # payment verified after an associate is deactivated earns that associate nothing.
   # [UNCONFIRMED] engineering reading of A11 (C5-7)
   deactivated_associates_earn: false
+  # BE-19: when an Admin or the Network Manager moves a suspended or deactivated
+  # associate's customers to another associate, who earns the personal-sale commission
+  # on that customer's later payments. owner_at_payment = the associate who owns the
+  # customer when the payment is verified (the new owner); commission recorded before the
+  # move stays with the associate who earned it. The only value implemented.
+  # [UNCONFIRMED] engineering reading (C5-REASSIGN)
+  reassigned_customers_earn: owner_at_payment
   # BE-12 individual rates: an Admin may raise or lower one Associate's personal-sale
   # rate (POST /api/v1/dashboard/associates/{id}/commission-rate). A reduction always
   # needs rate_change_notice_days' notice. false = an increase may take effect today;

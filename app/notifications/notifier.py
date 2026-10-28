@@ -33,9 +33,12 @@ class Notifier(ABC):
         raise NotImplementedError
 
     # ── Named convenience notifications (existing surface) ───────────────────────
-    def proposal_ready_for_review(self, proposal_id: int, lead_id: int, employee_id: str) -> None:
+    def proposal_ready_for_review(self, proposal_id: int, lead_id: int, employee_id: str, **extra) -> None:
+        """BE-19: a drafted proposal is waiting for approval — after a staff member prepared an
+        associate customer's formal proposal, or approved a site assessment that drafted one.
+        `employee_id` drafted it; `extra` may carry customer_name, version, onboarding_id."""
         self.notify("proposal_ready_for_review",
-                    {"proposal_id": proposal_id, "lead_id": lead_id, "assigned_to": employee_id})
+                    {"proposal_id": proposal_id, "lead_id": lead_id, "assigned_to": employee_id, **extra})
 
     def manager_signoff_required(self, proposal_id: int, lead_id: int, total_value: float) -> None:
         self.notify("manager_signoff_required",
@@ -162,7 +165,7 @@ def http_client() -> httpx.Client:
 # emails info@gridnova.in for both, so a second staff email would be noise. (The
 # contact form's own email arrives with the frontend change that also adds its
 # backend mirror.)
-STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
+STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked", "proposal_ready_for_review",
                       "manager_signoff_required", "customer_accepted", "stale_lead_digest",
                       "formal_proposal_requested", "stage_submitted", "execution_stuck", "dcr_mismatch",
                       "survey_review_overdue",
@@ -170,7 +173,8 @@ STAFF_EMAIL_EVENTS = ("new_lead", "lead_qualified", "meeting_booked",
                       "payment_recorded", "payment_dishonoured", "receipt_blocked", "payments_attention",
                       "commission_queries_overdue", "handover_blocked", "service_request_raised",
                       "service_requests_overdue", "associate_application_submitted",
-                      "studio_approval_requested", "studio_viewed", "studio_accepted", "studio_declined",
+                      "studio_approval_requested", "studio_converted", "studio_viewed", "studio_accepted",
+                      "studio_declined",
                       "studio_expiring", "studio_not_viewed")
 # Proposal Studio events for the proposal's owner only (config/access_control.yaml `owner: true`):
 # no shared mailbox receives them.
@@ -318,7 +322,8 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
         return (f"New {kind} application: {payload.get('name')}",
                 [f"{payload.get('name')} applied to join the network as a {kind} ({payload.get('state')}).",
                  f"Application #{payload.get('application_id')} is waiting for review."],
-                "Open applications", f"{base_url}/dashboard/associate-applications")
+                "Open the application",
+                f"{base_url}/dashboard/associate-network/{payload.get('application_type')}/{payload.get('application_id')}")
     if event_type.startswith("studio_"):
         return _studio_message(event_type, payload, base_url)
     proposal_url = f"{base_url}/dashboard/proposals/{payload.get('proposal_id')}"
@@ -328,6 +333,13 @@ def _staff_message(event_type: str, payload: dict, base_url: str) -> Optional[tu
         return (f"Manager sign-off needed: proposal #{payload.get('proposal_id')}",
                 [f"Proposal #{payload.get('proposal_id')} (lead #{payload.get('lead_id')}) "
                  "requires manager sign-off before it can be sent.", value_line],
+                "Open the proposal", proposal_url)
+    if event_type == "proposal_ready_for_review":
+        version = f" v{payload['version']}" if payload.get("version") else ""
+        return (f"Proposal to approve: {_name(payload)}",
+                [f"Proposal #{payload.get('proposal_id')}{version} for {_name(payload)} (lead #{payload.get('lead_id')}) "
+                 f"was drafted by {payload.get('assigned_to')} and is waiting for approval.",
+                 "Check it, then approve it or ask for a revision."],
                 "Open the proposal", proposal_url)
     if event_type == "customer_accepted":
         return (f"Proposal accepted: {_name(payload)}",
@@ -366,6 +378,13 @@ def _studio_message(event_type: str, payload: dict, base_url: str) -> Optional[t
         return (f"Expires {payload.get('valid_until')}: {ref}",
                 [f"Proposal {ref} ({what}) is valid until {payload.get('valid_until')} and has not been accepted."],
                 "Open the proposal", url)
+    if event_type == "studio_converted":
+        lead_url = f"{base_url}/dashboard/leads/{payload.get('lead_id')}"
+        return (f"New lead from the Proposal Studio: {payload.get('customer_name') or what}",
+                [f"Studio proposal {ref} ({what}) became lead #{payload.get('lead_id')}"
+                 f"{' — accepted by the customer' if payload.get('accepted') else ''}.",
+                 f"It is not assigned to anyone yet. Prepared by {payload.get('owner_name') or payload.get('owner_id')}."],
+                "Open the lead", lead_url)
     if event_type == "studio_not_viewed":
         return (f"Not opened yet: {ref}",
                 [f"Proposal {ref} ({what}) was issued {payload.get('days')} days ago and the customer has not opened "
@@ -453,7 +472,7 @@ def _render_payments_attention(payload: dict, base_url: str) -> tuple[str, str, 
 def _render_commission_queries_overdue(payload: dict, base_url: str) -> tuple[str, str, str]:
     items = payload.get("queries") or []
     subject = f"Commission queries past their response date: {len(items)}"
-    url = f"{base_url}/dashboard/commission-queries"
+    url = f"{base_url}/dashboard/commissions/queries"
     rows_html, rows_text = [], []
     for item in items:
         line = (f"Query #{item.get('query_id')} from {item.get('associate_name') or item.get('associate_id')} "
@@ -694,19 +713,28 @@ def _own_list(raw: str) -> list[str]:
     return [e.strip() for e in (raw or "").split(",") if e.strip()]
 
 
-def fixed_recipient_count(event_type: str) -> int:
-    """How many configured shared addresses receive this event (GET /access/alerts)."""
+def fixed_recipients(event_type: str) -> list[str]:
+    """The configured shared addresses that receive this event (GET /access/alerts)."""
     from app.config import settings
 
     staff = settings.staff_notify_email_list
     teams = {"accounts": _own_list(settings.accounts_notify_emails),
              "operations": _own_list(settings.operations_notify_emails)}
     if event_type in ("approval_requested",) or event_type in OWNER_ONLY_EVENTS:
-        return 0
+        return []
     audience = EVENT_AUDIENCE.get(event_type)
     if not audience:
-        return len(staff)
-    return len({e for team in audience for e in (teams.get(team) or staff)})
+        return list(staff)
+    out: list[str] = []
+    for e in (e for team in audience for e in (teams.get(team) or staff)):
+        if e not in out:
+            out.append(e)
+    return out
+
+
+def fixed_recipient_count(event_type: str) -> int:
+    """How many configured shared addresses receive this event (GET /access/alerts)."""
+    return len(fixed_recipients(event_type))
 
 
 def get_notifier() -> Notifier:
@@ -732,3 +760,21 @@ def get_notifier() -> Notifier:
 
 
 notifier: Notifier = get_notifier()
+
+
+def announce_proposal_ready(db, proposal_id: int, lead_id: int, drafted_by: str,
+                            onboarding_id: Optional[int] = None) -> None:
+    """BE-19: send proposal_ready_for_review for a draft that is already committed (the
+    Proposal Agent drafts in its own session). Never raises into the caller."""
+    try:
+        from app.memory.models import Customer, Lead, Proposal
+        lead = db.get(Lead, lead_id)
+        customer = db.get(Customer, lead.customer_id) if lead is not None else None
+        proposal = db.get(Proposal, proposal_id)
+        extra = {"customer_name": customer.name if customer else None,
+                 "version": proposal.version if proposal is not None else None}
+        if onboarding_id is not None:
+            extra["onboarding_id"] = onboarding_id
+        notifier.proposal_ready_for_review(proposal_id, lead_id, drafted_by, **extra)
+    except Exception:
+        logger.exception("proposal_ready_for_review not sent", extra={"proposal_id": proposal_id})

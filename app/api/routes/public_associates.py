@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from app.associates import service, texts, uploads, validation
 from app.config import settings
 from app.memory.db import get_db
-from app.notifications import notifier as notifier_module
+from app.notifications import associate_emails, notifier as notifier_module
 from app.notifications.deferred import notify_after_commit
 from app.memory.models import (
     APPLICATION_DOCUMENTS,
@@ -73,8 +73,11 @@ class _Form:
         self.data = data
         self.errors: list[dict] = []
 
-    def error(self, field: str, message: str, kind: str = "value_error") -> None:
-        self.errors.append({"loc": ["body", field], "msg": message, "type": kind})
+    def error(self, field: str, message: str, kind: str = "value_error", code: Optional[str] = None) -> None:
+        """`code` (BE-19) is stable and language-free, for the website to show the message
+        in the applicant's language; `msg` is the English fallback."""
+        self.errors.append({"loc": ["body", field], "msg": message, "type": kind,
+                            "code": code or ("required" if kind == "missing" else "invalid")})
 
     def raw(self, field: str) -> Optional[str]:
         value = self.data.get(field)
@@ -89,7 +92,7 @@ class _Form:
                 self.error(field, "Field required", "missing")
             return None
         if len(value) > max_len:
-            self.error(field, f"Must be at most {max_len} characters.")
+            self.error(field, f"Must be at most {max_len} characters.", code="too_long")
             return None
         return value
 
@@ -102,7 +105,7 @@ class _Form:
         try:
             return fn(value)
         except ValueError as exc:
-            self.error(field, str(exc))
+            self.error(field, str(exc), code=getattr(exc, "code", None))
             return None
 
     def integer(self, field: str, required: bool = True, minimum: Optional[int] = None,
@@ -111,11 +114,11 @@ class _Form:
             try:
                 number = int(value)
             except ValueError:
-                raise ValueError("Must be a whole number.")
+                raise validation.FieldError("not_a_whole_number", "Must be a whole number.")
             if minimum is not None and number < minimum:
-                raise ValueError(f"Must be at least {minimum}.")
+                raise validation.FieldError("below_minimum", f"Must be at least {minimum}.")
             if maximum is not None and number > maximum:
-                raise ValueError(f"Must be at most {maximum}.")
+                raise validation.FieldError("above_maximum", f"Must be at most {maximum}.")
             return number
         return self.apply(field, _int, required)
 
@@ -124,7 +127,7 @@ class _Form:
             try:
                 return enum_cls(value)
             except ValueError:
-                raise ValueError(f"Must be one of: {', '.join(e.value for e in enum_cls)}.")
+                raise validation.FieldError("not_a_choice", f"Must be one of: {', '.join(e.value for e in enum_cls)}.")
         return self.apply(field, _choice)
 
     def check(self) -> None:
@@ -136,7 +139,7 @@ def _parse_dob(value: str) -> date:
     try:
         born = date.fromisoformat(value)
     except ValueError:
-        raise ValueError("Must be a date in YYYY-MM-DD format.")
+        raise validation.FieldError("date_format", "Must be a date in YYYY-MM-DD format.")
     return validation.check_adult(born, service.today_ist())
 
 
@@ -162,9 +165,10 @@ def _parse_common(form: _Form) -> dict:
         form.error("kyc_consent_version", "Field required", "missing")
     elif consent_version != version:
         form.error("kyc_consent_version",
-                   "This consent notice version is no longer current. Please reload the form and accept the current notice.")
+                   "This consent notice version is no longer current. Please reload the form and accept the current notice.",
+                   code="consent_version_stale")
     if (form.raw("kyc_consent_accepted") or "").lower() != "true":
-        form.error("kyc_consent_accepted", "The KYC consent notice must be accepted.")
+        form.error("kyc_consent_accepted", "The KYC consent notice must be accepted.", code="consent_required")
     values["kyc_consent_version"] = consent_version
     return values
 
@@ -181,7 +185,7 @@ async def _read_documents(form: _Form) -> dict[str, uploads.Document]:
         except uploads.UploadRejected as exc:
             if exc.status_code == 413:
                 raise HTTPException(status_code=413, detail=str(exc))
-            form.error(doc, str(exc))
+            form.error(doc, str(exc), code=exc.code)
     return documents
 
 
@@ -282,6 +286,7 @@ def _persist_application(db: Session, application_type: AssociateType, common: d
                  "name": application.full_name, "state": place.state.name}
         notify_after_commit(db, lambda: notifier_module.notifier.notify("associate_application_submitted", alert),
                             f"associate application {application_type.value} {application.id}")
+        associate_emails.application_received(db, application, application_type)
         db.commit()
     except service.AssociateError as exc:
         db.rollback()
@@ -341,10 +346,10 @@ async def apply_preferred(request: Request, db: Session = Depends(get_db)):
             references.append({"name": name, "mobile": mobile})
         mobiles = [r["mobile"] for r in references]
         if all(mobiles) and mobiles[0] == mobiles[1]:
-            form.error("reference_2_mobile", "The two references must be different people.")
+            form.error("reference_2_mobile", "The two references must be different people.", code="references_same")
         for n, m in enumerate(mobiles, start=1):
             if m and applicant_mobile and m == applicant_mobile:
-                form.error(f"reference_{n}_mobile", "A reference cannot be the applicant.")
+                form.error(f"reference_{n}_mobile", "A reference cannot be the applicant.", code="reference_is_applicant")
         values["references"] = references
         return values
 

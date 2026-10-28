@@ -508,7 +508,8 @@ class TestConvert:
         again = ok(client.post(f"{D}/studio/proposals/{pid}/convert", headers=DESK))
         assert first["created"] is True and again == {**first, "created": False}
         lead = db_session.get(Lead, first["lead_id"])
-        assert lead.source == LeadSource.proposal_studio and lead.assigned_employee_id == "emp-desk-1"
+        # BE-19: left unassigned (Sales sees it as "nobody's"); was assigned to the Studio owner.
+        assert lead.source == LeadSource.proposal_studio and lead.assigned_employee_id is None
         assert lead.collected_fields["segment"] == "residential"
         proposal = db_session.get(Proposal, first["proposal_id"])
         assert proposal.status == ProposalStatus.accepted
@@ -710,3 +711,140 @@ class TestAssistant:
         assert all(s["status"] == "check" for s in body["suggestions"])
         assert {"price", "boq", "payment_terms", "plant", "addressee.gstin"} <= set(body["dropped"])
         assert _view(client, pid)["revision"] == before                         # nothing saved
+
+
+# ── BE-19: the gaps BE-18 and FE-18 found ───────────────────────────────────────
+
+class TestBE19:
+    def test_the_view_carries_the_customer_links_once_issued(self, client):
+        pid = new_proposal(client)["proposal"]["id"]
+        draft = _view(client, pid)
+        assert draft["public_url"] is None and draft["verify_url"] is None
+        out, token = issued_residential(client)
+        view = _view(client, out["proposal"]["id"])
+        assert view["public_url"] == out["public_url"] and view["public_url"].endswith(token)
+        assert view["verify_url"].endswith(view["version"]["verification_code"])
+
+    def test_pdf_link_as_json(self, client, db_session):
+        out, _ = issued_residential(client)
+        pid = out["proposal"]["id"]
+        body = ok(client.get(f"{D}/studio/proposals/{pid}/pdf-link", headers=DESK))
+        assert set(body) == {"url", "expires_at", "filename"} and body["filename"] == out["version"]["pdf_filename"]
+        assert body["url"].startswith("http")
+        assert db_session.query(StudioEvent).filter_by(proposal_id=pid, type="downloaded").count() == 1
+        draft = new_proposal(client)["proposal"]["id"]
+        r = client.get(f"{D}/studio/proposals/{draft}/pdf-link", headers=DESK)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "not_issued"
+        assert client.get(f"{D}/studio/proposals/{pid}/pdf", headers=DESK, follow_redirects=False).status_code == 302
+
+    @pytest.mark.parametrize("section", ["boq", "customer_scope", "payment_terms"])
+    def test_reset_a_section_to_its_defaults(self, client, db_session, section):
+        pid = new_proposal(client)["proposal"]["id"]
+        fill(client, pid)
+        default = _view(client, pid)["document"][section]
+        changed = {"boq": [{"description": "Only row", "quantity": "1", "make": "Equivalent"}],
+                   "customer_scope": ["Only item"],
+                   "payment_terms": [{"percent": "50", "label": "Half"}, {"percent": "50", "label": "Rest"}]}[section]
+        edited = ok(edit(client, pid, section, changed))
+        assert edited["document"][section] != default and section in edited["document"]["edited"]
+        r = client.post(f"{D}/studio/proposals/{pid}/sections/{section}/reset", headers=DESK,
+                        json={"base_revision": edited["revision"]})
+        body = ok(r)
+        assert body["document"][section] == default and section not in body["document"]["edited"]
+        assert body["revision"] == edited["revision"] + 1 and body["changes"]
+        reset = db_session.query(StudioEvent).filter_by(proposal_id=pid, type="edited").all()[-1]
+        assert reset.detail["reset"] is True and reset.detail["section"] == section
+
+    def test_reset_system_and_its_rules(self, client):
+        pid = new_proposal(client)["proposal"]["id"]
+        fill(client, pid)
+        edited = ok(edit(client, pid, "system", {"module_technology": "Mono PERC", "inverter": "Custom inverter"}))
+        url = f"{D}/studio/proposals/{pid}/sections/system/reset"
+        stale = client.post(url, headers=DESK, json={"base_revision": edited["revision"] - 1})
+        assert stale.status_code == 409 and stale.json()["detail"]["code"] == "stale_version"
+        body = ok(client.post(url, headers=DESK, json={"base_revision": edited["revision"]}))
+        assert body["document"]["system"]["inverter"] is None
+        bad = client.post(f"{D}/studio/proposals/{pid}/sections/price/reset", headers=DESK,
+                          json={"base_revision": body["revision"]})
+        assert bad.status_code == 422 and bad.json()["detail"]["code"] == "field_not_resettable"
+        assert client.post(url, headers=MGMT, json={"base_revision": body["revision"]}).status_code == 403
+        out, _ = issued_residential(client)
+        locked = client.post(f"{D}/studio/proposals/{out['proposal']['id']}/sections/boq/reset", headers=DESK,
+                             json={"base_revision": out["revision"]})
+        assert locked.status_code == 409 and locked.json()["detail"]["code"] == "proposal_locked"
+
+    def test_options_presets_and_makes(self, client):
+        from app.pricing import price_list
+        opts = ok(client.get(f"{D}/studio/options", headers=DESK))
+        presets = {p["id"]: p for p in opts["payment_term_presets"]}
+        assert set(presets) == {"up_to_10_kw", "above_10_kw"}
+        assert [t["percent"] for t in presets["up_to_10_kw"]["terms"]] == [
+            str(m["percent"]) for m in price_list.commercial_terms()["payment_schedule"]]
+        assert [t["percent"] for t in presets["above_10_kw"]["terms"]] == ["25", "60", "15"]
+        makes = opts["boq_makes"]
+        assert {"Sova Solar", "TATA", "Equivalent"} <= set(makes["module"])
+        assert {"Deye", "Sungrow"} <= set(makes["inverter"]) and "Polycab" in makes["cable"]
+        assert "Supreme" in makes["conduit"] and "Sova Solar" in makes["other"]
+        assert "Sova Solar" not in makes["inverter"]
+
+    def test_list_rows_and_customer_filter(self, client, db_session):
+        from app.memory.models import Employee
+        a = new_customer(client)["id"]
+        b = new_customer(client, mobile="9830000077", name="Another Customer")["id"]
+        pa = new_proposal(client, customer_id=a)["proposal"]["id"]
+        fill(client, pa)
+        new_proposal(client, customer_id=b)
+        db_session.get(Employee, "emp-desk-1").name = "Desk Person"
+        db_session.commit()
+        rows = ok(client.get(f"{D}/studio/proposals", params={"customer_id": a}, headers=DESK))["items"]
+        assert [r["id"] for r in rows] == [pa]
+        assert rows[0]["capacity_kwp"] == "3" and rows[0]["total"] and rows[0]["owner_name"] == "Desk Person"
+        assert "owner_email" not in rows[0] and "@" not in rows[0]["owner_name"]
+        assert _view(client, pa)["proposal"]["owner_name"] == "Desk Person"
+
+    def test_email_with_staff_text_and_subject(self, client, db_session, monkeypatch):
+        import httpx
+
+        from app.notifications import notifier as notifier_module
+        from app.notifications.notifier import EmailNotifier, LogNotifier
+        out, _ = issued_residential(client)
+        posts = []
+
+        class _Resp:
+            status_code = 200
+
+        monkeypatch.setattr(httpx, "post", lambda *a, **kw: posts.append(kw["json"]) or _Resp())
+        monkeypatch.setattr(notifier_module, "notifier", EmailNotifier("re_k", "Grid Nova <n@gridnova.in>", [],
+                                                                      "https://app.test", LogNotifier()))
+        url = f"{D}/studio/proposals/{out['proposal']['id']}/email"
+        ok(client.post(url, headers=DESK, json={"subject": "Your solar proposal",
+                                                "message": "As discussed <b>today</b>,\n\nsee the attached."}))
+        sent = posts[0]
+        assert sent["subject"] == "Your solar proposal"
+        html, text = sent["html"], sent["text"]
+        assert "&lt;b&gt;today&lt;/b&gt;" in html and "<b>today</b>" not in html
+        assert text.index("Dear") < text.index("As discussed") < text.index("Thank you for considering")
+        assert text.index("see the attached.") < text.index("using the link below")
+        long = client.post(url, headers=DESK, json={"message": "x" * 1501})
+        assert long.status_code == 422
+        event = db_session.query(StudioEvent).filter_by(type="emailed").one()
+        assert event.detail["subject"] == "Your solar proposal" and "As discussed" in event.detail["message"]
+
+    def test_converted_lead_is_unassigned_and_sales_is_told(self, client, db_session, alerts):
+        from app.auth import access
+        from app.notifications.notifier import _staff_message
+        out, _ = issued_residential(client)
+        pid = out["proposal"]["id"]
+        conv = ok(client.post(f"{D}/studio/proposals/{pid}/convert", headers=DESK))
+        lead = db_session.get(Lead, conv["lead_id"])
+        assert lead.assigned_employee_id is None
+        assert db_session.get(StudioProposal, pid).owner_id == "emp-desk-1"
+        [payload] = [p for e, p in alerts if e == "studio_converted"]
+        assert payload["lead_id"] == lead.id and payload["owner_id"] == "emp-desk-1"
+        assert access.load().alerts["studio_converted"]["roles"] == frozenset({"sales"})
+        event = db_session.query(StudioEvent).filter_by(proposal_id=pid, type="converted").one()
+        assert event.detail["owner_id"] == "emp-desk-1" and event.detail["lead_assigned_to"] is None
+        sales = {"X-Employee-Id": "emp-sales-9", "X-Employee-Role": "sales"}
+        assert lead.id in {i["id"] for i in client.get(f"{D}/leads", headers=sales).json()["items"]}
+        _, _, _, url = _staff_message("studio_converted", payload, "https://www.gridnova.in")
+        assert url == f"https://www.gridnova.in/dashboard/leads/{lead.id}"

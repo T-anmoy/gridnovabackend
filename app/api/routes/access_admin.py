@@ -61,8 +61,18 @@ def access_matrix(employee: AuthenticatedEmployee = Depends(get_current_employee
 @router.get("/access/alerts")
 def access_alerts(db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
     """Which roles receive each staff alert, and whether each currently reaches anyone.
-    Any staff member. Fixed shared addresses are counted, never listed."""
-    return {"events": staff_alerts.describe(db)}
+    Any staff member sees counts; a viewer with staff.manage also gets `addresses` (BE-19)."""
+    return {"events": staff_alerts.describe(db, with_addresses=employee.holds("staff.manage"))}
+
+
+@router.get("/access/admins")
+def access_admins(db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
+    """BE-19: the active Admins, so "ask an Admin" can name them. Any staff member;
+    `email` only for a viewer who is an Admin (null otherwise)."""
+    memory = MemoryManager(db)
+    show_email = "admin" in employee.role_values
+    people = sorted(memory.holders_of_role("admin"), key=lambda e: ((e.name or "").lower(), e.id))
+    return {"items": [{"id": e.id, "name": e.name, "email": e.email if show_email else None} for e in people]}
 
 
 # ── Invitations ────────────────────────────────────────────────────────────────
@@ -228,13 +238,16 @@ def _approver_permissions(employee: AuthenticatedEmployee) -> set[str]:
 def list_approvals(status: Optional[str] = Query(default=None,
                                                  pattern="^(pending|approved|rejected|cancelled|expired)$"),
                    db: Session = Depends(get_db), employee: AuthenticatedEmployee = Depends(get_current_employee)):
-    """Requests you asked for or could decide."""
+    """Requests you asked for, or that you could decide (BE-19: a staff change only when
+    you may assign every role it touches). `{items: [...]}`, newest first; each item
+    carries `requested_by_name`."""
     held = _approver_permissions(employee)
     if not held:
         raise HTTPException(status_code=403, detail="Your role cannot see approval requests.")
     rows = [r for r in approvals.list_all(db, status)
-            if r.requested_by == employee.employee_id or approvals.KINDS[r.action] in held]
-    return {"items": [approvals.serialize(r) for r in rows]}
+            if r.requested_by == employee.employee_id or approvals.could_decide(employee, r)]
+    names = approvals.requester_names(db, rows)
+    return {"items": [approvals.serialize(r, names) for r in rows]}
 
 
 class DecisionIn(BaseModel):
@@ -247,8 +260,9 @@ def approve_request(request_id: str, body: Optional[DecisionIn] = None, db: Sess
     """Apply the change, re-checked with your permissions. You cannot approve your own."""
     if not _approver_permissions(employee):
         raise HTTPException(status_code=403, detail="Your role cannot decide approval requests.")
-    return approvals.serialize(_run(db, lambda: approvals.approve(db, employee, request_id,
-                                                                  body.note if body else None)))
+    req = _run(db, lambda: approvals.approve(db, employee, request_id,
+                                                                  body.note if body else None))
+    return approvals.serialize(req, approvals.requester_names(db, [req]))
 
 
 @router.post("/approvals/{request_id}/reject")
@@ -256,8 +270,9 @@ def reject_request(request_id: str, body: Optional[DecisionIn] = None, db: Sessi
                    employee: AuthenticatedEmployee = Depends(get_current_employee)):
     if not _approver_permissions(employee):
         raise HTTPException(status_code=403, detail="Your role cannot decide approval requests.")
-    return approvals.serialize(_run(db, lambda: approvals.reject(db, employee, request_id,
-                                                                 body.note if body else None)))
+    req = _run(db, lambda: approvals.reject(db, employee, request_id,
+                                                                 body.note if body else None))
+    return approvals.serialize(req, approvals.requester_names(db, [req]))
 
 
 @router.post("/approvals/{request_id}/cancel")
@@ -266,4 +281,5 @@ def cancel_request(request_id: str, db: Session = Depends(get_db),
     """Withdraw your own pending request."""
     if not _approver_permissions(employee):
         raise HTTPException(status_code=403, detail="Your role cannot see approval requests.")
-    return approvals.serialize(_run(db, lambda: approvals.cancel(db, employee, request_id)))
+    req = _run(db, lambda: approvals.cancel(db, employee, request_id))
+    return approvals.serialize(req, approvals.requester_names(db, [req]))

@@ -2,7 +2,9 @@
 payments, projects, execution, accounts — work exactly as for a lead proposal.
 
 One call creates, once: the pipeline Customer (matched by email or mobile), a Project, a
-Lead (source proposal_studio, segment from the project type, assigned to the Studio owner)
+Lead (source proposal_studio, segment from the project type — left UNASSIGNED (BE-19): Sales
+sees it through "assigned to you or nobody", and a `studio_converted` alert goes to the Sales
+role; the Studio owner stays recorded on the Studio proposal and in its `converted` event)
 and a Proposal on it carrying the same document, reference, PDF key and status (`accepted`
 when the customer accepted, else `sent`). Never a second reference: the lead proposal reuses
 the Studio version's. Idempotent: a second call returns the same lead.
@@ -63,7 +65,6 @@ def convert(db: Session, p: StudioProposal, actor: str) -> dict:
         "project_type": "ground_mounted" if doc.mount_type == "ground_mounted" else "rooftop",
         "capacity_kw": float(cap) if cap else None, "location": doc.site.town,
         "studio_proposal": p.code}.items() if v_ is not None}
-    lead.assigned_employee_id = p.owner_id
     accepted = v.accepted_at is not None
     content = {"document": d.dump(doc), "sections": [], "source": "proposal_studio", "studio_proposal_id": p.id,
                "studio_version": v.version}
@@ -84,8 +85,14 @@ def convert(db: Session, p: StudioProposal, actor: str) -> dict:
     p.updated_at = service.now()
     service.event(db, p, "converted", version=v.version, actor=actor,
                   detail={"lead_id": lead.id, "proposal_id": proposal.id, "reference": v.document_reference,
-                          "status": ProposalStatus(proposal.status).value})
+                          "status": ProposalStatus(proposal.status).value, "owner_id": p.owner_id,
+                          "lead_assigned_to": None})
     db.flush()
+    names = service.owner_names(db, [p.owner_id])
+    service._notify_after_commit(db, "studio_converted", {
+        "proposal_id": p.id, "code": p.code, "title": p.title, "reference": v.document_reference,
+        "lead_id": lead.id, "customer_name": sc.name, "accepted": accepted, "owner_id": p.owner_id,
+        "owner_name": names.get(p.owner_id)})
     return {"lead_id": lead.id, "proposal_id": proposal.id, "created": True}
 
 

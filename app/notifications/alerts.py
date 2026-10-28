@@ -88,21 +88,35 @@ def recipients(event_type: str, payload: dict, fixed: list[str]) -> list[str]:
     return to
 
 
-def describe(db) -> list[dict]:
+def describe(db, *, with_addresses: bool = False) -> list[dict]:
     """For GET /access/alerts: per event, the roles, how many active people hold them,
-    and how many fixed addresses also receive it."""
+    and how many fixed addresses also receive it. `with_addresses` (BE-19, a viewer with
+    staff.manage) adds `addresses`: the fixed addresses and each role holder's address
+    actually emailed today (deduplicated, deactivated people left out) — the lead's
+    assigned employee and a Studio owner vary per record and are not listed."""
     from app.memory.memory_manager import MemoryManager
-    from app.notifications.notifier import fixed_recipient_count
+    from app.notifications.notifier import fixed_recipients
 
     memory = MemoryManager(db)
+    inactive = None
     out = []
     for event, spec in access.load().alerts.items():
-        holders = {r: len([e for e in memory.holders_of_role(r) if _usable(e.email)]) for r in sorted(spec["roles"])}
-        fixed = fixed_recipient_count(event)
-        out.append({"event": event, "roles": sorted(spec["roles"], key=access.ROLE_IDS.index),
-                    "assigned_employee": spec["assigned_employee"], "owner": spec.get("owner", False),
-                    "active_holders": holders,
-                    "fixed_addresses": fixed,
-                    "reaches_someone": bool(fixed or any(holders.values()) or event == "approval_requested"
-                                               or spec.get("owner", False))})
+        people = {r: [e.email for e in memory.holders_of_role(r) if _usable(e.email)] for r in sorted(spec["roles"])}
+        holders = {r: len(v) for r, v in people.items()}
+        fixed_list = fixed_recipients(event)
+        fixed = len(fixed_list)
+        row = {"event": event, "roles": sorted(spec["roles"], key=access.ROLE_IDS.index),
+               "assigned_employee": spec["assigned_employee"], "owner": spec.get("owner", False),
+               "active_holders": holders,
+               "fixed_addresses": fixed,
+               "reaches_someone": bool(fixed or any(holders.values()) or event == "approval_requested"
+                                          or spec.get("owner", False))}
+        if with_addresses:
+            if inactive is None:
+                from app.memory.models import Employee
+                inactive = {e.lower() for e in db.execute(select(Employee.email).where(
+                    Employee.is_active.is_(False))).scalars() if e}
+            row["addresses"] = {"fixed": merge(fixed_list, [], inactive),
+                                "by_role": {r: merge([], v, inactive) for r, v in people.items()}}
+        out.append(row)
     return out

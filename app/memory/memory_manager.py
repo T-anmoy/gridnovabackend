@@ -800,12 +800,16 @@ class MemoryManager:
         filters=None,
         page: int = 1,
         page_size: int = 25,
+        region=None,
     ) -> tuple[list[Lead], int]:
         """One page of leads, newest first, and the total — every filter (the caller's
-        scope, source, and `q`: customer name / email / phone, or a lead id) in SQL."""
+        scope, source, and `q`: customer name / email / phone, or a lead id) in SQL.
+        `region`: an extra SQL condition (the caller's regions, app/auth/scoping.py)."""
         query = select(Lead).join(Customer, Customer.id == Lead.customer_id)
         if scope is not None:
             query = query.where(scope.condition())
+        if region is not None:
+            query = query.where(region)
         if source is not None:
             query = query.where(Lead.source == source)
         if filters is not None:

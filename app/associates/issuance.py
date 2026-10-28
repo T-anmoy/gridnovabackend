@@ -33,13 +33,25 @@ def associate_claims(associate: Associate) -> dict:
     return {"principal": ASSOCIATE_PRINCIPAL, "associate_id": associate.associate_id}
 
 
-def send_clerk_invite(db: Session, associate: Associate, performed_by: str) -> ClerkInviteStatus:
-    from app.auth.clerk_client import ClerkSyncError, create_associate_invitation
+def send_clerk_invite(db: Session, associate: Associate, performed_by: str, *, resend: bool = False) -> ClerkInviteStatus:
+    """Send the Clerk invitation. `resend` (the dashboard's button, BE-19): an invitation
+    already sent but never accepted — expired, lost, sent to an address since corrected —
+    is revoked and a new one sent. Once the associate has signed in there is nothing to
+    send. The post-approval job never resends."""
+    from app.auth.clerk_client import ClerkSyncError, create_associate_invitation, revoke_invitation
 
     if associate.status != AssociateStatus.active:
         raise service.InvalidTransitionError("Only an active associate can be invited.")
+    if associate.clerk_user_id is not None:
+        raise service.InvalidTransitionError("This associate has already signed in; there is no invitation to send.")
     if associate.clerk_invite_status == ClerkInviteStatus.sent:
-        raise service.InvalidTransitionError("This associate's Clerk invitation was already sent.")
+        if not resend:
+            raise service.InvalidTransitionError("This associate's Clerk invitation was already sent.")
+        if associate.clerk_invitation_id:
+            try:
+                revoke_invitation(associate.clerk_invitation_id)
+            except ClerkSyncError:   # already accepted, expired or revoked: Clerk refuses; send anew regardless
+                logger.info("Old Clerk invitation for %s not revoked", associate.associate_id)
     try:
         created, invitation_id = create_associate_invitation(
             associate.email, associate_claims(associate), settings.associate_invite_redirect_url,
@@ -124,3 +136,52 @@ def generate_documents(db: Session, associate: Associate, performed_by: str, iss
     service.record_documents(db, associate, performed_by, id_card_key=card_key, letter_key=letter_key, error=None)
     db.commit()
     return None
+
+
+def revoke_access(db: Session, associate: Associate, performed_by: str) -> dict:
+    """After a suspension or deactivation committed (BE-19): Clerk bans the associate's
+    user (every session revoked, sign-in refused) or, before they ever signed in, the
+    invitation is revoked so its link stops working. The database already refuses every
+    request from a non-active associate, so a Clerk failure leaves the change standing
+    and is reported for a retry. Commits its own audit row."""
+    from app.auth import clerk_client
+
+    try:
+        if associate.clerk_user_id:
+            done = clerk_client.ban_user(associate.clerk_user_id)
+            outcome = {"clerk_banned": done, "invitation_revoked": False, "clerk_error": None}
+        elif associate.clerk_invite_status == ClerkInviteStatus.sent and associate.clerk_invitation_id:
+            done = clerk_client.revoke_invitation(associate.clerk_invitation_id)
+            if done:
+                # Nothing is outstanding now: reinstating the associate means sending a new one.
+                associate.clerk_invite_status = None
+            outcome = {"clerk_banned": False, "invitation_revoked": done, "clerk_error": None}
+        else:
+            return {"clerk_banned": False, "invitation_revoked": False, "clerk_error": None}
+    except clerk_client.ClerkSyncError as exc:
+        logger.error("Clerk access not revoked for %s", associate.associate_id)
+        return {"clerk_banned": False, "invitation_revoked": False, "clerk_error": str(exc)}
+    if done:
+        service.audit(db, "associate", associate.associate_id, "clerk_access_revoked", performed_by,
+                      after={k: v for k, v in outcome.items() if k != "clerk_error"})
+        db.commit()
+    return outcome
+
+
+def restore_access(db: Session, associate: Associate, performed_by: str) -> dict:
+    """After a reinstatement committed: unban the Clerk user. (An associate who never
+    signed in gets a new invitation from the dashboard's invite button.)"""
+    from app.auth import clerk_client
+
+    if not associate.clerk_user_id:
+        return {"clerk_unbanned": False, "clerk_error": None}
+    try:
+        done = clerk_client.unban_user(associate.clerk_user_id)
+    except clerk_client.ClerkSyncError as exc:
+        logger.error("Clerk access not restored for %s", associate.associate_id)
+        return {"clerk_unbanned": False, "clerk_error": str(exc)}
+    if done:
+        service.audit(db, "associate", associate.associate_id, "clerk_access_restored", performed_by,
+                      after={"clerk_unbanned": True})
+        db.commit()
+    return {"clerk_unbanned": done, "clerk_error": None}

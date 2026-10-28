@@ -54,6 +54,8 @@ ROUTES = {
     ("POST", f"{P}/issue"): (EDIT, {}),
     ("GET", f"{P}/preview.pdf"): (VIEW, {}),
     ("GET", f"{P}/pdf"): (VIEW, {}),
+    ("GET", f"{P}/pdf-link"): (VIEW, {}),
+    ("POST", f"{P}/sections/{{section}}/reset"): (EDIT, {"json": {"base_revision": 0}}),
     ("POST", f"{P}/email"): (EDIT, {"json": {}}),
     ("POST", f"{P}/whatsapp-link"): (EDIT, {}),
     ("POST", f"{P}/revise"): (EDIT, {}),
@@ -89,7 +91,7 @@ def scenario(client, db_session, fake_storage, monkeypatch):
     db_session.add(item)
     db_session.commit()
     return {"proposal_id": out["proposal"]["id"], "customer_id": draft["proposal"]["customer"]["id"],
-            "item_id": item.id, "a": 1, "b": 1}
+            "item_id": item.id, "a": 1, "b": 1, "section": "boq"}
 
 
 def _fill(value, ids):

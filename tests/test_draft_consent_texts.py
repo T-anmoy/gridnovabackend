@@ -52,5 +52,8 @@ def test_the_kyc_notice_is_live_and_matches_the_approved_draft():
     assert "+91 98747 74440" in texts.welcome_letter_body()
 
 
-def test_the_customer_notice_is_still_the_placeholder():
-    assert onboarding_config.current_notice()[0] == "placeholder-v0" and onboarding_config.notice_is_placeholder()
+def test_the_customer_notice_is_live_and_matches_the_draft():
+    # BE-19: Grid Nova decided the drafted notice is used as written (was: still the placeholder).
+    version, text = onboarding_config.current_notice()
+    assert version == "approved-v1" and not onboarding_config.notice_is_placeholder()
+    assert text == _notice()
