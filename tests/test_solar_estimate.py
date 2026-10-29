@@ -592,4 +592,4 @@ class TestCodeGuards:
                     "app/proposals/document.py", "app/llm/company_facts.py"):
             assert "app.estimate" in (ROOT / rel).read_text(encoding="utf-8"), rel
         # The associate estimate goes through the instant estimate.
-        assert "instant_estimate.calculate_instant_estimate" in (ROOT / "app/onboarding/estimate.py").read_text()
+        assert "instant_estimate.calculate_instant_estimate" in (ROOT / "app/onboarding/estimate.py").read_text(encoding="utf-8")

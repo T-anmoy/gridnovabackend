@@ -18,14 +18,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run(db: Path, *args, environment="development", script="scripts/dev_setup.py"):
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}", "ENVIRONMENT": environment}
-    return subprocess.run([sys.executable, script, *args], cwd=REPO_ROOT, env=env, capture_output=True, text=True)
+    # PYTHONIOENCODING: the script prints "→", which a Windows pipe's code page cannot encode.
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}", "ENVIRONMENT": environment, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run([sys.executable, script, *args], cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+                          encoding="utf-8")
 
 
 def _alembic(db: Path, *args):
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}", "ENVIRONMENT": "development"}
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}", "ENVIRONMENT": "development", "PYTHONIOENCODING": "utf-8"}
     return subprocess.run([sys.executable, "-m", "alembic", "-c", "alembic/alembic.ini", *args],
-                          cwd=REPO_ROOT, env=env, capture_output=True, text=True)
+                          cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8")
 
 
 def _scalar(db: Path, sql: str):

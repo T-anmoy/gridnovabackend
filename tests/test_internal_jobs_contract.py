@@ -32,7 +32,7 @@ def test_every_job_is_in_the_scheduler_config():
     """deploy/scheduler.yaml schedules every job the app exposes."""
     from pathlib import Path
     import yaml
-    config = yaml.safe_load((Path(__file__).resolve().parents[1] / "deploy" / "scheduler.yaml").read_text())
+    config = yaml.safe_load((Path(__file__).resolve().parents[1] / "deploy" / "scheduler.yaml").read_text(encoding="utf-8"))
     scheduled = {job["path"] for job in config["jobs"]}
     assert scheduled == set(JOBS)
 

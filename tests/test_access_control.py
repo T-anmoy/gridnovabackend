@@ -185,7 +185,7 @@ class TestCatalogue:
         assert getattr(employee, gate)() is (GATE_PERMISSION[gate] in expected_matrix()[role.value])
 
     def test_no_permission_is_unused(self):
-        code = "\n".join(p.read_text() for p in (REPO / "app").rglob("*.py"))
+        code = "\n".join(p.read_text(encoding="utf-8") for p in (REPO / "app").rglob("*.py"))
         for perm in access.load().permissions:
             assert f'"{perm}"' in code, f"{perm} is never checked in app/"
 

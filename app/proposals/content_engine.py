@@ -51,7 +51,7 @@ def load_content_config(force_reload: bool = False) -> dict:
     global _CONTENT_CONFIG
     with _lock:
         if _CONTENT_CONFIG is None or force_reload:
-            with open(_CONFIG_PATH, "r") as f:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
             if not isinstance(cfg, dict):
                 raise ProposalConfigError(f"{_CONFIG_PATH} did not parse to a mapping.")

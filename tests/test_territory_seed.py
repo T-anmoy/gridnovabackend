@@ -48,10 +48,10 @@ class TestLoader:
         shutil.copytree(DATA_DIR, data)
         seed_territories(db_session, data)
         db_session.commit()
-        text = (data / "districts.csv").read_text().replace("10,188,ARARIA", "10,188,ARARIA RENAMED")
+        text = (data / "districts.csv").read_text(encoding="utf-8").replace("10,188,ARARIA", "10,188,ARARIA RENAMED")
         (data / "districts.csv").write_text(text)
         # Dropping a block from the file must not delete its row.
-        lines = (data / "blocks.csv").read_text().splitlines()
+        lines = (data / "blocks.csv").read_text(encoding="utf-8").splitlines()
         (data / "blocks.csv").write_text("\n".join(l for l in lines if not l.startswith("188,1625,")) + "\n")
         result = seed_territories(db_session, data)
         db_session.commit()

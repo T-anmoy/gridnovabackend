@@ -4,6 +4,8 @@ Every historical FK (leads, proposals, meetings, audit log) must survive a
 deactivation untouched, and a deactivated employee must actually be blocked at
 sign-in, not merely labelled in the dashboard.
 """
+from datetime import datetime, timedelta, timezone
+
 from app.memory.memory_manager import MemoryManager
 from tests.conftest import admin_headers, engineer_headers, management_headers, sales_headers
 
@@ -151,7 +153,10 @@ class TestEmployeeOrdering:
         ids = []
         for i in range(4):
             emp = _seed_employee(memory, db_session, f"emp-order-{i}", name=f"Order {i}")
+            # Distinct times: Windows' clock gives back-to-back inserts the same instant.
+            emp.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=i)
             ids.append(emp.id)
+        db_session.commit()
 
         r = client.get("/api/v1/dashboard/employees", headers=admin_headers())
         assert r.status_code == 200

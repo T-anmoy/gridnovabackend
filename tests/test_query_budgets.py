@@ -92,6 +92,14 @@ def _applications_queries(client, db, n: int) -> tuple[int, dict]:
     from tests.onboarding_support import ALIPURDUAR, make_associate
     for i in range(n):   # both programmes, interleaved
         make_associate(db, **({"level": "district_head", "territory": ALIPURDUAR} if i % 2 else {}))
+    # One submitted_at per row: Windows' clock gives back-to-back inserts the same instant, and
+    # ties change which programmes the first page mixes (and so how many statements it takes).
+    from app.memory.models import AssociateApplication, PreferredAssociateApplication
+    rows = [*db.query(AssociateApplication), *db.query(PreferredAssociateApplication)]
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for k, row in enumerate(sorted(rows, key=lambda r: (r.submitted_at, type(r).__name__, r.id))):
+        row.submitted_at = base + timedelta(seconds=k)
+    db.commit()
     client.get("/api/v1/dashboard/associate-applications", headers=ADMIN)
     with count_queries() as statements:
         r = client.get("/api/v1/dashboard/associate-applications", params={"page_size": 5}, headers=ADMIN)

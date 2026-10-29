@@ -44,10 +44,10 @@ class TestVersionOneUnchanged:
         page = document_render.build_html(make(), reference="GN/23/10/2026/01", doc_date=SAMPLE_DAY, draft=False,
                                           pages=pages)
         assert hashlib.sha256(page.encode()).hexdigest() == json.loads(
-            (GOLDEN / "proposal_v1_html.sha256.json").read_text())[name]
+            (GOLDEN / "proposal_v1_html.sha256.json").read_text(encoding="utf-8"))[name]
         body = re.sub(r"<style>.*?</style>", "", page, flags=re.S)
         lines = [" ".join(x.split()) for x in html.unescape(re.sub(r"<[^>]+>", "\n", body)).splitlines()]
-        assert "\n".join(x for x in lines if x) + "\n" == (GOLDEN / f"proposal_v1_{name}.txt").read_text()
+        assert "\n".join(x for x in lines if x) + "\n" == (GOLDEN / f"proposal_v1_{name}.txt").read_text(encoding="utf-8")
 
     def test_a_lead_document_still_parses_as_version_one(self):
         doc = d.parse_any(d.dump(compact_document()))
