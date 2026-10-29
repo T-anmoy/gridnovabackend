@@ -56,9 +56,10 @@ LLM mock mode activates automatically when `LLM_API_KEY` is unset. CI
 image and smoke-tests it.
 
 Dependencies: `requirements.txt` (runtime, direct), `requirements-dev.txt` (+ pytest),
-`requirements-nemo.txt` (optional NeMo rail). The image and CI install the hash-pinned
-`requirements.lock` / `requirements-dev.lock`; after editing a `requirements*.txt`, run
-`scripts/lock_requirements.sh`.
+`requirements-nemo.txt` (+ the NeMo rail). The image installs the hash-pinned
+`requirements-nemo.lock` (the runtime lock's exact pins plus NeMo Guardrails; build with
+`--build-arg LOCKFILE=requirements.lock` for a lean image without it), CI the
+`requirements-dev.lock`; after editing a `requirements*.txt`, run `scripts/lock_requirements.sh`.
 
 ## Deployment (Cloud Run + Cloud SQL, asia-south1)
 
@@ -129,7 +130,7 @@ staging/production without it; "warns" = it starts and logs a warning.
 | `STUDIO_AI_FILL_ENABLED` | — | `true` switches on the Proposal Studio's optional suggest-from-notes assistant (default `false`; BE-18) |
 | `LLM_REQUEST_TIMEOUT_SECONDS / LLM_MAX_RETRIES` | — | Per-call timeout and transport retries |
 | `AGENT_SLOW_RUN_MS / AGENT_DAILY_ACTION_LIMIT_PER_LEAD / DISABLED_AGENTS` | — | Agent harness and governance (kill switch) |
-| `NEMO_GUARDRAILS_ENABLED / NEMO_GUARDRAILS_TIMEOUT_SECONDS / NEMO_GUARDRAILS_FAIL_CLOSED / NEMO_GUARDRAILS_MAX_WORKERS` | — | Optional semantic output rail (needs `requirements-nemo.txt`, not in the image) |
+| `NEMO_GUARDRAILS_ENABLED / NEMO_GUARDRAILS_TIMEOUT_SECONDS / NEMO_GUARDRAILS_FAIL_CLOSED / NEMO_GUARDRAILS_MAX_WORKERS` | — | Semantic output rail on every Nova reply (in the image; on in deploy/env.production.yaml) |
 | `STORAGE_BUCKET / STORAGE_ENDPOINT_URL / STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY` | warns | Cloudflare R2 (private bucket): PDFs, uploads, receipts |
 | `STORAGE_SIGNED_URL_TTL_SECONDS` | — | Lifetime of signed download links (600) |
 | `RESEND_API_KEY / NOTIFY_FROM_EMAIL` | warns | Email via Resend; both needed |

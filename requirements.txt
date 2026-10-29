@@ -48,3 +48,6 @@ google-api-python-client==2.157.0
 # fixing the PYSEC-2026 advisories against 2.13.0 / 0.0.20 (BE-3).
 PyJWT==2.15.0
 python-multipart==0.0.31
+# zoneinfo's IANA database on Windows laptops (Linux images and macOS ship their own); without
+# it every IST conversion (app/timezones.py) raises ZoneInfoNotFoundError.
+tzdata==2026.6 ; sys_platform == "win32"

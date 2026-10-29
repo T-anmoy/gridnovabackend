@@ -41,10 +41,13 @@ jobs:
       - name: ruff check
         run: ruff check .
 
-      # The runtime lock is what ships in the image. (requirements-dev.lock adds only test
-      # tooling that never leaves CI.)
+      # The image ships requirements-nemo.lock (the runtime lock plus NeMo Guardrails), so
+      # both are audited. (requirements-dev.lock adds only test tooling that never leaves CI.)
       - name: pip-audit (runtime lock)
         run: pip-audit --require-hashes --disable-pip -r requirements.lock
+
+      - name: pip-audit (image lock, with NeMo Guardrails)
+        run: pip-audit --require-hashes --disable-pip -r requirements-nemo.lock
 
   test:
     runs-on: ubuntu-24.04

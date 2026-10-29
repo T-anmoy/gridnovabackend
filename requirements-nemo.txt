@@ -1,11 +1,12 @@
-# Optional: NeMo Guardrails — semantic output rail preventing internal-information
-# disclosure in customer replies (app/agents/nemo_guard.py). Off unless
-# NEMO_GUARDRAILS_ENABLED is set, and the code degrades to the deterministic guardrails
-# when the package is absent, so the production image does NOT install it.
+# NeMo Guardrails — semantic output rail preventing internal-information disclosure in
+# customer replies (app/agents/nemo_guard.py). The production image installs this lock
+# (requirements-nemo.lock = the runtime lock plus NeMo); the rail runs when
+# NEMO_GUARDRAILS_ENABLED=true, and the code degrades to the deterministic guardrails when
+# it is off or the package is absent.
 # Weighs ~400MB installed (pulls onnxruntime + numpy + huggingface-hub via fastembed).
+# The output rail needs no embedding model, so nothing is downloaded at start-up.
 # Verified not to downgrade langchain-core below the CVE-2025-68664 pin.
 #
-# To enable it, install this on top of the runtime lock and set NEMO_GUARDRAILS_ENABLED=true:
-#     pip install -r requirements-nemo.txt
+# After editing this file or requirements.txt, regenerate the locks: scripts/lock_requirements.sh
 -r requirements.txt
 nemoguardrails==0.24.0

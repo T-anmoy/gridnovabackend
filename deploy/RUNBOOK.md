@@ -52,7 +52,7 @@ gcloud services enable run.googleapis.com sqladmin.googleapis.com secretmanager.
 gcloud artifacts repositories create $REPO --repository-format=docker --location=$REGION \
   --description="Grid Nova backend images"
 
-# Build in Cloud Build (linux/amd64, the hash-pinned requirements.lock, fonts included):
+# Build in Cloud Build (linux/amd64, the hash-pinned requirements-nemo.lock, fonts included):
 gcloud builds submit --region=$REGION --tag=$IMAGE .
 ```
 

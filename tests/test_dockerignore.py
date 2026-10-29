@@ -56,7 +56,7 @@ def test_never_in_the_image(path):
 @pytest.mark.parametrize("path", [
     "app/main.py", "app/agents/nemo/output_policy.md", "alembic/alembic.ini", "alembic/versions/0045_be1_security.py",
     "config/sales_policy.yaml", "data/territories/states.csv", "data/pincodes/README.md",
-    "scripts/bootstrap_db.py", "requirements.txt", "requirements.lock", "scripts/smoke_fonts.py",
+    "scripts/bootstrap_db.py", "requirements.txt", "requirements.lock", "requirements-nemo.lock", "scripts/smoke_fonts.py",
 ])
 def test_everything_the_app_reads_is_kept(path):
     assert not excluded(path), path
@@ -76,5 +76,5 @@ def test_env_example_is_committable_and_complete():
     if (ROOT / ".git").exists():  # a plain copy of the tree (no repository) cannot answer this part
         r = subprocess.run(["git", "check-ignore", "-q", "--no-index", ".env.example"], cwd=ROOT)
         assert r.returncode == 1, ".env.example is git-ignored"
-    documented = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", (ROOT / ".env.example").read_text(), re.M))
+    documented = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", (ROOT / ".env.example").read_text(encoding="utf-8"), re.M))
     assert {f.upper() for f in Settings.model_fields} <= documented
