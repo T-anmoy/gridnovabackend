@@ -1,15 +1,22 @@
 # Access control (BE-17) — the one source of truth for who may do what.
 #
 # Loaded once and validated at startup (app/auth/access.py). Every AuthenticatedEmployee
-# .can_*() gate is `return self.has("<permission>")`; tests/test_access_control_matrix.py
+# .can_*() gate is `return self.has("<permission>")`; tests/test_permission_matrix.py
 # pins every role × permission and fails when a gate, a permission or a role drifts.
 #
 # A person may hold several roles: their permissions are the union. Roles come from the
 # database (employee_roles), never from the sign-in token.
 #
-# `sensitive: true` permissions are refused with 403 two_factor_required when every
-# held role that grants the permission has `requires_two_factor: true` and the session
-# did not complete a second factor (Clerk's `fva` claim).
+# Two-step sign-in. A role's `requires_two_factor: true` means: its `sensitive: true`
+# permissions are refused with 403 two_factor_required unless the session completed a
+# second factor (Clerk's `fva` claim) — when every held role that grants the permission
+# requires it.
+#
+# It is OFF (`false`) for every role by the owner's decision of 29 Oct 2026: Grid Nova is
+# on Clerk's free plan, where two-step sign-in is not available, so nobody could complete
+# it. To turn it back on (Clerk Pro), first have each person enable two-step in their
+# Clerk account, then set `requires_two_factor: true` on their role here. Nothing else
+# changes: the `sensitive` flags and the `fva` check stay in place for exactly that.
 
 permissions:
   # ── Leads ────────────────────────────────────────────────────────────────────
@@ -199,7 +206,7 @@ roles:
     description: Every power in the system except the payout bank file (hold Accounts as well for that).
     permissions: all
     exclude: [payouts.bank_file.export]
-    requires_two_factor: true
+    requires_two_factor: false
     can_assign_roles: all
   management:
     label: Management
@@ -232,7 +239,7 @@ roles:
       - studio.view
       - studio.view_all
       - studio.approve
-    requires_two_factor: true
+    requires_two_factor: false
     can_assign_roles: []
   network_manager:
     label: Network Manager
@@ -251,7 +258,7 @@ roles:
       - surveys.view
       - audit.view_associates
       - staff.manage
-    requires_two_factor: true
+    requires_two_factor: false
     can_assign_roles: [sales, engineer, operations]
   sales:
     label: Sales
@@ -322,7 +329,7 @@ roles:
       - commissions.process
       - payouts.bank_file.export
       - records.commissions.read
-    requires_two_factor: true
+    requires_two_factor: false
     can_assign_roles: []
 
   proposal_desk:

@@ -21,8 +21,9 @@ Money is a decimal string (`"54450.00"`). `{lead_id}` is the lead's id.
 | Associate credential, no credential | 401 | 401 | 401 |
 
 The lead's region applies (`employees.regions`, BE-19): 403 `"This record is outside the regions
-you work in."` when the lead's state is known and outside them. Accounts, Admin and Management
-need two-step sign-in (`two_factor_required`), as everywhere.
+you work in."` when the lead's state is known and outside them. Two-step sign-in is off for every
+role since BE-21 (`two_factor_required` returns only if a role's `requires_two_factor` is turned
+back on — access_control.md §7).
 
 A lead brought by an associate answers **409** `{"code": "associate_customer", "onboarding_id": N}`
 on every route below: its payments stay on `/dashboard/onboardings/{N}/payments`.

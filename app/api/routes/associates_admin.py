@@ -353,6 +353,9 @@ def serialize_associate(db: Session, associate: Associate) -> dict:
         "approved_by_employee_id": associate.approved_by_employee_id,
         "clerk_invite_status": associate.clerk_invite_status.value if associate.clerk_invite_status else None,
         "clerk_user_bound": associate.clerk_user_id is not None,
+        # BE-21: Clerk could not send the invitation — the associate signs up normally and
+        # claims their account (POST /api/v1/associate/me/claim).
+        "manual_sign_up": issuance.manual_sign_up(associate),
         "documents": {
             "id_card": associate.id_card_storage_key is not None,
             "welcome_letter": associate.welcome_letter_storage_key is not None,

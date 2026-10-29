@@ -69,6 +69,8 @@ def clerk(monkeypatch, signing_key):
     monkeypatch.setattr(deps, "_jwks_client_uri", None)
     monkeypatch.setattr(settings, "clerk_jwt_issuer", ISSUER)
     monkeypatch.setattr(settings, "allowed_origins", [ORIGIN, "https://gridnova.test"])
+    # The token below is a first Admin through the bootstrap path (BE-21: listed address).
+    monkeypatch.setattr(settings, "bootstrap_admin_emails", "admin@gridnova.test")
     return fetched
 
 

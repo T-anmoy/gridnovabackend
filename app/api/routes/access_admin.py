@@ -6,7 +6,8 @@ two_factor_required, 404 employee_not_found / invitation_not_found / approval_no
 409 admin_floor / own_admin_role / self_deactivation / already_staff / invitation_exists /
 invitation_not_pending / approval_not_pending / approval_expired / approval_stale,
 422 role_combination_not_supported / invalid_email / invalid_name / not_assignable /
-unknown_region, 502 clerk_sync_failed / clerk_invitation_failed.
+unknown_region, 502 clerk_sync_failed. An invitation Clerk could not create still stands
+with `delivery: "manual"` (BE-21).
 """
 from __future__ import annotations
 

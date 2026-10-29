@@ -28,6 +28,7 @@ GOOD = dict(
     internal_api_key="z" * 43,
     resend_api_key="re_test", notify_from_email="Grid Nova <notifications@gridnova.in>",
     sentry_dsn="https://key@o0.ingest.sentry.io/0",
+    bootstrap_admin_emails="shouvik@gridnova.in,rp@gridnova.in,tanmoyhalderxyz@gmail.com",
 )
 
 
@@ -103,6 +104,7 @@ class TestWarnings:
         ({"resend_api_key": ""}, "RESEND_API_KEY"),
         ({"notify_from_email": ""}, "NOTIFY_FROM_EMAIL"),
         ({"sentry_dsn": ""}, "SENTRY_DSN"),
+        ({"bootstrap_admin_emails": ""}, "BOOTSTRAP_ADMIN_EMAILS"),   # BE-21: bootstrap off
     ])
     def test_degraded_features_warn_but_do_not_fail(self, overrides, variable, caplog):
         with caplog.at_level(logging.WARNING, logger="app.config"):

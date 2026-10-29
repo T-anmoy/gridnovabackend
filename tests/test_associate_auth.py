@@ -31,6 +31,13 @@ def associate_claims(sub="user_assoc_1", associate_id="GNA-WB-26-00001"):
 STAFF_CLAIMS = {"sub": "user_staff_1", "public_metadata": {"role": "admin"}, "email": "s@gridnova.in"}
 
 
+@pytest.fixture(autouse=True)
+def _bootstrap_list(monkeypatch):
+    """STAFF_CLAIMS signs in as a first Admin through the bootstrap path (BE-21: listed address)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "bootstrap_admin_emails", "s@gridnova.in")
+
+
 @pytest.fixture
 def associate(db_session, territories):
     """One active associate, created directly (the approval flow has its own tests)."""

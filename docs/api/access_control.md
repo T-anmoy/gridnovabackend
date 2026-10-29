@@ -1,8 +1,10 @@
 # Access control (BE-17)
 
 Permission bundles, several roles per person, the Network Manager, staff invitations,
-safe offboarding, second approval (maker–checker), role-routed alerts, enforced two-step
-sign-in and regions. Written from `config/access_control.yaml`, `app/auth/access.py`,
+safe offboarding, second approval (maker–checker), role-routed alerts, two-step sign-in
+(off for every role since BE-21) and regions. BE-21 (Clerk's free plan): offboarding revokes
+sessions instead of banning (§4), the bootstrap is locked to named verified addresses (§3),
+and an invitation Clerk cannot send still works (`delivery: "manual"`, §3). Written from `config/access_control.yaml`, `app/auth/access.py`,
 `app/auth/dependencies.py`, `app/staff/`, `app/api/routes/access_admin.py` and the changed
 employee routes in `app/api/routes/dashboard.py`. Base path `/api/v1/dashboard`.
 
@@ -126,7 +128,7 @@ holders: `leads.view_all` / `leads.view_assigned` / `leads.view_commercial` /
 ```json
 {"permissions": [{"id": "leads.assign", "description": "Assign a lead to a salesperson.", "sensitive": false}],
  "roles": [{"id": "network_manager", "label": "Network Manager", "description": "…",
-            "requires_two_factor": true, "can_assign_roles": ["sales", "engineer", "operations"],
+            "requires_two_factor": false, "can_assign_roles": ["sales", "engineer", "operations"],
             "permissions": ["associates.applications.review", "…"]}],
  "exclusive_roles": ["sales", "engineer", "operations"]}
 ```
@@ -134,7 +136,7 @@ holders: `leads.view_all` / `leads.view_assigned` / `leads.view_commercial` /
 ### `GET /employees/me` — any staff (new fields)
 ```json
 {"id": "user_2ab", "role": "admin", "roles": ["accounts", "admin"], "permissions": ["…"],
- "two_factor_ok": true, "requires_two_factor": true, "can_assign_roles": ["admin", "…"],
+ "two_factor_ok": true, "requires_two_factor": false, "can_assign_roles": ["admin", "…"],
  "regions": [], "is_active": true, "google_calendar_connected": false}
 ```
 `role` stays (primary role). Use `permissions` to show or hide actions.
@@ -155,9 +157,15 @@ Clerk unreachable, or a person who never signed in to Clerk.
    `email`) — and, when the user's `public_metadata` carries `staff_invitation_id`, that
    exact invitation — creates the employee with the invited roles. Audited
    `invitation_accepted` and one `role_granted` per role.
-2. Else, **bootstrap**: `public_metadata.role == "admin"` and **no** `staff_invitation_id`
-   → an Admin, audited `role_granted` with `performed_by: "bootstrap"`. (Kept for the first
-   Admins; `scripts/grant_admin.py` is the documented way, RUNBOOK §8.)
+2. Else, **bootstrap** (BE-21: locked) — an Admin only when **all** hold:
+   `public_metadata.role == "admin"`; **no** `staff_invitation_id`; and one of the Clerk
+   user's **verified** addresses (as in 1 — never the token's `email` claim alone) is on
+   `BOOTSTRAP_ADMIN_EMAILS` (comma-separated; production: the three first Admins). The
+   employee's email is that matched address. Audited `role_granted` and `bootstrap_admin`
+   (`performed_by: "bootstrap"`, `after_value: {clerk_user_id, list_match}`). Anything else
+   with `role: admin` is 403 `not_invited`, audited `bootstrap_refused` and logged with the
+   Clerk user id only (no email). Empty `BOOTSTRAP_ADMIN_EMAILS` = bootstrap off (the
+   production boot warns). `scripts/grant_admin.py` is the other way in (RUNBOOK §8).
 3. Else **403** `{"code": "not_invited", "message": "You have not been invited to the Grid Nova dashboard. Ask a Grid Nova administrator to invite you."}`.
    An expired invitation: 403 `invitation_expired`. Another staff row already uses the
    address: 403 `email_in_use`. Clerk unreachable for the email check: 503
@@ -174,23 +182,33 @@ Body `{name, email, roles: [role, …]}` (1–7 roles). Every role must be one y
   (§5). Nothing is sent until it is approved.
 - 403 `role_not_assignable` (`roles` lists the ones outside your scope), 409
   `already_staff` / `invitation_exists`, 422 `invalid_email` / `invalid_name` /
-  `role_combination_not_supported`, 502 `clerk_invitation_failed` (nothing saved).
+  `role_combination_not_supported`.
+- **Clerk refuses or is unreachable** (BE-21): the invitation is **still created** and
+  pending, with `clerk_status: "failed"`, `delivery: "manual"` and `manual_instructions`
+  ("Ask {name} to sign up at {FRONTEND_BASE_URL}/dashboard/sign-up with {email}."). The
+  person signs up normally with that address; at first sign-in the verified-email match
+  (§3 step 1) makes them the employee with exactly the invited roles. (Before BE-21 this
+  was 502 `clerk_invitation_failed`, nothing saved — that error no longer exists.)
 
 ```json
 {"invitation_id": "9f1c…", "name": "Abhijit Bhattacharjee", "email": "abhijit@gridnova.in",
  "roles": ["network_manager"], "status": "pending", "invited_by": "user_2ab", "clerk_status": "sent",
- "created_at": "…", "expires_at": "…", "resent_at": null, "accepted_employee_id": null,
+ "delivery": "clerk_email", "manual_instructions": null, "created_at": "…", "expires_at": "…", "resent_at": null, "accepted_employee_id": null,
  "accepted_at": null, "revoked_by": null, "revoked_at": null}
 ```
 `status`: `pending` | `accepted` | `revoked` | `expired` (a pending invitation past
-`expires_at` reads as `expired`). `clerk_status`: `sent` | `skipped` (no Clerk key).
+`expires_at` reads as `expired`). `clerk_status`: `sent` | `skipped` (no Clerk key) |
+`failed` (Clerk refused, BE-21). `delivery`: `clerk_email` (`clerk_status` sent) |
+`manual` (anything else — nobody emailed the person). `manual_instructions`: the sentence
+for the dashboard while a manual invitation is pending, else null.
 
 ### `GET /staff/invitations?status=` — `staff.manage`
 `{"items": [invitation, …]}`, newest first.
 
 ### `POST /staff/invitations/{id}/resend` — `staff.manage`, within scope
 Pending or expired only. Clerk has no resend: the old Clerk invitation is revoked and a new
-one created; `expires_at` restarts. 409 `invitation_not_pending` / `invitation_exists`.
+one created; `expires_at` restarts. If Clerk refuses the new one the invitation stays
+pending with `delivery: "manual"`. 409 `invitation_not_pending` / `invitation_exists`.
 
 ### `DELETE /staff/invitations/{id}` — `staff.manage`, within scope
 Revoked here and in Clerk. Response = the invitation + `clerk_error` (null, or why Clerk's
@@ -223,20 +241,32 @@ and adds `roles`. An unknown employee is now 404 (it used to update Clerk only).
 ### `PATCH /employees/{id}/deactivate` — `staff.manage`, within scope
 409 `self_deactivation`, 409 `admin_floor`. 200:
 ```json
-{"employee_id": "user_9", "is_active": false, "clerk_banned": true, "sessions_revoked": true,
- "clerk_error": null,
+{"employee_id": "user_9", "is_active": false, "clerk_banned": false, "sessions_revoked": 2,
+ "invitation_revoked": false, "clerk_error": null, "clerk_mode": "revoke_sessions",
  "handover": {"open_leads": [{"lead_id": 12, "pipeline_stage": "qualified"}],
               "open_proposals": [{"proposal_id": 4, "lead_id": 12, "status": "draft"}],
               "pending_invitations": [{"invitation_id": "…", "email": "…"}]}}
 ```
-The database refuses the person from their next request. Clerk then **bans** the user
-(`POST /v1/users/{id}/ban`: every session revoked, sign-in refused). A Clerk failure leaves
-the deactivation standing and returns `clerk_banned: false` with `clerk_error`. Audit:
-`deactivated`, then `sessions_revoked` when Clerk confirmed. The leaver's own pending approval requests are withdrawn (`approval_requests_withdrawn`: their ids).
+The database refuses the person from their next request — even with a token Clerk still
+considers valid. Then Clerk, by `CLERK_BAN_ENABLED` (BE-21):
+
+| `clerk_mode` | When | Clerk calls | `clerk_banned` | `sessions_revoked` |
+|---|---|---|---|---|
+| `revoke_sessions` | `CLERK_BAN_ENABLED=false` (default; Clerk free plan has no ban) | `GET /v1/sessions?user_id=…&status=active`, then `POST /v1/sessions/{id}/revoke` for each | `false` | how many were revoked (`null` without a Clerk key) |
+| `ban` | `CLERK_BAN_ENABLED=true` (Clerk Pro) | `POST /v1/users/{id}/ban` (Clerk revokes every session, refuses sign-in) | `true` | `null` (Clerk does not say how many) |
+
+`invitation_revoked` is always `false` here (kept so staff and associate responses share
+one shape). A Clerk failure never undoes the deactivation: it returns `clerk_error` (and,
+for a partial revoke, the count that did succeed). With sessions revoked the person can
+still sign in to Clerk, and the API refuses them. Audit: `deactivated`, then
+`sessions_revoked` (the outcome) — or `clerk_offboarding_failed` when Clerk failed.
+**Type change:** `sessions_revoked` was a boolean before BE-21; it is now `int | null`. The leaver's own pending approval requests are withdrawn (`approval_requests_withdrawn`: their ids).
 
 ### `PATCH /employees/{id}/reactivate` — `staff.manage`, within scope
-Roles unchanged. Clerk unban (`POST /v1/users/{id}/unban`). 200 adds `roles`,
-`clerk_unbanned`, `clerk_error`.
+Roles unchanged. 200 adds `roles`, `clerk_unbanned`, `clerk_error`, `clerk_mode`. Only
+`clerk_mode: "ban"` has anything to undo (`POST /v1/users/{id}/unban`, audited
+`clerk_unbanned`); with `revoke_sessions` nothing changes in Clerk — the database decides
+(`clerk_unbanned: false`).
 
 ### `GET /employees/{id}/handover` — `staff.manage`
 `{"employee_id", "open_leads", "open_proposals", "pending_invitations"}` (as above).
@@ -345,7 +375,18 @@ mailbox does: `studio_viewed`, `studio_accepted`, `studio_declined`, `studio_exp
 
 ## 7. Two-step sign-in
 
-Roles with `requires_two_factor` (Admin, Management, Network Manager, Accounts): a request
+**Off for every role** (BE-21, the owner's decision of 29 Oct 2026). Grid Nova is on
+Clerk's free plan, where two-step sign-in is not available, so `requires_two_factor` is
+`false` for all eight roles in `config/access_control.yaml`: nobody gets
+`two_factor_required` today, and `GET /employees/me` / `GET /access/matrix` report
+`requires_two_factor: false`. `two_factor_ok` is still reported (from `fva`).
+
+**Turning it back on** (after buying Clerk Pro and enabling the authenticator app): each
+person enables two-step in their Clerk account, then their role's
+`requires_two_factor` is set to `true` in the config — one line per role, no code change.
+From then on the rule below applies to that role.
+
+The rule, for any role with `requires_two_factor: true`: a request
 that uses a **sensitive** permission is refused with
 **403** `{"code": "two_factor_required", "message": "This action needs two-step verification. …"}`
 unless the session token's `fva` claim shows a completed second factor (`fva[1] >= 0`).
@@ -386,3 +427,14 @@ while anyone holds it as their primary role).
 - Handle 403 `not_invited` / `invitation_expired` on the sign-in landing page.
 - The staff invitation lands on `STAFF_INVITE_REDIRECT_URL`; with a custom redirect,
   Clerk requires that page to complete the sign-up (`<SignUp />` with the ticket).
+
+### For the frontend (FE-21)
+
+- `GET /employees/me` → `requires_two_factor` is `false` for everyone: hide the two-step
+  prompts (keep the `two_factor_required` handler — it returns if the config is flipped).
+- Deactivate dialog: read `clerk_mode`. `revoke_sessions` + no `clerk_error` = "every open
+  session has ended"; `ban` + `clerk_banned` = blocked in Clerk too. Show the "do it by
+  hand in Clerk" warning only when `clerk_error` is set. `sessions_revoked` is now a
+  number (or null), not a boolean.
+- Invitations: show `manual_instructions` when `delivery == "manual"` (copy button).
+  `clerk_status` may now be `failed`.

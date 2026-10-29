@@ -10,7 +10,12 @@ exactly the invited roles.
 Nobody else gets in: no employee row and no matching invitation is 403 not_invited. The
 one exception is the bootstrap path for a first Admin, kept from before BE-17: a Clerk
 user whose metadata an operator set to {"role": "admin"} by hand, carrying no invitation
-id (scripts/grant_admin.py is the documented way; RUNBOOK §8).
+id — and, since BE-21, only with a verified address on BOOTSTRAP_ADMIN_EMAILS
+(scripts/grant_admin.py is the other way in; RUNBOOK §8).
+
+When Clerk cannot create the invitation (BE-21), the Grid Nova invitation still stands
+with `delivery: "manual"`: the person signs up normally at the dashboard sign-up page
+with the invited address, and the verified-email match above admits them.
 """
 from __future__ import annotations
 
@@ -40,6 +45,7 @@ INVITATION_EXPIRED = {"code": "invitation_expired",
                       "message": "Your invitation to the Grid Nova dashboard has expired. Ask a Grid Nova "
                                  "administrator to send it again."}
 INVITATION_APPROVAL_ACTIONS = {"admin": "role.admin", "accounts": "role.accounts"}
+BOOTSTRAP = "bootstrap"
 
 
 def _now() -> datetime:
@@ -63,6 +69,7 @@ def serialize(inv: StaffInvitation) -> dict:
         return v.isoformat() if v else None
     return {"invitation_id": inv.id, "name": inv.name, "email": inv.email, "roles": list(inv.roles),
             "status": status_of(inv), "invited_by": inv.invited_by, "clerk_status": inv.clerk_status,
+            "delivery": delivery_of(inv), "manual_instructions": manual_instructions(inv),
             "created_at": iso(inv.created_at), "expires_at": iso(inv.expires_at), "resent_at": iso(inv.resent_at),
             "accepted_employee_id": inv.accepted_employee_id, "accepted_at": iso(inv.accepted_at),
             "revoked_by": inv.revoked_by, "revoked_at": iso(inv.revoked_at)}
@@ -108,7 +115,10 @@ def validate_new(db: Session, actor, name: str, email: str, roles: list[str]) ->
     return name, email, roles
 
 
-def _send_clerk(inv: StaffInvitation) -> None:
+def _send_clerk(inv: StaffInvitation) -> Optional[str]:
+    """Ask Clerk to email the invitation. When Clerk refuses (BE-21) the Grid Nova
+    invitation still stands — `clerk_status: failed`, delivery manual — and the error is
+    returned for the audit row."""
     from app.auth import clerk_client
 
     metadata = {"roles": list(inv.roles), "role": access.primary_role(inv.roles), "staff_invitation_id": inv.id}
@@ -116,11 +126,26 @@ def _send_clerk(inv: StaffInvitation) -> None:
         created, clerk_id = clerk_client.create_staff_invitation(
             inv.email, metadata, settings.staff_invite_redirect_url, access.load().invitation_expiry_days)
     except clerk_client.ClerkSyncError as exc:
-        raise StaffError("Clerk could not create the invitation (the address may already have a Clerk account "
-                         "or invitation). Nothing was saved.", code="clerk_invitation_failed", status_code=502,
-                         extra={"detail": str(exc)})
+        logger.warning("Clerk staff invitation failed; delivery is manual", extra={"invitation_id": inv.id})
+        inv.clerk_invitation_id = None
+        inv.clerk_status = "failed"
+        return str(exc)
     inv.clerk_invitation_id = clerk_id
     inv.clerk_status = "sent" if created else "skipped"
+    return None
+
+
+def delivery_of(inv: StaffInvitation) -> str:
+    """"clerk_email" when Clerk emailed the link; "manual" when it did not (refused, or no
+    Clerk key) and someone must tell the person to sign up themselves."""
+    return "clerk_email" if inv.clerk_status == "sent" else "manual"
+
+
+def manual_instructions(inv: StaffInvitation) -> Optional[str]:
+    if delivery_of(inv) != "manual" or status_of(inv) != StaffInvitationStatus.pending.value:
+        return None
+    return (f"Ask {inv.name} to sign up at {settings.frontend_base_url.rstrip('/')}/dashboard/sign-up "
+            f"with {inv.email}.")
 
 
 def issue(db: Session, *, name: str, email: str, roles: list[str], invited_by: str, send: bool = True) -> StaffInvitation:
@@ -132,11 +157,11 @@ def issue(db: Session, *, name: str, email: str, roles: list[str], invited_by: s
                           expires_at=now + timedelta(days=access.load().invitation_expiry_days))
     db.add(inv)
     db.flush()
-    if send:
-        _send_clerk(inv)
+    clerk_error = _send_clerk(inv) if send else None
     _audit(db, inv, "staff_invited", invited_by, after={"email": email, "name": name, "roles": inv.roles,
                                                         "expires_at": inv.expires_at.isoformat(),
-                                                        "clerk_status": inv.clerk_status})
+                                                        "clerk_status": inv.clerk_status,
+                                                        "delivery": delivery_of(inv), "clerk_error": clerk_error})
     db.flush()
     return inv
 
@@ -176,9 +201,10 @@ def resend(db: Session, actor, invitation_id: str) -> StaffInvitation:
     inv.expires_at = now + timedelta(days=access.load().invitation_expiry_days)
     inv.resent_at = now
     db.flush()
-    _send_clerk(inv)
+    clerk_error = _send_clerk(inv)
     _audit(db, inv, "invitation_resent", actor.employee_id, before=before,
-           after={"expires_at": inv.expires_at.isoformat(), "status": "pending", "clerk_status": inv.clerk_status})
+           after={"expires_at": inv.expires_at.isoformat(), "status": "pending", "clerk_status": inv.clerk_status,
+                  "delivery": delivery_of(inv), "clerk_error": clerk_error})
     db.flush()
     return inv
 
@@ -290,11 +316,24 @@ def first_sign_in(db: Session, employee_id: str, payload: dict, metadata: dict) 
             raise HTTPException(status_code=403, detail=INVITATION_EXPIRED)
         raise HTTPException(status_code=403, detail=NOT_INVITED)
     # Bootstrap: a first Admin set up by hand in Clerk. Never for an invited user (their
-    # metadata carries the invitation id), and never any other role.
+    # metadata carries the invitation id), never any other role, and only for a VERIFIED
+    # address on BOOTSTRAP_ADMIN_EMAILS (BE-21) — the token's own email claim is never enough.
     if not metadata.get("staff_invitation_id") and metadata.get("role") == EmployeeRole.admin.value:
-        email = normalise_email(payload.get("email", "")) or f"{employee_id}@no-email.local"
-        emp = _create_employee(db, employee_id, payload.get("name", ""), email, ["admin"], granted_by="bootstrap")
+        match = sorted(verified & settings.bootstrap_admin_email_set)
+        if not match:
+            db.add(AuditLog(entity_type="employee", entity_id=employee_id, action="bootstrap_refused",
+                            performed_by=BOOTSTRAP, before_value=None,
+                            after_value={"clerk_user_id": employee_id,
+                                         "reason": "no verified address on BOOTSTRAP_ADMIN_EMAILS"}))
+            db.commit()
+            logger.warning("Bootstrap Admin refused: no verified address on the list",
+                           extra={"clerk_user_id": employee_id})
+            raise HTTPException(status_code=403, detail=NOT_INVITED)
+        emp = _create_employee(db, employee_id, payload.get("name", ""), match[0], ["admin"], granted_by=BOOTSTRAP)
+        db.add(AuditLog(entity_type="employee", entity_id=employee_id, action="bootstrap_admin",
+                        performed_by=BOOTSTRAP, before_value=None,
+                        after_value={"clerk_user_id": employee_id, "list_match": match[0]}))
         db.commit()
-        logger.warning("Admin provisioned through the bootstrap path", extra={"employee_id": employee_id})
+        logger.warning("Admin provisioned through the bootstrap path", extra={"clerk_user_id": employee_id})
         return emp
     raise HTTPException(status_code=403, detail=NOT_INVITED)

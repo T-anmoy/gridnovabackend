@@ -12233,6 +12233,28 @@
         "summary": "Me"
       }
     },
+    "/api/v1/associate/me/claim": {
+      "post": {
+        "description": "BE-21: link a Clerk user who signed up without the invitation (it failed or never\narrived) to their approved associate, by a verified email match. Returns\n`refresh_session: true` — the frontend must refresh the session token so it carries\nthe associate claims. Errors: 403 claim_not_allowed (every refusal, saying nothing\nabout whether the address exists), 429 rate_limited, 502 clerk_sync_failed, 503\nidentity_check_unavailable.",
+        "operationId": "claim_account_api_v1_associate_me_claim_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Claim Account"
+      }
+    },
     "/api/v1/associate/me/documents/{document}": {
       "get": {
         "description": "A short-lived signed link to the associate's own ID card or welcome letter.",

@@ -11,8 +11,9 @@ request alike):
   * combine  — the `exclusive_roles` are held one at a time.
 
 Clerk is told after the database decision: roles are copied to public_metadata (for
-the frontend), a deactivated person is banned (Clerk revokes every session), a
-reactivated one unbanned. The database is what stops them — on their next request.
+the frontend); a deactivated person's sessions are revoked — or, with CLERK_BAN_ENABLED,
+they are banned and unbanned on reactivation (BE-21). The database is what stops them —
+on their next request.
 """
 from __future__ import annotations
 
@@ -138,33 +139,33 @@ def validate_deactivation(memory: MemoryManager, actor, target: Employee) -> Non
         check_admin_floor(memory, target.id)
 
 
-def ban_in_clerk(db: Session, employee_id: str, performed_by: str) -> dict:
-    """After the deactivation committed: Clerk bans the user, which revokes every session
-    and refuses sign-in. A failure leaves the deactivation standing (the database already
-    refuses every request) and is reported for a retry."""
-    from app.auth import clerk_client
+def cut_off_in_clerk(db: Session, employee_id: str, performed_by: str) -> dict:
+    """After the deactivation committed: Clerk revokes every session (or, with
+    CLERK_BAN_ENABLED, bans the user — app/auth/offboarding.py). A failure leaves the
+    deactivation standing (the database already refuses every request) and is reported
+    for a retry. Audited whenever Clerk acted or failed."""
+    from app.auth import offboarding
 
-    try:
-        banned = clerk_client.ban_user(employee_id)
-    except clerk_client.ClerkSyncError as exc:
-        logger.error("Clerk ban failed after deactivation", extra={"employee_id": employee_id})
-        return {"clerk_banned": False, "sessions_revoked": False, "clerk_error": str(exc)}
-    if banned:
-        db.add(AuditLog(entity_type="employee", entity_id=employee_id, action="sessions_revoked",
-                        performed_by=performed_by, before_value=None,
-                        after_value={"clerk": "banned", "sessions": "all revoked"}))
+    outcome = {**offboarding.cut_off(employee_id), "invitation_revoked": False}
+    if offboarding.acted(outcome):
+        db.add(AuditLog(entity_type="employee", entity_id=employee_id,
+                        action="clerk_offboarding_failed" if outcome["clerk_error"] else "sessions_revoked",
+                        performed_by=performed_by, before_value=None, after_value=outcome))
         db.commit()
-    return {"clerk_banned": banned, "sessions_revoked": banned, "clerk_error": None}
+    return outcome
 
 
-def unban_in_clerk(employee_id: str) -> dict:
-    from app.auth import clerk_client
+def restore_in_clerk(db: Session, employee_id: str, performed_by: str) -> dict:
+    """After a reactivation committed: unban when ban mode is on; otherwise nothing to undo."""
+    from app.auth import offboarding
 
-    try:
-        return {"clerk_unbanned": clerk_client.unban_user(employee_id), "clerk_error": None}
-    except clerk_client.ClerkSyncError as exc:
-        logger.error("Clerk unban failed after reactivation", extra={"employee_id": employee_id})
-        return {"clerk_unbanned": False, "clerk_error": str(exc)}
+    outcome = offboarding.restore(employee_id)
+    if offboarding.acted(outcome):
+        db.add(AuditLog(entity_type="employee", entity_id=employee_id,
+                        action="clerk_unban_failed" if outcome["clerk_error"] else "clerk_unbanned",
+                        performed_by=performed_by, before_value=None, after_value=outcome))
+        db.commit()
+    return outcome
 
 
 def can_be_assigned_leads(memory: MemoryManager, employee: Employee) -> bool:

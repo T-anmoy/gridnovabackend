@@ -33,6 +33,16 @@ def associate_claims(associate: Associate) -> dict:
     return {"principal": ASSOCIATE_PRINCIPAL, "associate_id": associate.associate_id}
 
 
+def manual_sign_up(associate: Associate) -> Optional[str]:
+    """What the dashboard tells staff when Clerk's invitation failed (BE-21): the associate
+    signs up themselves and claims the account. None otherwise."""
+    if (associate.status != AssociateStatus.active or associate.clerk_user_id is not None
+            or associate.clerk_invite_status != ClerkInviteStatus.failed):
+        return None
+    return (f"Ask the associate to sign up at {settings.frontend_base_url.rstrip('/')}/associates/sign-up "
+            f"with {associate.email}.")
+
+
 def send_clerk_invite(db: Session, associate: Associate, performed_by: str, *, resend: bool = False) -> ClerkInviteStatus:
     """Send the Clerk invitation. `resend` (the dashboard's button, BE-19): an invitation
     already sent but never accepted — expired, lost, sent to an address since corrected —
@@ -139,49 +149,47 @@ def generate_documents(db: Session, associate: Associate, performed_by: str, iss
 
 
 def revoke_access(db: Session, associate: Associate, performed_by: str) -> dict:
-    """After a suspension or deactivation committed (BE-19): Clerk bans the associate's
-    user (every session revoked, sign-in refused) or, before they ever signed in, the
-    invitation is revoked so its link stops working. The database already refuses every
-    request from a non-active associate, so a Clerk failure leaves the change standing
-    and is reported for a retry. Commits its own audit row."""
-    from app.auth import clerk_client
+    """After a suspension or deactivation committed (BE-19, BE-21): the associate's Clerk
+    user has every session revoked (or is banned, with CLERK_BAN_ENABLED —
+    app/auth/offboarding.py); an invitation still pending is revoked so its link stops
+    working. The database already refuses every request from a non-active associate, so
+    a Clerk failure leaves the change standing and is reported for a retry. Commits its
+    own audit row."""
+    from app.auth import clerk_client, offboarding
 
-    try:
-        if associate.clerk_user_id:
-            done = clerk_client.ban_user(associate.clerk_user_id)
-            outcome = {"clerk_banned": done, "invitation_revoked": False, "clerk_error": None}
-        elif associate.clerk_invite_status == ClerkInviteStatus.sent and associate.clerk_invitation_id:
-            done = clerk_client.revoke_invitation(associate.clerk_invitation_id)
-            if done:
-                # Nothing is outstanding now: reinstating the associate means sending a new one.
-                associate.clerk_invite_status = None
-            outcome = {"clerk_banned": False, "invitation_revoked": done, "clerk_error": None}
-        else:
-            return {"clerk_banned": False, "invitation_revoked": False, "clerk_error": None}
-    except clerk_client.ClerkSyncError as exc:
-        logger.error("Clerk access not revoked for %s", associate.associate_id)
-        return {"clerk_banned": False, "invitation_revoked": False, "clerk_error": str(exc)}
-    if done:
-        service.audit(db, "associate", associate.associate_id, "clerk_access_revoked", performed_by,
-                      after={k: v for k, v in outcome.items() if k != "clerk_error"})
+    outcome = {"clerk_banned": False, "sessions_revoked": None, "invitation_revoked": False, "clerk_error": None,
+               "clerk_mode": offboarding.mode()}
+    if associate.clerk_user_id:
+        outcome.update(offboarding.cut_off(associate.clerk_user_id))
+    elif associate.clerk_invite_status == ClerkInviteStatus.sent and associate.clerk_invitation_id:
+        try:
+            outcome["invitation_revoked"] = clerk_client.revoke_invitation(associate.clerk_invitation_id)
+        except clerk_client.ClerkSyncError as exc:
+            logger.error("Clerk invitation not revoked for %s", associate.associate_id)
+            outcome["clerk_error"] = str(exc)
+        if outcome["invitation_revoked"]:
+            # Nothing is outstanding now: reinstating the associate means sending a new one.
+            associate.clerk_invite_status = None
+    if offboarding.acted(outcome):
+        service.audit(db, "associate", associate.associate_id,
+                      "clerk_access_revoke_failed" if outcome["clerk_error"] else "clerk_access_revoked",
+                      performed_by, after=outcome)
         db.commit()
     return outcome
 
 
 def restore_access(db: Session, associate: Associate, performed_by: str) -> dict:
-    """After a reinstatement committed: unban the Clerk user. (An associate who never
-    signed in gets a new invitation from the dashboard's invite button.)"""
-    from app.auth import clerk_client
+    """After a reinstatement committed: unban the Clerk user when ban mode is on. With
+    sessions revoked there is nothing to undo — the database decides. (An associate who
+    never signed in gets a new invitation from the dashboard's invite button.)"""
+    from app.auth import offboarding
 
     if not associate.clerk_user_id:
-        return {"clerk_unbanned": False, "clerk_error": None}
-    try:
-        done = clerk_client.unban_user(associate.clerk_user_id)
-    except clerk_client.ClerkSyncError as exc:
-        logger.error("Clerk access not restored for %s", associate.associate_id)
-        return {"clerk_unbanned": False, "clerk_error": str(exc)}
-    if done:
-        service.audit(db, "associate", associate.associate_id, "clerk_access_restored", performed_by,
-                      after={"clerk_unbanned": True})
+        return {"clerk_unbanned": False, "clerk_error": None, "clerk_mode": offboarding.mode()}
+    outcome = offboarding.restore(associate.clerk_user_id)
+    if offboarding.acted(outcome):
+        service.audit(db, "associate", associate.associate_id,
+                      "clerk_access_restore_failed" if outcome["clerk_error"] else "clerk_access_restored",
+                      performed_by, after=outcome)
         db.commit()
-    return {"clerk_unbanned": done, "clerk_error": None}
+    return outcome

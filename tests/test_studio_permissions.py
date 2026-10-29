@@ -12,6 +12,7 @@ import pytest
 
 from app.memory.models import StudioLibraryItem
 from tests.studio_support import D, issued_residential, new_proposal
+from tests.test_access_control import two_step_on  # noqa: F401 — fixture
 
 COVERED_ROUTERS = ("studio",)
 
@@ -138,8 +139,20 @@ def test_proposal_desk_alone_sees_nothing_outside_the_studio(client):
     assert client.get(f"{D}/studio/proposals", headers=desk).status_code == 200
 
 
-def test_proposal_desk_needs_no_second_factor_but_admin_pricing_does(client):
+def test_no_role_needs_a_second_factor_to_price(client):
+    """BE-21: two-step is off for every role (Clerk free plan)."""
     from tests.studio_support import edit
+    view = new_proposal(client)
+    pid = view["proposal"]["id"]
+    off = {"X-Employee-Two-Factor": "off"}
+    for role in ("proposal_desk", "admin"):
+        r = edit(client, pid, "price", {"mode": "none"}, headers={**ACTORS[role], **off})
+        assert r.status_code == 200, (role, r.text)
+
+
+def test_with_two_step_back_on_admin_pricing_needs_it(client, two_step_on):
+    from tests.studio_support import edit
+    two_step_on("admin")
     view = new_proposal(client)
     pid = view["proposal"]["id"]
     off = {"X-Employee-Two-Factor": "off"}

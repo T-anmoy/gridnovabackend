@@ -267,6 +267,8 @@ PUBLIC = {
 # Associate routes: "own" = not tied to one customer; "read"/"write" = one customer's.
 ASSOCIATE = {
     ("GET", "/api/v1/associate/me"): ("own", {}),
+    # BE-21: a Clerk token with no associate principal yet; staff credentials are refused.
+    ("POST", "/api/v1/associate/me/claim"): ("own", {}),
     ("GET", "/api/v1/associate/me/documents/{document}"): ("own", {}),
     ("GET", "/api/v1/associate/territory/members"): ("own", {}),
     ("GET", "/api/v1/associate/onboardings/options"): ("own", {}),

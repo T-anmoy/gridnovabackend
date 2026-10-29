@@ -538,6 +538,29 @@ def _resolve_associate(db: Session, associate_id: str, clerk_user_id: Optional[s
     )
 
 
+def get_clerk_identity(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> dict:
+    """A verified Clerk token and nothing more: who this is, with no Grid Nova principal
+    yet (BE-21's associate claim). Never reads the dev X-Employee-* / X-Associate-Id
+    headers and never provisions anything. Returns the claims."""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return _verify_clerk_jwt(credentials.credentials)
+    except Exception as exc:
+        logger.warning("JWT verification failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 def get_current_associate(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),

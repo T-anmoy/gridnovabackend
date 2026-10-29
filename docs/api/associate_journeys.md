@@ -56,19 +56,64 @@ Approval is told by Clerk's invitation email, as before.
   (the endpoint is unchanged). A card cannot be generated while `FRONTEND_BASE_URL` is empty
   (`documents.error` names it).
 
+### When Clerk cannot send the invitation (BE-21)
+
+The approval still completes (as before) and `clerk_invite_status` is `failed`. The associate
+record now carries `manual_sign_up` — the sentence for staff: "Ask the associate to sign up at
+{FRONTEND_BASE_URL}/associates/sign-up with {email}." (null in every other case: invitation
+sent, or the associate already signed in, or not active). Retrying the invitation
+(`POST …/clerk-invite`) still works too.
+
+### `POST /api/v1/associate/me/claim` — new (BE-21)
+
+For the associate who signed up **without** the invitation. Takes the Clerk session token as
+it is right after sign-up — **no** associate principal yet (staff dev headers are not a Clerk
+token: 401). No body. The caller is linked to an associate only when **all** hold:
+
+1. the caller is not staff (no employee row for this Clerk user) and holds no associate yet;
+2. one of the caller's **verified** Clerk addresses (Clerk `GET /v1/users/{id}`; never the
+   token's `email` claim alone) equals the associate's email, exactly (trimmed, lower-cased);
+3. the associate is `active`, has no Clerk user yet, and `clerk_invite_status` is `failed` or
+   `sent` (exactly one such associate).
+
+Then: Clerk `PATCH /v1/users/{id}/metadata` sets `public_metadata {principal: "associate",
+associate_id}` (free on every plan), `clerk_user_id` is set (a conditional update — of two
+sessions racing for one associate, exactly one wins), a still-pending Clerk invitation is
+revoked, and `clerk_user_claimed` is audited.
+
+* **200** `{"associate_id": "GNA-WB-26-00012", "refresh_session": true}` — refresh the Clerk
+  session (`getToken({skipCache: true})` / `session.reload()`) so the token carries the
+  associate claims; then every associate route works as for an invited associate.
+* **403** `{"code": "claim_not_allowed", "message": "…"}` — every refusal, with the same body
+  whether or not the address belongs to an associate.
+* **429** `rate_limited` — 10 a minute per client IP and per Clerk user.
+* **502** `clerk_sync_failed` — Clerk refused the metadata update; nothing was linked, retry.
+* **503** `identity_check_unavailable` — Clerk could not be asked for the verified addresses.
+
+**Clerk setting:** sign-up must stay **open** (not "Invite-only") — otherwise a person without an
+invitation link cannot create the account to claim with. The API is the gate: an uninvited
+staff sign-up gets 403 `not_invited`, an unmatched associate 403 `claim_not_allowed`.
+
 ## 4. Suspend, reinstate, deactivate — and moving customers
 
 `POST /associates/{id}/status` answers the associate as before **plus**:
 ```json
-{"…": "…", "access": {"clerk_banned": true, "invitation_revoked": false, "clerk_error": null},
+{"…": "…", "access": {"clerk_banned": false, "sessions_revoked": 2, "invitation_revoked": false,
+                       "clerk_error": null, "clerk_mode": "revoke_sessions"},
  "open_customers": 3}
 ```
-* Suspending or deactivating bans the associate's Clerk user (every session ends, sign-in
-  refused) or, before they ever signed in, revokes the invitation (`clerk_invite_status` becomes
-  null; reinstating then means sending a new one). Reinstating answers
-  `"access": {"clerk_unbanned": true, "clerk_error": null}`. The database refuses a non-active
-  associate on every request regardless, so a Clerk failure (`clerk_error`) leaves the change
-  standing. `access` is null when nothing changed for Clerk.
+* Suspending or deactivating (BE-21): the database refuses the associate on their very next
+  request, even with a token Clerk still considers valid. Then, for a signed-in associate,
+  Clerk by `CLERK_BAN_ENABLED`: `revoke_sessions` (default; Clerk's free plan has no ban) ends
+  every active session (`sessions_revoked`: how many; null without a Clerk key); `ban` (Clerk
+  Pro) bans the user (`clerk_banned: true`, `sessions_revoked: null`). Before they ever signed
+  in, the pending invitation is revoked instead (`invitation_revoked: true`;
+  `clerk_invite_status` becomes null; reinstating then means sending a new one).
+* Reinstating answers `"access": {"clerk_unbanned": …, "clerk_error": null, "clerk_mode": …}` —
+  only `ban` mode unbans; with `revoke_sessions` nothing changes in Clerk. A Clerk failure
+  (`clerk_error`, plus the count that did succeed) leaves the status change standing; audited
+  `clerk_access_revoked` / `clerk_access_restored`, or `…_failed`. `access` is null when the
+  status did not change.
 * `open_customers`: customers the associate still owns (not closed).
 * **Commission is frozen while suspended**: their approved entries stay out of every payout
   batch (still approved) and are paid in the first batch after reinstatement. A deactivated

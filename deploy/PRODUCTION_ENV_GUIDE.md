@@ -51,6 +51,8 @@ PUBLIC_API_BASE_URL: "https://api.gridnova.in"
 CLERK_JWT_ISSUER: "https://clerk.gridnova.in"
 ASSOCIATE_INVITE_REDIRECT_URL: "https://www.gridnova.in/associates/sign-up"
 STAFF_INVITE_REDIRECT_URL: "https://www.gridnova.in/dashboard/sign-up"
+CLERK_BAN_ENABLED: "false"                  # BE-21: Clerk free plan — offboarding revokes sessions
+BOOTSTRAP_ADMIN_EMAILS: "shouvik@gridnova.in,rp@gridnova.in,tanmoyhalderxyz@gmail.com"
 STORAGE_BUCKET: "gridnova-prod"
 STORAGE_ENDPOINT_URL: "https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com"      # FILL
 NOTIFY_FROM_EMAIL: "Grid Nova <notifications@gridnova.in>"
@@ -109,14 +111,47 @@ At boot the app **refuses to start** if: the database is not PostgreSQL, the Cle
 
 ## 5. Clerk production instance (settings, RUNBOOK §8)
 
+**Clerk's free (Hobby) plan is enough** (BE-21). What Grid Nova needs from Clerk is free on
+every plan: sign-in, invitations, custom session-token claims, user public metadata, listing
+and revoking sessions, and the custom domain. Two features are **Pro only** and are **off**:
+two-step sign-in (MFA) and banning a user. The backend does not depend on either — the
+database decides who may do what, and a deactivated person is refused on their next request.
+
 1. **Domains:** `gridnova.in` — add the DNS records Clerk lists (section 7).
-2. **Sessions → Customize session token:**
+2. **Sessions → Customize session token** (unchanged):
    ```json
    { "public_metadata": "{{user.public_metadata}}", "email": "{{user.primary_email_address}}", "name": "{{user.full_name}}" }
    ```
-3. **Restrictions / Access mode → Invite-only.**
-4. **Multi-factor:** enable Authenticator app (TOTP) + Backup codes; leave "Require MFA" **off**. This needs a **paid Clerk plan (Pro)** in production. If the owner stays on the free plan, two-step cannot be enforced — tell the owner; the code expects Admin, Management, Network Manager and Accounts to use two-step for sensitive actions (otherwise they get `two_factor_required`).
-5. **First Admins** (after the migration job has run): RUNBOOK §8 step 4 with `scripts/grant_admin.py` for `shouvik@gridnova.in` (Shouvik Biswas), `rp@gridnova.in` (Raju Paul), `tanmoyhalderxyz@gmail.com` (Tanmoy Halder). Everyone else is invited from the dashboard.
+3. **Access mode → keep sign-up OPEN (`public`)** — not Invite-only. The app is the gate:
+   anyone signed in who was not invited gets 403 `not_invited` and no account in Grid Nova;
+   an associate who is not an approved, unclaimed associate with that verified address gets
+   403 `claim_not_allowed`. Open sign-up is what lets the fallbacks work when Clerk's
+   invitation email does not arrive or cannot be created: the person signs up themselves
+   with the invited address (staff: `/dashboard/sign-up`; associates: `/associates/sign-up`,
+   then the claim, `docs/api/associate_journeys.md`).
+4. **Multi-factor: leave off.** Two-step is off for every role in
+   `config/access_control.yaml` (owner's decision, 29 Oct 2026).
+5. **First Admins** (after the migration job has run) — `BOOTSTRAP_ADMIN_EMAILS` is
+   `shouvik@gridnova.in` (Shouvik Biswas), `rp@gridnova.in` (Raju Paul),
+   `tanmoyhalderxyz@gmail.com` (Tanmoy Halder). For each of the three:
+   1. They **sign up** at `https://www.gridnova.in/dashboard/sign-up` with that exact address
+      and verify it (Clerk's email code).
+   2. In the Clerk Dashboard → **Users** → that user → **Metadata** → **Public**, set
+      `{"role": "admin"}` → **Save**.
+   3. They **sign out and sign in again** (so the session token carries it), then open the
+      dashboard. The first API call creates them as Admin (audited `bootstrap_admin`).
+   Only a **verified** address on the list works; anything else is `not_invited`. The other
+   way in, `scripts/grant_admin.py` as the migration job (RUNBOOK §8 step 4), still works.
+   Everyone else is invited from the dashboard (Staff → Invite).
+
+**Switching on two-step and ban after buying Clerk Pro:**
+- Ban: set `CLERK_BAN_ENABLED: "true"` in `deploy/env.production.yaml` and redeploy.
+  Deactivation then bans (and reactivation unbans) instead of revoking sessions.
+- Two-step: Clerk Dashboard → Multi-factor → enable Authenticator app (TOTP) + Backup codes;
+  leave "Require MFA" off (it would force it on associates). Have each Admin, Management,
+  Network Manager and Accounts person enable it in their account first, **then** set
+  `requires_two_factor: true` on those roles in `config/access_control.yaml` and deploy.
+  Sensitive actions then need a session that completed the second factor.
 
 ## 6. Google Cloud resources (summary of RUNBOOK §1–§10)
 

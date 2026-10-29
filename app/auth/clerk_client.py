@@ -2,7 +2,8 @@
 Thin Clerk Backend API client. Staff roles live in the database (BE-17); Clerk's
 `public_metadata.roles` / `.role` is kept as a copy so the frontend can render before
 its first API call. Also: staff and associate invitations, the verified email
-addresses checked at a first sign-in, and banning / unbanning a deactivated employee.
+addresses checked at a first sign-in, and offboarding — revoking a deactivated person's
+sessions (Clerk's free plan) or, with CLERK_BAN_ENABLED, banning / unbanning them (Pro).
 
 When `CLERK_SECRET_KEY` is unset (local dev / tests) this is a no-op so the
 role update still succeeds against the local mirror without a network call.
@@ -168,8 +169,8 @@ def verified_emails(user_id: str) -> list[str] | None:
 
 def ban_user(user_id: str) -> bool:
     """POST /v1/users/{id}/ban: Clerk revokes all the user's sessions and refuses any
-    further sign-in until unbanned. (Clerk's lock expires on its own, so offboarding
-    uses ban.)"""
+    further sign-in until unbanned. Clerk Pro only — used when CLERK_BAN_ENABLED
+    (app/auth/offboarding.py); on the free plan offboarding revokes sessions instead."""
     if not settings.clerk_secret_key:
         logger.info("Clerk ban skipped (no secret key configured)", extra={"user_id": user_id})
         return False
@@ -183,6 +184,73 @@ def unban_user(user_id: str) -> bool:
         logger.info("Clerk unban skipped (no secret key configured)", extra={"user_id": user_id})
         return False
     _call("POST", f"/users/{user_id}/unban", "unban")
+    return True
+
+
+# ── Offboarding on Clerk's free plan (BE-21): revoke sessions instead of a ban ──────
+SESSIONS_PAGE = 100
+
+
+def active_session_ids(user_id: str) -> list[str] | None:
+    """GET /v1/sessions?user_id=…&status=active, every page. None when skipped (no key)."""
+    if not settings.clerk_secret_key:
+        return None
+    ids: list[str] = []
+    offset = 0
+    while True:
+        page = _call("GET", "/sessions", "session list", params={
+            "user_id": user_id, "status": "active", "limit": SESSIONS_PAGE, "offset": offset}).json() or []
+        if isinstance(page, dict):   # tolerate the {data, total_count} envelope as well as a bare list
+            page = page.get("data") or []
+        ids += [s["id"] for s in page if isinstance(s, dict) and s.get("id")]
+        if len(page) < SESSIONS_PAGE:
+            return ids
+        offset += SESSIONS_PAGE
+
+
+def revoke_session(session_id: str) -> bool:
+    """POST /v1/sessions/{id}/revoke: that session ends (the person is signed out of it)."""
+    if not settings.clerk_secret_key:
+        return False
+    _call("POST", f"/sessions/{session_id}/revoke", "session revoke")
+    return True
+
+
+class SessionRevokeError(ClerkSyncError):
+    """Some sessions could not be revoked; `revoked` says how many were."""
+
+    def __init__(self, message: str, revoked: int):
+        super().__init__(message)
+        self.revoked = revoked
+
+
+def revoke_user_sessions(user_id: str) -> int | None:
+    """End every active session of a Clerk user. Returns how many were revoked, None when
+    skipped (no key). Raises ClerkSyncError when the list fails, SessionRevokeError (with
+    the count that did succeed) when any single revoke fails — the rest are still tried."""
+    ids = active_session_ids(user_id)
+    if ids is None:
+        logger.info("Clerk session revoke skipped (no secret key configured)", extra={"user_id": user_id})
+        return None
+    revoked, failed = 0, 0
+    for session_id in ids:
+        try:
+            if revoke_session(session_id):
+                revoked += 1
+        except ClerkSyncError:
+            failed += 1
+    if failed:
+        raise SessionRevokeError(f"Clerk session revoke failed for {failed} of {len(ids)} session(s)", revoked)
+    return revoked
+
+
+def update_public_metadata(user_id: str, public_metadata: dict) -> bool:
+    """PATCH /v1/users/{id}/metadata. Clerk deep-merges, so other keys are kept. False when
+    skipped (no key); ClerkSyncError when Clerk refuses."""
+    if not settings.clerk_secret_key:
+        logger.info("Clerk metadata update skipped (no secret key configured)", extra={"user_id": user_id})
+        return False
+    _call("PATCH", f"/users/{user_id}/metadata", "metadata update", json={"public_metadata": public_metadata})
     return True
 
 

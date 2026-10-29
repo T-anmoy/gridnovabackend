@@ -1559,9 +1559,9 @@ def deactivate_employee(
     memory.set_employee_active(employee_id, active=False, performed_by=employee.employee_id)
     withdrawn = approvals.cancel_for_leaver(db, employee_id, employee.employee_id)
     db.commit()
-    # Refused from the next request on (the database decides); Clerk then bans the user,
-    # which revokes every session and blocks sign-in.
-    clerk = staff_roles.ban_in_clerk(db, employee_id, employee.employee_id)
+    # Refused from the next request on (the database decides); Clerk then revokes every
+    # session — or bans the user when CLERK_BAN_ENABLED (BE-21).
+    clerk = staff_roles.cut_off_in_clerk(db, employee_id, employee.employee_id)
     return {"employee_id": employee_id, "is_active": False, **clerk,
             "handover": staff_roles.handover(db, employee_id), "approval_requests_withdrawn": withdrawn}
 
@@ -1592,7 +1592,7 @@ def reactivate_employee(
     memory.set_employee_active(employee_id, active=True, performed_by=employee.employee_id)
     db.commit()
     return {"employee_id": employee_id, "is_active": True, "roles": memory.employee_roles(employee_id),
-            **staff_roles.unban_in_clerk(employee_id)}
+            **staff_roles.restore_in_clerk(db, employee_id, employee.employee_id)}
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────────

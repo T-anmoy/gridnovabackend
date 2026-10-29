@@ -21,6 +21,7 @@ from app.memory.models import (
 from tests.associate_support import (  # noqa: F401 — fixtures
     ASSOCIATE_APPLY, BR, DASH, associate_form, kyc_ready, submit, territories,
 )
+from tests.clerk_support import clerk_mock
 from tests.conftest import seed_employees
 from tests.execution_support import Recorder
 
@@ -168,41 +169,74 @@ class TestClerkAccess:
         db_session.commit()
         return gna
 
-    def test_suspending_a_signed_in_associate_bans_them_and_reinstating_unbans(self, client, territories,
-                                                                               db_session, monkeypatch):
-        calls = []
-        monkeypatch.setattr("app.auth.clerk_client.ban_user", lambda u: calls.append(("ban", u)) or True)
-        monkeypatch.setattr("app.auth.clerk_client.unban_user", lambda u: calls.append(("unban", u)) or True)
+    def test_suspending_revokes_sessions_and_never_bans(self, client, territories, db_session, monkeypatch):
+        """BE-21 default (Clerk free plan): every session ends; reinstating changes nothing in
+        Clerk — the database decides."""
+        clerk = clerk_mock(monkeypatch, sessions={"user_a": ["s1", "s2", "s3"]})
+        gna = self._associate(db_session, clerk_user_id="user_a")
+        r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "x"}, headers=ADMIN)
+        assert r.status_code == 200
+        assert r.json()["access"] == {"clerk_banned": False, "sessions_revoked": 3, "invitation_revoked": False,
+                                      "clerk_error": None, "clerk_mode": "revoke_sessions"}
+        assert clerk.revoked == ["s1", "s2", "s3"] and clerk.bans == []
+        r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "active"}, headers=ADMIN)
+        assert r.json()["access"] == {"clerk_unbanned": False, "clerk_error": None, "clerk_mode": "revoke_sessions"}
+        assert clerk.unbans == []
+        revoked = db_session.execute(select(AuditLog).where(AuditLog.entity_id == gna,
+                                                            AuditLog.action == "clerk_access_revoked")).scalar_one()
+        assert revoked.after_value["sessions_revoked"] == 3
+
+    def test_a_suspended_associates_existing_token_is_refused(self, client, territories, db_session, monkeypatch):
+        from app.auth import dependencies as deps
+        clerk_mock(monkeypatch, sessions={"user_tok": ["s1"]})
+        gna = self._associate(db_session, clerk_user_id="user_tok")
+        monkeypatch.setattr(deps, "_verify_clerk_jwt", lambda t: {
+            "sub": "user_tok", "public_metadata": {"principal": "associate", "associate_id": gna}})
+        bearer = {"Authorization": "Bearer still-valid"}
+        assert client.get("/api/v1/associate/me", headers=bearer).status_code == 200
+        client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "x"}, headers=ADMIN)
+        assert client.get("/api/v1/associate/me", headers=bearer).status_code == 403
+
+    def test_ban_mode_bans_and_reinstating_unbans(self, client, territories, db_session, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "clerk_ban_enabled", True)
+        clerk = clerk_mock(monkeypatch, sessions={"user_a": ["s1"]})
         gna = self._associate(db_session, clerk_user_id="user_a")
         r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "x"}, headers=ADMIN)
         assert r.status_code == 200 and r.json()["access"]["clerk_banned"] is True
-        assert calls == [("ban", "user_a")]
+        assert r.json()["access"]["clerk_mode"] == "ban" and clerk.bans == ["user_a"] and clerk.revoked == []
         r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "active"}, headers=ADMIN)
-        assert r.json()["access"] == {"clerk_unbanned": True, "clerk_error": None}
-        assert calls[-1] == ("unban", "user_a")
+        assert r.json()["access"] == {"clerk_unbanned": True, "clerk_error": None, "clerk_mode": "ban"}
+        assert clerk.unbans == ["user_a"]
         actions = set(db_session.execute(select(AuditLog.action).where(AuditLog.entity_id == gna)).scalars())
         assert {"clerk_access_revoked", "clerk_access_restored"} <= actions
 
     def test_an_unaccepted_invitation_is_revoked(self, client, territories, db_session, monkeypatch):
-        revoked = []
-        monkeypatch.setattr("app.auth.clerk_client.revoke_invitation", lambda i: revoked.append(i) or True)
+        clerk = clerk_mock(monkeypatch)
         gna = self._associate(db_session, clerk_invite_status=ClerkInviteStatus.sent, clerk_invitation_id="inv_1")
         r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "deactivated", "reason": "x"},
                         headers=ADMIN)
-        assert r.json()["access"]["invitation_revoked"] is True and revoked == ["inv_1"]
+        assert r.json()["access"]["invitation_revoked"] is True and clerk.invitations_revoked == ["inv_1"]
         assert r.json()["clerk_invite_status"] is None
 
     def test_a_clerk_failure_leaves_the_suspension_standing(self, client, territories, db_session, monkeypatch):
-        from app.auth.clerk_client import ClerkSyncError
-
-        def boom(_):
-            raise ClerkSyncError("Clerk ban failed (HTTP 500)")
-        monkeypatch.setattr("app.auth.clerk_client.ban_user", boom)
+        clerk_mock(monkeypatch, sessions={"user_b": ["s_bad"]}, failing={"s_bad"})
         gna = self._associate(db_session, clerk_user_id="user_b")
         r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "x"}, headers=ADMIN)
         assert r.status_code == 200 and r.json()["status"] == "suspended"
-        assert r.json()["access"]["clerk_error"] == "Clerk ban failed (HTTP 500)"
+        assert "session revoke failed" in r.json()["access"]["clerk_error"]
+        assert r.json()["access"]["sessions_revoked"] == 0
         assert client.get("/api/v1/associate/me", headers={"X-Associate-Id": gna}).status_code == 403
+        assert db_session.execute(select(AuditLog).where(AuditLog.entity_id == gna,
+                                                         AuditLog.action == "clerk_access_revoke_failed")).first()
+
+    def test_a_ban_failure_leaves_the_suspension_standing(self, client, territories, db_session, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "clerk_ban_enabled", True)
+        clerk_mock(monkeypatch, ban_fails=True)
+        gna = self._associate(db_session, clerk_user_id="user_c")
+        r = client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "x"}, headers=ADMIN)
+        assert r.status_code == 200 and r.json()["access"]["clerk_error"] == "Clerk ban failed (HTTP 402)"
 
 
 # ── B10: a suspended associate's customers can be moved ─────────────────────────

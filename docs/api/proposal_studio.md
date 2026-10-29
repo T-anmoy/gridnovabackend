@@ -26,8 +26,9 @@ lead → Nova → proposal flow, which is unchanged.
 | `studio.convert` — create a lead | ✓ | ✓ | — |
 
 Every other role gets **403** on every Studio route. `proposal_desk` may be combined with
-any role (e.g. Sales) and needs no two-step sign-in; Admin/Management sensitive actions
-answer `403 two_factor_required` without it (BE-17). `GET /employees/me` lists the
+any role (e.g. Sales) and needs no two-step sign-in. Since BE-21 no role does (Clerk free
+plan); `403 two_factor_required` returns only if a role's `requires_two_factor` is turned back
+on (access_control.md §7). `GET /employees/me` lists the
 permissions — show the Studio nav item when `studio.view` is held.
 
 ## 2. Project types and layouts

@@ -1,25 +1,50 @@
 """Routes for associates themselves — authenticated by get_current_associate, never by
 the staff dependency. An associate sees their own record; a Preferred Associate also
 sees the roster of associates below them in their territory (app/auth/scoping.py
-RosterScope)."""
+RosterScope). The one exception is the claim (BE-21), which takes a Clerk token that
+carries no associate principal yet."""
 from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.associates_admin import document_link
+from app.associates import claim as associate_claim
 from app.associates import issuance, service
-from app.auth.dependencies import AuthenticatedAssociate, get_current_associate
+from app.auth.dependencies import AuthenticatedAssociate, get_clerk_identity, get_current_associate
 from app.auth.scoping import roster_scope
 from app.memory.db import get_db
 from app.memory.models import (
     Associate, AssociateApplication, AssociateStatus, AssociateType, CustomerOnboarding, OnboardingStatus,
 )
+from app.security.client_ip import client_ip
+from app.security.rate_limit import RateLimitLog
 
 router = APIRouter(prefix="/api/v1/associate")
+
+# BE-21 claim: per client IP and per Clerk user, like the public associate routes.
+CLAIM_LIMIT, CLAIM_WINDOW_SECONDS = 10, 60
+_claim_ip_log = RateLimitLog(CLAIM_WINDOW_SECONDS)
+_claim_user_log = RateLimitLog(CLAIM_WINDOW_SECONDS)
+
+
+@router.post("/me/claim")
+def claim_account(request: Request, db: Session = Depends(get_db), identity: dict = Depends(get_clerk_identity)):
+    """BE-21: link a Clerk user who signed up without the invitation (it failed or never
+    arrived) to their approved associate, by a verified email match. Returns
+    `refresh_session: true` — the frontend must refresh the session token so it carries
+    the associate claims. Errors: 403 claim_not_allowed (every refusal, saying nothing
+    about whether the address exists), 429 rate_limited, 502 clerk_sync_failed, 503
+    identity_check_unavailable."""
+    if not (_claim_ip_log.hit(client_ip(request), CLAIM_LIMIT)
+            and _claim_user_log.hit(str(identity.get("sub")), CLAIM_LIMIT)):
+        raise HTTPException(status_code=429, detail={"code": "rate_limited",
+                                                     "message": "Too many attempts. Wait a minute and try again."})
+    associate = associate_claim.claim(db, identity)
+    return {"associate_id": associate.associate_id, "refresh_session": True}
 
 
 @router.get("/me")

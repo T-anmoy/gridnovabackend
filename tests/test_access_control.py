@@ -24,6 +24,7 @@ from app.memory.models import (
     ApprovalRequest, ApprovalRequestStatus, AuditLog, Employee, EmployeeRole, EmployeeRoleGrant, Lead,
     LeadSource, PipelineStage, StaffInvitation, StaffInvitationStatus,
 )
+from tests.clerk_support import clerk_mock
 from tests.conftest import admin_headers
 from tests.test_bootstrap_db import empty_database_url  # noqa: F401 — the fixture
 
@@ -244,7 +245,7 @@ class TestUnion:
         body = r.json()
         assert body["roles"] == ["accounts", "admin"] and body["role"] == "admin"
         assert "payouts.bank_file.export" in body["permissions"] and body["two_factor_ok"] is True
-        assert body["requires_two_factor"] is True
+        assert body["requires_two_factor"] is False   # BE-21: off for every role
 
 
 # ── The database decides ─────────────────────────────────────────────────────────
@@ -253,6 +254,11 @@ def token(monkeypatch, sub: str, **claims):
     payload = {"sub": sub, "public_metadata": claims.pop("metadata", {}), **claims}
     monkeypatch.setattr(deps, "_verify_clerk_jwt", lambda t: payload)
     return {"Authorization": "Bearer t"}
+
+
+def bootstrap_list(monkeypatch, *emails: str) -> None:
+    from app.config import settings
+    monkeypatch.setattr(settings, "bootstrap_admin_emails", ",".join(emails))
 
 
 def seed(db_session, employee_id: str, *roles: str, email: str | None = None, active: bool = True) -> Employee:
@@ -288,33 +294,59 @@ class TestDatabaseAuthority:
         assert client.get(ME, headers=h).json()["roles"] == ["sales"]
 
     def test_deactivated_is_refused_on_the_next_request(self, client, db_session, monkeypatch):
+        """BE-21 default (CLERK_BAN_ENABLED false): every active session is revoked, the
+        Clerk user is never banned, and the still-valid token is refused at once."""
         seed(db_session, "user_s1", "sales")
         h = token(monkeypatch, "user_s1", metadata={"role": "sales"})
         assert client.get(ME, headers=h).status_code == 200
-        bans = []
-        monkeypatch.setattr("app.auth.clerk_client.ban_user", lambda uid: bans.append(uid) or True)
+        clerk = clerk_mock(monkeypatch, sessions={"user_s1": ["sess_1", "sess_2"]})
         r = client.patch(f"{D}/employees/user_s1/deactivate", headers=admin_headers())
-        assert r.status_code == 200 and r.json()["clerk_banned"] is True and r.json()["sessions_revoked"] is True
-        assert bans == ["user_s1"]
+        body = r.json()
+        assert r.status_code == 200 and body["clerk_mode"] == "revoke_sessions"
+        assert body["clerk_banned"] is False and body["sessions_revoked"] == 2 and body["clerk_error"] is None
+        assert body["invitation_revoked"] is False
+        assert clerk.revoked == ["sess_1", "sess_2"] and clerk.bans == []
         assert client.get(ME, headers=h).status_code == 403
-        actions = [a.action for a in db_session.query(AuditLog).filter_by(entity_id="user_s1")]
-        assert "deactivated" in actions and "sessions_revoked" in actions
+        audit = {a.action: a for a in db_session.query(AuditLog).filter_by(entity_id="user_s1")}
+        assert "deactivated" in audit and audit["sessions_revoked"].after_value["sessions_revoked"] == 2
 
-    def test_reactivate_unbans_and_keeps_roles(self, client, db_session, monkeypatch):
-        seed(db_session, "user_r1", "engineer", active=False)
-        unbans = []
-        monkeypatch.setattr("app.auth.clerk_client.unban_user", lambda uid: unbans.append(uid) or True)
-        r = client.patch(f"{D}/employees/user_r1/reactivate", headers=admin_headers())
-        assert r.status_code == 200 and r.json()["roles"] == ["engineer"] and r.json()["clerk_unbanned"] is True
-        assert unbans == ["user_r1"]
+    def test_reactivate_without_ban_mode_changes_nothing_in_clerk(self, client, db_session, monkeypatch):
+        seed(db_session, "user_r0", "engineer", active=False)
+        clerk = clerk_mock(monkeypatch)
+        r = client.patch(f"{D}/employees/user_r0/reactivate", headers=admin_headers())
+        assert r.status_code == 200 and r.json()["roles"] == ["engineer"]
+        assert r.json()["clerk_unbanned"] is False and r.json()["clerk_mode"] == "revoke_sessions"
+        assert clerk.unbans == [] and clerk.bans == []
+
+    def test_a_revoke_failure_leaves_the_deactivation_standing(self, client, db_session, monkeypatch):
+        seed(db_session, "user_s3", "sales")
+        clerk_mock(monkeypatch, sessions={"user_s3": ["ok_1", "bad_2"]}, failing={"bad_2"})
+        r = client.patch(f"{D}/employees/user_s3/deactivate", headers=admin_headers())
+        assert r.status_code == 200 and r.json()["sessions_revoked"] == 1 and r.json()["clerk_error"]
+        db_session.expire_all()
+        assert db_session.get(Employee, "user_s3").is_active is False
+        assert db_session.query(AuditLog).filter_by(entity_id="user_s3", action="clerk_offboarding_failed").count() == 1
+
+    def test_ban_mode_bans_and_reactivation_unbans(self, client, db_session, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "clerk_ban_enabled", True)
+        seed(db_session, "user_s4", "sales")
+        h = token(monkeypatch, "user_s4", metadata={"role": "sales"})
+        clerk = clerk_mock(monkeypatch, sessions={"user_s4": ["sess_x"]})
+        r = client.patch(f"{D}/employees/user_s4/deactivate", headers=admin_headers())
+        assert r.status_code == 200 and r.json()["clerk_banned"] is True and r.json()["clerk_mode"] == "ban"
+        assert r.json()["sessions_revoked"] is None
+        assert clerk.bans == ["user_s4"] and clerk.revoked == []
+        assert client.get(ME, headers=h).status_code == 403
+        r = client.patch(f"{D}/employees/user_s4/reactivate", headers=admin_headers())
+        assert r.status_code == 200 and r.json()["clerk_unbanned"] is True and clerk.unbans == ["user_s4"]
+        assert db_session.query(AuditLog).filter_by(entity_id="user_s4", action="clerk_unbanned").count() == 1
 
     def test_a_ban_failure_leaves_the_deactivation_standing(self, client, db_session, monkeypatch):
-        from app.auth.clerk_client import ClerkSyncError
+        from app.config import settings
+        monkeypatch.setattr(settings, "clerk_ban_enabled", True)
         seed(db_session, "user_s2", "sales")
-
-        def _fail(uid):
-            raise ClerkSyncError("down")
-        monkeypatch.setattr("app.auth.clerk_client.ban_user", _fail)
+        clerk_mock(monkeypatch, ban_fails=True)
         r = client.patch(f"{D}/employees/user_s2/deactivate", headers=admin_headers())
         assert r.status_code == 200 and r.json()["clerk_banned"] is False and r.json()["clerk_error"]
         db_session.expire_all()
@@ -325,10 +357,16 @@ class TestDatabaseAuthority:
         assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
 
     def test_bootstrap_admin_path_is_audited(self, client, db_session, monkeypatch):
+        bootstrap_list(monkeypatch, "b@gridnova.in")
+        clerk_mock(monkeypatch, verified={"user_boot": ["b@gridnova.in"]})
         r = client.get(ME, headers=token(monkeypatch, "user_boot", metadata={"role": "admin"}, email="b@gridnova.in"))
         assert r.status_code == 200 and r.json()["roles"] == ["admin"]
         grant = db_session.query(AuditLog).filter_by(entity_id="user_boot", action="role_granted").one()
         assert grant.performed_by == "bootstrap"
+        boot = db_session.query(AuditLog).filter_by(entity_id="user_boot", action="bootstrap_admin").one()
+        assert boot.performed_by == "bootstrap"
+        assert boot.after_value == {"clerk_user_id": "user_boot", "list_match": "b@gridnova.in"}
+        assert db_session.get(Employee, "user_boot").email == "b@gridnova.in"
 
     def test_an_invited_user_never_takes_the_bootstrap_path(self, client, db_session, monkeypatch):
         # Their invitation was revoked; their Clerk metadata still says admin.
@@ -337,6 +375,69 @@ class TestDatabaseAuthority:
                   email="rev@gridnova.in")
         r = client.get(ME, headers=h)
         assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+
+
+class TestBootstrapLocked:
+    """BE-21: the first-Admin bootstrap needs `role: admin`, no invitation id, and a
+    VERIFIED address on BOOTSTRAP_ADMIN_EMAILS."""
+
+    LIST = ("shouvik@gridnova.in", "rp@gridnova.in", "tanmoyhalderxyz@gmail.com")
+
+    def _sign_in(self, client, monkeypatch, sub, metadata, verified, email="x@gmail.com"):
+        bootstrap_list(monkeypatch, *self.LIST)
+        clerk_mock(monkeypatch, verified={sub: verified})
+        return client.get(ME, headers=token(monkeypatch, sub, metadata=metadata, email=email))
+
+    def test_listed_verified_admin_becomes_admin(self, client, db_session, monkeypatch):
+        r = self._sign_in(client, monkeypatch, "user_sh", {"role": "admin"}, ["Shouvik@Gridnova.in"],
+                          email="shouvik@gridnova.in")
+        assert r.status_code == 200 and r.json()["roles"] == ["admin"]
+        assert db_session.get(Employee, "user_sh").email == "shouvik@gridnova.in"
+
+    def test_unverified_listed_address_is_refused(self, client, db_session, monkeypatch, caplog):
+        caplog.set_level(logging.WARNING)
+        # The token claims a listed address, but Clerk has not verified it.
+        r = self._sign_in(client, monkeypatch, "user_unv_b", {"role": "admin"}, [], email="rp@gridnova.in")
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+        assert db_session.get(Employee, "user_unv_b") is None
+        refused = db_session.query(AuditLog).filter_by(entity_id="user_unv_b", action="bootstrap_refused").one()
+        assert refused.performed_by == "bootstrap"
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "rp@gridnova.in" not in logged
+
+    def test_address_not_on_the_list_is_refused(self, client, db_session, monkeypatch):
+        r = self._sign_in(client, monkeypatch, "user_out", {"role": "admin"}, ["intruder@gmail.com"])
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+        assert db_session.get(Employee, "user_out") is None
+
+    def test_another_role_in_metadata_is_refused(self, client, db_session, monkeypatch):
+        r = self._sign_in(client, monkeypatch, "user_mgmt", {"role": "management"}, ["shouvik@gridnova.in"])
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+
+    def test_an_empty_list_switches_bootstrap_off(self, client, db_session, monkeypatch):
+        bootstrap_list(monkeypatch)
+        clerk_mock(monkeypatch, verified={"user_off": ["shouvik@gridnova.in"]})
+        r = client.get(ME, headers=token(monkeypatch, "user_off", metadata={"role": "admin"}))
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+
+    def test_an_invited_user_follows_the_invitation_not_bootstrap(self, client, db_session, monkeypatch):
+        inv = invitation(db_session, "tanmoyhalderxyz@gmail.com", ["accounts"])
+        r = self._sign_in(client, monkeypatch, "user_tan", {"role": "admin", "staff_invitation_id": inv.id},
+                          ["tanmoyhalderxyz@gmail.com"])
+        assert r.status_code == 200 and r.json()["roles"] == ["accounts"]
+        assert db_session.query(AuditLog).filter_by(entity_id="user_tan", action="bootstrap_admin").count() == 0
+
+    def test_an_existing_employee_never_changes_roles(self, client, db_session, monkeypatch):
+        seed(db_session, "user_exist", "sales", email="shouvik@gridnova.in")
+        r = self._sign_in(client, monkeypatch, "user_exist", {"role": "admin"}, ["shouvik@gridnova.in"])
+        assert r.status_code == 200 and r.json()["roles"] == ["sales"]
+
+    def test_production_guard_warns_when_the_list_is_empty(self):
+        from app.config import Settings, production_config_problems
+        s = Settings(_env_file=None, environment="staging", bootstrap_admin_emails="")
+        assert any("BOOTSTRAP_ADMIN_EMAILS" in w for w in production_config_problems(s)[1])
+        s = Settings(_env_file=None, environment="staging", bootstrap_admin_emails="a@b.in")
+        assert not any("BOOTSTRAP_ADMIN_EMAILS" in w for w in production_config_problems(s)[1])
 
 
 # ── Network Manager ──────────────────────────────────────────────────────────────
@@ -410,10 +511,11 @@ class TestNetworkManager:
         assert r.status_code == 200 and r.json()["total_value"] == 120_000
         for action in ("approve", "manager-sign-off", "send"):
             assert client.post(f"{D}/proposals/{pid}/{action}", json={}, headers=NM).status_code == 403, action
+        # BE-21: two-step is off for every role, so a session without a second factor works.
         no_2fa = {**NM, "X-Employee-Two-Factor": "off"}
         r = client.patch(f"{D}/proposals/{pid}/adjust-pricing", json={"new_value": 110_000, "reason": "x"},
                          headers=no_2fa)
-        assert r.status_code == 403 and r.json()["detail"]["code"] == "two_factor_required"
+        assert r.status_code == 200 and r.json()["total_value"] == 110_000
 
 
 # ── Role changes, the floor, handover ───────────────────────────────────────────
@@ -511,15 +613,67 @@ class TestInvitations:
         assert email == "ab@gridnova.in" and md["roles"] == ["network_manager"] and md["role"] == "network_manager"
         assert md["staff_invitation_id"] == r.json()["invitation_id"] and days == 7
 
-    def test_clerk_refusal_saves_nothing(self, client, db_session, monkeypatch):
+    def test_a_clerk_refusal_still_creates_a_manual_invitation(self, client, db_session, monkeypatch):
+        """BE-21: Clerk refusing the invitation no longer loses it — the Grid Nova invitation
+        stands, pending, with delivery "manual" and what to tell the person."""
         from app.auth.clerk_client import ClerkSyncError
+        from app.config import settings
 
         def _fail(*a):
             raise ClerkSyncError("exists")
         monkeypatch.setattr("app.auth.clerk_client.create_staff_invitation", _fail)
-        r = client.post(f"{D}/staff/invitations", json={"name": "A", "email": "a@gmail.com", "roles": ["sales"]},
+        monkeypatch.setattr(settings, "frontend_base_url", "https://www.gridnova.in")
+        r = client.post(f"{D}/staff/invitations", json={"name": "Asha", "email": "a@gmail.com", "roles": ["sales"]},
                         headers=admin_headers())
-        assert r.status_code == 502 and db_session.query(StaffInvitation).count() == 0
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["status"] == "pending" and body["clerk_status"] == "failed" and body["delivery"] == "manual"
+        assert body["manual_instructions"] == ("Ask Asha to sign up at https://www.gridnova.in/dashboard/sign-up "
+                                               "with a@gmail.com.")
+        inv = db_session.get(StaffInvitation, body["invitation_id"])
+        assert inv.clerk_invitation_id is None
+        audit = db_session.query(AuditLog).filter_by(entity_id=inv.id, action="staff_invited").one()
+        assert audit.after_value["delivery"] == "manual" and audit.after_value["clerk_error"]
+
+    def test_delivery_is_clerk_email_when_clerk_sent_it(self, client, monkeypatch):
+        monkeypatch.setattr("app.auth.clerk_client.create_staff_invitation", lambda *a: (True, "inv_ok"))
+        r = client.post(f"{D}/staff/invitations", json={"name": "B", "email": "b2@gmail.com", "roles": ["sales"]},
+                        headers=admin_headers())
+        assert r.json()["delivery"] == "clerk_email" and r.json()["manual_instructions"] is None
+
+    def test_a_resend_clerk_refuses_stays_manual(self, client, db_session, monkeypatch):
+        from app.auth.clerk_client import ClerkSyncError
+        inv = invitation(db_session, "rs@gmail.com", ["sales"])
+
+        def _fail(*a):
+            raise ClerkSyncError("down")
+        monkeypatch.setattr("app.auth.clerk_client.create_staff_invitation", _fail)
+        r = client.post(f"{D}/staff/invitations/{inv.id}/resend", headers=admin_headers())
+        assert r.status_code == 200 and r.json()["status"] == "pending" and r.json()["delivery"] == "manual"
+
+    def test_a_normal_sign_up_with_the_invited_verified_address_joins(self, client, db_session, monkeypatch):
+        """No ticket, no metadata: the person signed up themselves (delivery manual)."""
+        inv = invitation(db_session, "self@gmail.com", ["operations", "accounts"])
+        inv.clerk_status = "failed"
+        db_session.commit()
+        monkeypatch.setattr("app.auth.clerk_client.verified_emails", lambda uid: ["self@gmail.com"])
+        r = client.get(ME, headers=token(monkeypatch, "user_self", email="self@gmail.com"))
+        assert r.status_code == 200 and r.json()["roles"] == ["accounts", "operations"]
+        db_session.expire_all()
+        assert db_session.get(StaffInvitation, inv.id).status == StaffInvitationStatus.accepted
+
+    def test_a_normal_sign_up_with_an_unverified_address_does_not(self, client, db_session, monkeypatch):
+        invitation(db_session, "selfu@gmail.com", ["sales"])
+        monkeypatch.setattr("app.auth.clerk_client.verified_emails", lambda uid: [])
+        r = client.get(ME, headers=token(monkeypatch, "user_selfu", email="selfu@gmail.com"))
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+        assert db_session.get(Employee, "user_selfu") is None
+
+    def test_an_uninvited_sign_up_is_refused_and_creates_no_employee(self, client, db_session, monkeypatch):
+        monkeypatch.setattr("app.auth.clerk_client.verified_emails", lambda uid: ["stranger@gmail.com"])
+        r = client.get(ME, headers=token(monkeypatch, "user_stranger", email="stranger@gmail.com"))
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "not_invited"
+        assert db_session.get(Employee, "user_stranger") is None
 
     def test_duplicate_email_and_existing_staff(self, client, db_session):
         body = {"name": "A", "email": "dup@gmail.com", "roles": ["sales"]}
@@ -680,31 +834,87 @@ class TestSecondApproval:
 
 # ── Two-step sign-in ─────────────────────────────────────────────────────────────
 
-class TestTwoFactor:
-    def test_sensitive_refused_without_a_second_factor(self, client, db_session, monkeypatch):
-        admins(db_session, "user_2fa")
-        r = client.get(f"{D}/employees", headers=token(monkeypatch, "user_2fa", fva=[3, -1]))
-        assert r.status_code == 403 and r.json()["detail"]["code"] == "two_factor_required"
+@pytest.fixture
+def two_step_on(monkeypatch):
+    """BE-21 reversibility: the access config with `requires_two_factor: true` on the given
+    roles — exactly the one-line change that turns two-step back on after buying Clerk Pro."""
+    import yaml
 
-    def test_sensitive_allowed_with_it(self, client, db_session, monkeypatch):
+    def apply(*roles: str):
+        raw = yaml.safe_load((REPO / "config" / "access_control.yaml").read_text(encoding="utf-8"))
+        for role in roles:
+            raw["roles"][role]["requires_two_factor"] = True
+        cfg = access._build(raw)
+        monkeypatch.setattr(access, "load", lambda: cfg)
+    return apply
+
+
+class TestTwoFactor:
+    def test_off_for_every_role(self):
+        """BE-21: the owner's decision (Clerk free plan). Fails when any role drifts back on."""
+        assert {r: c.requires_two_factor for r, c in access.load().roles.items()} == {
+            r.value: False for r in EmployeeRole}
+
+    def test_every_sensitive_permission_works_without_a_second_factor(self):
+        for role in EmployeeRole:
+            e = AuthenticatedEmployee(employee_id="x", role=role, two_factor_ok=False)
+            for perm in e.permissions:
+                assert e.has(perm), (role.value, perm)
+
+    @pytest.mark.parametrize("role", ["admin", "management", "network_manager", "accounts"])
+    def test_the_four_formerly_blocked_roles_reach_their_sensitive_actions(self, client, db_session,
+                                                                          monkeypatch, role):
+        seed(db_session, f"user_2f_{role}", role)
+        h = token(monkeypatch, f"user_2f_{role}", fva=[3, -1])   # no second factor in this session
+        me = client.get(ME, headers=h).json()
+        assert me["two_factor_ok"] is False and me["requires_two_factor"] is False
+        sensitive = [p for p in me["permissions"] if access.is_sensitive(p)]
+        assert sensitive, role
+        e = AuthenticatedEmployee(employee_id="x", role=EmployeeRole(role), two_factor_ok=False)
+        assert all(e.has(p) for p in sensitive)
+
+    def test_admin_lists_staff_without_a_second_factor(self, client, db_session, monkeypatch):
+        admins(db_session, "user_2fa")
+        assert client.get(f"{D}/employees", headers=token(monkeypatch, "user_2fa", fva=[3, -1])).status_code == 200
+
+    def test_matrix_reports_it_off(self, client):
+        r = client.get(f"{D}/access/matrix", headers={"X-Employee-Id": "emp-o", "X-Employee-Role": "operations"})
+        assert {x["id"]: x["requires_two_factor"] for x in r.json()["roles"]} == {r.value: False for r in EmployeeRole}
+
+    # ── Reversible: flip the role's value and two_factor_required returns ──
+
+    def test_reversible_sensitive_refused_without_a_second_factor(self, client, db_session, monkeypatch,
+                                                                  two_step_on):
+        two_step_on("admin")
+        admins(db_session, "user_2fr")
+        r = client.get(f"{D}/employees", headers=token(monkeypatch, "user_2fr", fva=[3, -1]))
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "two_factor_required"
+        assert client.get(ME, headers=token(monkeypatch, "user_2fr", fva=[3, -1])).json()["requires_two_factor"] is True
+
+    def test_reversible_allowed_with_it(self, client, db_session, monkeypatch, two_step_on):
+        two_step_on("admin")
         admins(db_session, "user_2fb")
         assert client.get(f"{D}/employees", headers=token(monkeypatch, "user_2fb", fva=[3, 2])).status_code == 200
 
-    def test_non_sensitive_stays_open(self, client, db_session, monkeypatch):
+    def test_reversible_non_sensitive_stays_open(self, client, db_session, monkeypatch, two_step_on):
+        two_step_on("admin")
         admins(db_session, "user_2fc")
         h = token(monkeypatch, "user_2fc")
         assert client.get(ME, headers=h).json()["two_factor_ok"] is False
         assert client.get(f"{D}/leads", headers=h).status_code == 200
         assert client.get(f"{D}/access/matrix", headers=h).status_code == 200
 
-    def test_a_role_without_the_requirement_is_not_blocked(self, client, db_session, monkeypatch):
-        seed(db_session, "user_sales_2f", "sales")
+    def test_reversible_a_role_without_the_requirement_is_not_blocked(self, two_step_on):
+        two_step_on("admin")
         e = AuthenticatedEmployee(employee_id="s", role=EmployeeRole.sales, two_factor_ok=False)
         assert e.can_adjust_pricing()   # sensitive, but Sales does not require two-step
 
-    def test_dev_header_can_switch_it_off(self, client):
+    def test_reversible_dev_header_can_switch_it_off(self, client, two_step_on):
+        two_step_on("admin")
         r = client.get(f"{D}/employees", headers=multi("emp-admin-1", "admin", two_factor=False))
         assert r.status_code == 403 and r.json()["detail"]["code"] == "two_factor_required"
+        r = client.get(f"{D}/employees", headers=multi("emp-admin-1", "admin"))
+        assert r.status_code == 200
 
 
 # ── Alerts ───────────────────────────────────────────────────────────────────────

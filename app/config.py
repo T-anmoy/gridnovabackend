@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     # Clerk
     clerk_secret_key: str = ""
     clerk_jwt_issuer: str = ""
+    # BE-21: offboarding in Clerk. False (Clerk's free plan, where ban is not available):
+    # a deactivated employee's or suspended associate's sessions are revoked. True (Pro):
+    # the Clerk user is banned and, on reactivation, unbanned. Either way the database
+    # refuses them on their next request.
+    clerk_ban_enabled: bool = False
+    # BE-21: comma-separated addresses that may become the first Admins through the
+    # bootstrap path ({"role": "admin"} set by hand on a Clerk user's public metadata) —
+    # only with that address verified in Clerk. Blank = bootstrap off.
+    bootstrap_admin_emails: str = ""
 
     # Storage (Cloudflare R2 / S3-compatible)
     storage_bucket: str = ""
@@ -207,6 +216,10 @@ class Settings(BaseSettings):
         return self.environment in DEV_AUTH_ENVIRONMENTS
 
     @property
+    def bootstrap_admin_email_set(self) -> frozenset:
+        return frozenset(e.strip().lower() for e in self.bootstrap_admin_emails.split(",") if e.strip())
+
+    @property
     def staff_notify_email_list(self) -> List[str]:
         return [e.strip() for e in self.staff_notify_emails.split(",") if e.strip()]
 
@@ -340,6 +353,9 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
                         "proposals, receipts, staff and associate alerts)")
     if not s.sentry_dsn.strip():
         warnings.append("SENTRY_DSN is empty — unhandled errors are only in Cloud Logging")
+    if not s.bootstrap_admin_email_set:
+        warnings.append("BOOTSTRAP_ADMIN_EMAILS is empty — the first-Admin bootstrap path is off "
+                        "(scripts/grant_admin.py still works)")
     from app.associates import texts
     if texts.consent_is_placeholder():
         warnings.append("config/associate_documents.yaml: the current KYC consent notice is a [PLACEHOLDER] "

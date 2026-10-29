@@ -119,7 +119,9 @@ staging/production without it; "warns" = it starts and logs a warning.
 | `FRONTEND_BASE_URL` | yes | The website's origin (browser redirects, associate email links) |
 | `PUBLIC_API_BASE_URL` | yes | This API's public origin (customer PDF/receipt links, ID card QR codes) |
 | `CLERK_JWT_ISSUER` | yes | Clerk Frontend API URL; tokens are verified against its JWKS |
-| `CLERK_SECRET_KEY` | yes | Clerk secret key (roles copy, staff and associate invitations, verified-email check at first sign-in, ban on deactivation) |
+| `CLERK_SECRET_KEY` | yes | Clerk secret key (roles copy, staff and associate invitations, verified-email check at first sign-in and at the associate claim, session revoke on deactivation) |
+| `CLERK_BAN_ENABLED` | — | `true` bans a deactivated person in Clerk (Pro plan only) instead of revoking their sessions (default `false`; BE-21) |
+| `BOOTSTRAP_ADMIN_EMAILS` | warns | Comma-separated verified addresses that may become the first Admins via `{"role": "admin"}` in Clerk metadata; blank = bootstrap off (BE-21) |
 | `ASSOCIATE_INVITE_REDIRECT_URL` | — | Where an invited associate lands (the portal sign-up page) |
 | `STAFF_INVITE_REDIRECT_URL` | — | Where an invited staff member lands (the dashboard page that completes Clerk's invitation sign-up; BE-17) |
 | `INTERNAL_API_KEY` | production (warns on staging) | `X-Internal-Key` for Cloud Scheduler and the website's lead mirror |

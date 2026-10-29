@@ -214,6 +214,20 @@ uvicorn app.main:app --reload --port 8000
 
 Task history (for `git log` context): BE-1…BE-15 and FE-1…FE-15, HF-* hotfixes, Phase 3–4A. Latest: BE-12/FE-12 individual commission rates; BE-13/FE-13 proposal templates + editor; BE-14/FE-14 estimate engine + calculator v2; BE-15 CORS on 500s; FE-15 responsive polish.
 
+**BE-21 (30 Oct 2026) — sign-in on Clerk's free plan.** Grid Nova stays on Clerk's free
+(Hobby) plan, where two-step sign-in and banning are not available, so the system no longer
+depends on either. Two-step is off for every role (`requires_two_factor: false` in
+`config/access_control.yaml`; the `sensitive` flags and the `fva` check stay, so turning it
+back on is one value per role). Deactivating staff or suspending an associate revokes their
+Clerk sessions instead of banning (`CLERK_BAN_ENABLED`, default false; `clerk_mode` in the
+response) — the database refuses them on the next request either way. The first-Admin
+bootstrap (`{"role": "admin"}` set by hand in Clerk) now needs a verified address on
+`BOOTSTRAP_ADMIN_EMAILS` (the three first Admins). If Clerk cannot send an invitation, staff
+invitations stay pending with `delivery: "manual"` and associates claim their account
+themselves (`POST /api/v1/associate/me/claim`). Clerk sign-up must stay open. No migration.
+Contracts: `docs/api/access_control.md`, `docs/api/associate_journeys.md`;
+steps: `deploy/PRODUCTION_ENV_GUIDE.md` §5.
+
 ---
 
 ## 8. Known issues and risks

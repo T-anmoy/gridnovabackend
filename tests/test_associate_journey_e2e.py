@@ -28,6 +28,7 @@ from app.memory.models import (
     Associate, CommissionEntry, CustomerOnboarding, ProjectStage, Proposal, ProposalStatus,
 )
 from tests.associate_support import ASSOCIATE_APPLY, associate_form, submit
+from tests.clerk_support import clerk_mock
 from tests.commission_support import ACCOUNTS_2, approve_all, publish
 from tests.execution_support import Recorder, advance_to, exec_url, staff_exec_url
 from tests.onboarding_support import (  # noqa: F401 — fixtures
@@ -50,12 +51,13 @@ def world(client, db_session, onboarding_ready, sendable_proposal_content, stub_
     seed_employees(db_session, "emp-admin-1", "emp-sales-1", "emp-eng-1")
     rec = Recorder()
     monkeypatch.setattr(notifier_module, "notifier", rec)
-    invites, bans = [], []
+    invites = []
     monkeypatch.setattr("app.auth.clerk_client.create_associate_invitation",
                         lambda email, meta, redirect="": invites.append((email, meta)) or (True, "inv_e2e"))
-    monkeypatch.setattr("app.auth.clerk_client.ban_user", lambda user: bans.append(user) or True)
+    # BE-21: Clerk's free plan — offboarding revokes sessions; a ban would be a bug.
+    clerk = clerk_mock(monkeypatch, sessions={"user_e2e_1": ["sess_e2e_1"]})
     with patch("app.associates.documents.render_pdf", return_value=b"%PDF-stub"):
-        yield {"emails": rec, "invites": invites, "bans": bans}
+        yield {"emails": rec, "invites": invites, "clerk": clerk}
 
 
 def _ok(r, code=200):
@@ -216,10 +218,11 @@ def test_suspended_mid_way(client, db_session, world, monkeypatch):
     pay(client, gna, oid, 1, "UTR-SUS-1")
     assert approve_all(client, db_session)
 
-    # Suspended: access refused at once, the Clerk user banned.
+    # Suspended: access refused at once, every Clerk session revoked (never a ban).
     body = _ok(client.post(f"{DASH}/associates/{gna}/status", json={"status": "suspended", "reason": "Complaint"},
                            headers=NM))
-    assert body["access"]["clerk_banned"] is True and world["bans"] == ["user_e2e_1"]
+    assert body["access"]["sessions_revoked"] == 1 and body["access"]["clerk_mode"] == "revoke_sessions"
+    assert world["clerk"].revoked == ["sess_e2e_1"] and world["clerk"].bans == []
     assert body["open_customers"] == 1
     assert client.get(f"{ASSOC}/me", headers=headers(gna)).status_code == 403
     assert client.get(f"{BASE}/{oid}", headers=headers(gna)).status_code == 403
