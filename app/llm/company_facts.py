@@ -171,22 +171,39 @@ Raju Paul (Partner), Srinjay Das (VP Business), Moloy Das (GM Projects),
 Arun Kumar (Zonal Sales Manager), Naren Mukherjee (Senior Advisor — Solar Power).
 """
 
-COMPANY_FACTS_BOUNDARY = """You may only state facts that appear above. If a customer asks something not
+# The one real, confirmed response-time commitment. "Shortly" and "soon" promise
+# nothing and read as a brush-off — this is the actual number, used everywhere
+# customer-facing timing comes up: the Sales Agent's reply prompt
+# (app/llm/client.py's _REPLY_RULES), the hand-off rule below and its deterministic
+# stand-down reply (app/agents/sales_agent.py). One constant so they can never drift apart.
+RESPONSE_TIME_COMMITMENT = "within 48 business hours"
+
+COMPANY_FACTS_BOUNDARY = f"""You may only state facts that appear above. If a customer asks something not
 covered here — company history, specific past projects beyond what's listed,
 certifications, comparisons to competitors, or anything else — say a team
 member will follow up with specifics, and move the conversation forward.
 Never guess, estimate, or infer a company fact that isn't explicitly stated
 above. This rule has the same weight as the existing rule against inventing
 a price or a meeting slot — treat any violation of it exactly as seriously.
+
+QUESTIONS ONLY THE TEAM CAN ANSWER. These always get a hand-off, in words, in
+the same reply — not just a change of subject:
+- the company's legal form or registration (Pvt Ltd, LLP, partnership, GST,
+  CIN, licences) — the facts above do not say, so neither confirm nor deny;
+- whether we are cheaper or better than another company;
+- whether we did a particular project, site or client not listed above;
+- the status of their own proposal, order, payment or installation — you
+  cannot see it;
+- a price, a per-kW rate or what a system would cost — never a figure, and
+  never just "I can't share prices": name the Solar Calculator on the website
+  for an instant estimate, and say a team member will follow up with exact
+  numbers.
+The hand-off names the team and the real timing: "a team member will follow
+up {RESPONSE_TIME_COMMITMENT}". Say that sentence, then, if useful, ask your
+one question. Deflecting ("I can't comment on that") without the hand-off
+leaves the customer with nobody to ask.
 """
 
 # The unit the reply prompt inserts: facts, then the rule about their limits,
 # immediately adjacent so one can never be read without the other.
 COMPANY_FACTS_BLOCK = COMPANY_FACTS + "\n" + COMPANY_FACTS_BOUNDARY
-
-# The one real, confirmed response-time commitment. "Shortly" and "soon" promise
-# nothing and read as a brush-off — this is the actual number, used everywhere
-# customer-facing timing comes up: the Sales Agent's reply prompt
-# (app/llm/client.py's _REPLY_RULES) and its deterministic stand-down reply
-# (app/agents/sales_agent.py). One constant so the two can never drift apart.
-RESPONSE_TIME_COMMITMENT = "within 48 business hours"

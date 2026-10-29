@@ -99,9 +99,30 @@ def reflect_on_lead(
 ) -> dict:
     """Reflect on one lead's conversation and persist what comes back.
 
+    Runs under the agent harness as the Sales Agent writing customer memory, like every
+    other model call an agent makes: the kill switch stops it, and each run is counted
+    and audited — whether it came from a chat turn, the stale-lead job or the dashboard.
+
     Returns a summary dict for logging and tests. Never raises — a failure here
     leaves the lead exactly as it was.
     """
+    from app.agents import harness
+    from app.governance import registry
+
+    base = {"trigger": trigger, "lead_id": lead_id, "memories_written": 0}
+    run = harness.run(
+        registry.SALES_AGENT.id,
+        registry.WRITE_CUSTOMER_MEMORY,
+        lambda: _reflect_on_lead(memory, lead_id, trigger, performed_by),
+        memory=memory,
+        lead_id=lead_id,
+        on_denied=lambda decision: {**base, "skipped": f"not permitted: {decision.reason}"},
+        on_error=lambda exc: {**base, "skipped": f"error: {exc}"},
+    )
+    return run.result
+
+
+def _reflect_on_lead(memory: "MemoryManager", lead_id: int, trigger: str, performed_by: str) -> dict:
     result = {"trigger": trigger, "lead_id": lead_id, "memories_written": 0, "skipped": None}
     try:
         ctx = memory.get_lead_context(lead_id)
@@ -169,7 +190,7 @@ def _persist(
     for item in reflection.get("memories") or []:
         if not isinstance(item, dict):
             continue
-        summary = (item.get("summary") or "").strip()
+        summary = _text(item.get("summary"))
         if not summary:
             continue
         key = _normalise(summary)
@@ -178,7 +199,7 @@ def _persist(
         existing.add(key)
 
         kind = _VALID_KINDS.get(str(item.get("kind", "")).lower(), MemoryKind.episode)
-        detail = (item.get("detail") or "").strip() or None
+        detail = _text(item.get("detail"))
         tags = item.get("tags")
         if not isinstance(tags, list) or not tags:
             tags = _keywords(f"{summary} {detail or ''}")
@@ -200,7 +221,7 @@ def _persist(
     # Self-reflection: keep it as its own retrievable memory when it says something
     # concrete, so "what did we get wrong with this customer" is answerable — but
     # never let a filler answer become a permanent record.
-    notes = (reflection.get("agent_notes") or "").strip()
+    notes = _text(reflection.get("agent_notes")) or ""
     if notes and _normalise(notes) not in existing and not _is_filler(notes):
         memory.add_customer_memory(
             customer_id=customer_id,
@@ -218,15 +239,30 @@ def _persist(
 
     memory.upsert_customer_profile(
         customer_id=customer_id,
-        summary=reflection.get("summary"),
-        traits=reflection.get("traits"),
-        open_questions=reflection.get("open_questions"),
+        summary=_text(reflection.get("summary")),
+        traits=_text_list(reflection.get("traits")),
+        open_questions=_text_list(reflection.get("open_questions")),
         agent_notes=notes or None,
-        next_best_action=reflection.get("next_best_action"),
+        next_best_action=_text(reflection.get("next_best_action")),
         last_reflected_message_id=last_message_id,
         performed_by=performed_by,
     )
     return written
+
+
+def _text(value) -> Optional[str]:
+    """A model-supplied string field, or None. Anything else is not trusted to be text."""
+    return (value.strip() or None) if isinstance(value, str) else None
+
+
+def _text_list(value) -> Optional[list]:
+    """A model-supplied list of strings. A bare string is one item — list("abc") would
+    store it letter by letter — and anything that is not text is dropped."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return None
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 _FILLER = {

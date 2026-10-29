@@ -403,3 +403,52 @@ class TestLiveBlockQuestions:
         out = answer(db_session, "Projects in Krishnanagar - I block", role="sales")
         assert all("block" not in (c["args"].get("filters") or {}) for c in out["tool_calls"])
         assert "Krishnanagar - I" not in str(out["tables"])
+
+
+class TestPlanRepairs:
+    def test_an_associate_id_sent_to_project_dossier_becomes_associate_summary(self):
+        raw = json.dumps({"intent": "x", "tool_calls": [{"tool": "project_dossier", "args": {"ref": "GNA-WB-26-90001"}}]})
+        plan, errors = validate_plan(raw, "Tell me about GNA-WB-26-90001", 3)
+        assert errors == []
+        assert plan["tool_calls"] == [{"tool": "associate_summary", "args": {"associate_id": "GNA-WB-26-90001", "limit": 20}}]
+
+    def test_a_project_reference_is_left_alone(self):
+        raw = json.dumps({"intent": "x", "tool_calls": [{"tool": "project_dossier", "args": {"ref": "GN-ARC-0101"}}]})
+        plan, _ = validate_plan(raw, "Show GN-ARC-0101", 3)
+        assert plan["tool_calls"][0]["tool"] == "project_dossier"
+
+    @pytest.mark.parametrize("written", ["Mrs Roy", "mrs. Roy", "Shri Roy", "Roy"])
+    def test_honorifics_are_dropped_from_a_customer_name(self, written):
+        raw = json.dumps({"intent": "x", "tool_calls": [
+            {"tool": "search_projects", "args": {"filters": {"customer_name": written}}}]})
+        plan, errors = validate_plan(raw, f"What did we install for {written}?", 3)
+        assert errors == [] and plan["tool_calls"][0]["args"]["filters"]["customer_name"] == "Roy"
+
+    def test_named_periods_are_worked_out_for_the_planner(self):
+        from datetime import date
+
+        from app.agents.records_agent import _periods
+
+        text = _periods(date(2026, 10, 29))
+        assert "this quarter: 2026-10-01 to 2026-12-31" in text
+        assert "last quarter: 2026-07-01 to 2026-09-30" in text
+        assert "last month: 2026-09-01 to 2026-09-30" in text
+
+
+class TestClosedSearchField:
+    def test_a_filter_the_role_cannot_use_asks_for_another_way(self, db_session, records, fake_model):
+        fake_model.plans = [json.dumps({"intent": "search", "tool_calls": [
+            {"tool": "search_projects", "args": {"filters": {"block": "Krishnanagar - I"}}}]})]
+        out = answer(db_session, "Projects in Krishnanagar - I block", role="sales")
+        assert out["status"] == "needs_clarification" and out["tables"] == []
+        assert out["answer"].startswith("Your role cannot search projects by block.")
+        assert "Krishnanagar - I" not in out["answer"]
+        db_session.commit()
+        audit = db_session.execute(select(AuditLog).where(AuditLog.action == "nova_records_refused")).scalars().all()
+        assert audit and audit[-1].after_value["category"] == "role_scope"
+
+    def test_a_radius_search_the_role_cannot_use_stays_refused(self, db_session, records, fake_model):
+        fake_model.plans = [json.dumps({"intent": "search", "tool_calls": [
+            {"tool": "search_projects", "args": {"filters": {"near": {"place": "Kasba"}}}}]})]
+        out = answer(db_session, "Projects near Kasba", role="sales")
+        assert out["status"] == "refused" and out["answer"] == "Your role cannot search projects by location."

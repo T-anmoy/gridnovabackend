@@ -372,7 +372,13 @@ def _prepare_environment(mock: bool) -> Path:
     workdir = Path(tempfile.mkdtemp(prefix="nova-eval-"))
     os.environ["DATABASE_URL"] = f"sqlite:///{workdir / 'eval.db'}"
     os.environ["ENVIRONMENT"] = "development"   # dev header auth for the staff route
-    for key in ("SENTRY_DSN", "SLACK_WEBHOOK_URL", "CLERK_SECRET_KEY", "CLERK_JWT_ISSUER"):
+    # Everything that reaches a real person or a real store is blanked too: a .env with
+    # production keys must not email staff about eval leads, upload files or touch calendars.
+    for key in ("SENTRY_DSN", "SLACK_WEBHOOK_URL", "CLERK_SECRET_KEY", "CLERK_JWT_ISSUER",
+                "RESEND_API_KEY", "NOTIFY_FROM_EMAIL", "STAFF_NOTIFY_EMAILS", "ACCOUNTS_NOTIFY_EMAILS",
+                "OPERATIONS_NOTIFY_EMAILS", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET",
+                "STORAGE_ENDPOINT_URL", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
+                "GOOGLE_OAUTH_REDIRECT_URI"):
         os.environ[key] = ""
     if mock:
         os.environ["LLM_API_KEY"] = ""

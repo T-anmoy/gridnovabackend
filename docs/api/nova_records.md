@@ -107,8 +107,8 @@ Response 200:
 |---|---|---|---|
 | `answered` | Records found and the answer is verified (or the templated answer) | short English text citing refs in brackets | from the tool rows |
 | `not_on_record` | Every tool came back empty **for this caller** | `Nothing on record that you can see matches <filters>. Try a broader search — …` | empty |
-| `needs_clarification` | Nothing searchable in the question, an unusable plan, or several customers match a name | a question back; for several matches it lists them with refs | candidate rows, when there are any |
-| `refused` | A request to change/send/book/assign, identity data, the instructions, or something the role cannot see | a fixed sentence (below) | always empty |
+| `needs_clarification` | Nothing searchable in the question, an unusable plan, several customers match a name, or the only search planned was by customer name or block, which the role may not search on | a question back; for several matches it lists them with refs; for a closed field `Your role cannot search projects by <field>. Try a project reference, a lead number, a district or a date range instead.` | candidate rows, when there are any |
+| `refused` | A request to change/send/book/assign, identity data, the instructions, or a tool the role cannot use at all | a fixed sentence (below) | always empty |
 
 A project or lead the caller may not see is `not_on_record`, exactly like one that does
 not exist — the answer never reveals that a hidden record exists.
@@ -245,7 +245,12 @@ model or the response. Nothing is filtered after the fact.
 
 Project fields follow `config/archive.yaml` (registry ARC-2, unconfirmed). A filter on a
 field the role may not see is refused, not silently dropped (Sales cannot search by customer
-name, block, location or associate; free-text search only reads fields the role sees).
+name, block, location or associate; free-text search only reads fields the role sees). When
+nothing else was found, a refused customer-name or block search comes back as
+`needs_clarification` with a hint to search another way — the same status the keyword router
+gives, since it builds those filters only for roles that may use them. A refused radius
+("near") search stays `refused`. Either way the attempt is audit-logged as
+`nova_records_refused` (category `role_scope`).
 
 Nova Records is deliberately **narrower** than two existing routes: Sales sees no money in
 Nova Records (the payments routes show Sales its own leads' payments), and Management sees no

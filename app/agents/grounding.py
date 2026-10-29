@@ -35,6 +35,16 @@ UNSUPPORTED_FACT = "unsupported_fact"
 NOT_ON_RECORD = "That is not on record."
 _RE_NOT_ON_RECORD = re.compile(r"\b(?:not|nothing(?: is)?) on record\b", re.I)
 
+# A memory that only records what the customer typed ("[M12] (episode, …): Customer said: …",
+# plus its detail line) proves they typed it, not that it is true. It may be cited, but its
+# figures are not evidence: "budget is 50 lakh" from such a line would pass as a fact otherwise.
+_RE_CUSTOMER_WORDS = re.compile(r"^[ \t]*\[M\d+\] \([^)]*\)[^:\n]*: Customer said:.*(?:\n[ \t]+detail:.*)?", re.M)
+
+
+def verified_text(context_block: str) -> str:
+    """The context block without customer-written memory lines: what a stated fact must match."""
+    return _RE_CUSTOMER_WORDS.sub("", context_block or "")
+
 
 @dataclass
 class GroundingResult:
@@ -168,7 +178,7 @@ def check_grounding(answer: str, context_block: str, evidence: str = "") -> Grou
     employee's own guess back would otherwise pass as a fact on record.
     """
     answer = answer or ""
-    corpus = f"{context_block or ''}\n{evidence or ''}"
+    corpus = f"{verified_text(context_block)}\n{evidence or ''}"
     result = GroundingResult(citations=extract_citations(answer), facts=extract_facts(answer))
 
     known = extract_citations(context_block)

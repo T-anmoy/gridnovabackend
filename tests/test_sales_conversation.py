@@ -255,3 +255,15 @@ class TestStagedFlow:
         db_session.commit()
         assert result["offered_slots"], "meeting_offer stage should proactively offer real slots"
         assert memory.get_lead(lead.id).pending_meeting_slots["slots"] == result["offered_slots"]
+
+
+@pytest.mark.parametrize("raw", ['["rooftop", "Surat"]', '"rooftop"', "42", "null"])
+def test_extraction_that_is_not_an_object_extracts_nothing(raw, monkeypatch):
+    """A model answering with a list or a bare value must cost the turn nothing: the
+    agent reads the extraction as field -> value, so anything else is an empty one."""
+    from app.llm import client as llm_module
+
+    client = llm_module.LLMClient.__new__(llm_module.LLMClient)
+    client._mock = False
+    monkeypatch.setattr(client, "_chat", lambda messages, lead_id, operation: raw, raising=False)
+    assert client.extract_fields("rooftop in Surat", []) == {}

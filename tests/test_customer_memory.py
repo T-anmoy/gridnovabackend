@@ -122,6 +122,54 @@ class TestReflection:
         assert result["skipped"] == "lead not found"
         assert result["memories_written"] == 0
 
+    def test_the_kill_switch_stops_reflection(self, memory, db_session, monkeypatch):
+        customer, lead = _seed_conversation(memory)
+        db_session.commit()
+        monkeypatch.setattr("app.config.settings.disabled_agents", ["sales_agent"])
+
+        result = reflection.reflect_on_lead(memory, lead.id, trigger=reflection.TRIGGER_LEAD_QUIET)
+        db_session.commit()
+        assert result["memories_written"] == 0
+        assert result["skipped"].startswith("not permitted")
+        assert memory.list_customer_memories(customer.id) == []
+        assert memory.get_customer_profile(customer.id) is None
+
+    def test_a_reflection_run_goes_through_the_harness(self, memory, db_session):
+        from app.memory.models import AuditLog
+
+        _, lead = _seed_conversation(memory)
+        db_session.commit()
+        reflection.reflect_on_lead(memory, lead.id)
+        db_session.commit()
+        runs = db_session.query(AuditLog).filter_by(entity_type="agent_run",
+                                                    action="sales_agent.write_customer_memory").all()
+        assert len(runs) == 1 and runs[0].after_value["code"] == "ok"
+
+    def test_malformed_model_output_is_stored_safely(self, memory, db_session, monkeypatch):
+        customer, lead = _seed_conversation(memory)
+        db_session.commit()
+        monkeypatch.setattr(reflection.llm_client, "reflect_on_conversation", lambda **_: {
+            "summary": 42,
+            "traits": "prefers WhatsApp",
+            "open_questions": ["roof age", 7, "  "],
+            "next_best_action": ["not", "text"],
+            "memories": [
+                {"kind": "preference", "summary": "Wants a site visit first", "salience": "4.5"},
+                {"kind": "objection", "summary": "Worried about the water tank", "salience": "high"},
+                {"kind": "episode", "summary": 99},
+            ],
+        })
+
+        result = reflection.reflect_on_lead(memory, lead.id)
+        db_session.commit()
+        assert result["memories_written"] == 2
+        saliences = {m.summary: m.salience for m in memory.list_customer_memories(customer.id)}
+        assert saliences == {"Wants a site visit first": 4, "Worried about the water tank": 3}
+        profile = memory.get_customer_profile(customer.id)
+        assert profile.traits == ["prefers WhatsApp"]
+        assert profile.open_questions == ["roof age"]
+        assert profile.summary is None and profile.next_best_action is None
+
     def test_filler_self_critique_is_not_stored(self):
         assert reflection._is_filler("nothing to note")
         assert reflection._is_filler("Nothing to note.")

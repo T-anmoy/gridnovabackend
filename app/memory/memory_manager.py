@@ -172,6 +172,16 @@ def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
+def _salience(value: Any) -> int:
+    """A memory's 1-5 salience. Reflection gets it from the model, which may send "4",
+    4.5 or "high"; anything unreadable is the default 3 rather than a failed reflection."""
+    try:
+        number = round(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return 3
+    return max(1, min(5, number)) if number else 3
+
+
 def _serialize(obj: Any) -> Any:
     if obj is None:
         return None
@@ -1671,7 +1681,7 @@ class MemoryManager:
             summary=summary.strip(),
             detail=(detail or None),
             tags=[str(t).lower() for t in (tags or [])],
-            salience=max(1, min(5, int(salience or 3))),
+            salience=_salience(salience),
             occurred_at=occurred_at or datetime.now(timezone.utc),
             created_by=created_by,
             embedding=embedding,
@@ -1732,7 +1742,7 @@ class MemoryManager:
                 AuditLog.entity_type == "proposal",
                 AuditLog.action == "pricing_adjusted",
             )
-            .order_by(AuditLog.created_at.desc())
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
         ).scalars()
 
         for entry in rows:
@@ -2013,7 +2023,7 @@ class MemoryManager:
     # ── Audit retrieval ────────────────────────────────────────────────────────
 
     def list_audit_logs(self, entity_type: Optional[str] = None, entity_id: Optional[str] = None) -> list[AuditLog]:
-        q = select(AuditLog).order_by(AuditLog.created_at.desc())
+        q = select(AuditLog).order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
         if entity_type:
             q = q.where(AuditLog.entity_type == entity_type)
         if entity_id:
@@ -2051,7 +2061,7 @@ class MemoryManager:
         page = max(page, 1)
         page_size = max(1, min(page_size, 200))
         rows = self._db.execute(
-            base.order_by(AuditLog.created_at.desc())
+            base.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).scalars().all()
@@ -2206,7 +2216,7 @@ class MemoryManager:
                 AuditLog.entity_id == agent_id,
                 AuditLog.entity_type.in_(("agent", "agent_governance")),
             )
-            .order_by(AuditLog.created_at.desc())
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .limit(limit)
         )
         return list(self._db.execute(q).scalars().all())

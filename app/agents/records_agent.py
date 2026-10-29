@@ -32,7 +32,7 @@ import json
 import logging
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -53,6 +53,10 @@ NEEDS_CLARIFICATION = "needs_clarification"
 REFUSED = "refused"
 
 MAX_QUESTION_CHARS = 1000
+ROLE_SEARCH_HINT = "Try a project reference, a lead number, a district or a date range instead."
+# Search filters the keyword router only builds for a role that may use them
+# (app/records/router.py): a model plan using one for another role is asked to rephrase.
+ASK_AGAIN_FIELDS = {"customer_name", "block"}
 GENERIC_CLARIFICATION = ("I couldn't work out how to look that up. Could you rephrase it with a project reference, "
                          "a lead number, a customer name, a place, a make or a date range?")
 
@@ -81,6 +85,37 @@ def _numbers(text_: str) -> set:
     return {float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text_ or "")}
 
 
+_RE_ASSOCIATE_ID = re.compile(r"^\s*GNA-[A-Z]{2}-\d{2}-\d{3,6}\s*$", re.I)
+_RE_HONORIFIC = re.compile(r"^\s*(?:mr|mrs|ms|miss|shri|smt|dr|sri)\.?\s+", re.I)
+
+
+def _periods(today: date) -> str:
+    """The named periods a question may use, worked out here so the model copies dates
+    instead of doing calendar arithmetic (it put "this quarter" in the wrong quarter)."""
+    this_q = router.quarter_bounds(today)
+    last_q = router.quarter_bounds(this_q[0] - timedelta(days=1))
+    month_start = today.replace(day=1)
+    last_month_end = month_start - timedelta(days=1)
+    rows = [("this month", month_start, today), ("last month", last_month_end.replace(day=1), last_month_end),
+            ("this quarter", *this_q), ("last quarter", *last_q),
+            ("this year", date(today.year, 1, 1), today),
+            ("last year", date(today.year - 1, 1, 1), date(today.year - 1, 12, 31))]
+    return "\n".join(f"- {name}: {start.isoformat()} to {end.isoformat()}" for name, start, end in rows)
+
+
+def _normalise_call(tool: str, args: dict) -> tuple[str, dict]:
+    """Repair the two planning slips a rule can recognise, before validation: an
+    Associate ID sent to project_dossier (it names an associate, never a project), and an
+    honorific kept in a customer-name search ("Mrs Roy" matches no stored name)."""
+    if tool == "project_dossier" and _RE_ASSOCIATE_ID.match(str(args.get("ref") or "")):
+        return "associate_summary", {"associate_id": str(args["ref"]).strip()}
+    filters = args.get("filters")
+    if isinstance(filters, dict) and isinstance(filters.get("customer_name"), str):
+        name = _RE_HONORIFIC.sub("", filters["customer_name"]).strip()
+        args = {**args, "filters": {**filters, "customer_name": name or filters["customer_name"]}}
+    return tool, args
+
+
 def validate_plan(raw: str, question: str, max_calls: int) -> tuple[Optional[dict], list[str]]:
     """Parse and validate a model plan. Returns (plan, errors); plan is None on errors."""
     errors: list[str] = []
@@ -94,21 +129,22 @@ def validate_plan(raw: str, question: str, max_calls: int) -> tuple[Optional[dic
     calls = []
     asked = _numbers(question)
     for i, call in enumerate(plan.tool_calls[:max_calls]):
-        spec = tools.TOOLS.get(call.tool)
+        tool, raw_args = _normalise_call(call.tool, call.args)
+        spec = tools.TOOLS.get(tool)
         if spec is None:
-            errors.append(f"tool_calls[{i}]: unknown tool {call.tool!r}; use one of {sorted(tools.TOOLS)}")
+            errors.append(f"tool_calls[{i}]: unknown tool {tool!r}; use one of {sorted(tools.TOOLS)}")
             continue
         try:
-            args = spec["args"].model_validate(call.args).model_dump(mode="json", exclude_none=True)
+            args = spec["args"].model_validate(raw_args).model_dump(mode="json", exclude_none=True)
         except ValidationError as exc:
-            errors.append(f"tool_calls[{i}] ({call.tool}): bad args: {exc.errors()[:3]}")
+            errors.append(f"tool_calls[{i}] ({tool}): bad args: {exc.errors()[:3]}")
             continue
         near = (args.get("filters") or {}).get("near") or {}
         for key in ("lat", "lng"):
             if key in near and not any(abs(near[key] - n) < 1e-6 for n in asked):
                 errors.append(f"tool_calls[{i}]: coordinates must come from the question; use near.place instead")
                 break
-        calls.append({"tool": call.tool, "args": args})
+        calls.append({"tool": tool, "args": args})
     if not calls and not plan.clarification and not errors:
         errors.append("no tool_calls and no clarification")
     if errors:
@@ -160,7 +196,14 @@ class RecordsAgent:
             if refusals:
                 self._audit(db, viewer, turn_id, "nova_records_refused",
                             {"category": "role_scope", "errors": refusals})
-                return self._reply(REFUSED, " ".join(dict.fromkeys(e["message"] for e in refusals)), **base)
+                said = " ".join(dict.fromkeys(e["message"] for e in refusals))
+                if all(e["code"] == "filter_not_permitted" and e.get("field") in ASK_AGAIN_FIELDS for e in refusals):
+                    # Only the WAY of searching is closed to this role — the records are not.
+                    # Ask for a way it may search, as the keyword router does by never building
+                    # these filters for the role, so the answer is the same whichever planner ran.
+                    # A radius search stays refused: the router builds it and the tool refuses it.
+                    return self._reply(NEEDS_CLARIFICATION, f"{said} {ROLE_SEARCH_HINT}", **base)
+                return self._reply(REFUSED, said, **base)
             message = next((e["message"] for e in errors if e["code"] == "invalid_argument"), GENERIC_CLARIFICATION)
             return self._reply(NEEDS_CLARIFICATION, message, **base)
 
@@ -181,7 +224,8 @@ class RecordsAgent:
     def _plan(self, db, viewer, question, context, history, today, usage) -> tuple[dict, str]:
         max_calls = records_config.limit("max_tool_calls")
         kwargs = dict(question=question, role=access.role_of(viewer).value, today=today.isoformat(), context=context,
-                      catalogue=tools.schemas(), history=history[-records_config.limit("history_turns"):])
+                      catalogue=tools.schemas(), history=history[-records_config.limit("history_turns"):],
+                      periods=_periods(today))
         raw = llm_client.records_plan(**kwargs)
         if raw is None:
             return router.plan(db, question, viewer, context, today), "keyword"
