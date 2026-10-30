@@ -2,7 +2,9 @@
 #
 # This file drives the proposal composition engine (app/proposals/content_engine.py).
 # Grid Nova staff can edit copy, pricing, and matching rules here WITHOUT touching code.
-# Mark anything that still needs a real value with [PLACEHOLDER].
+# Mark anything that still needs a real value with [PLACEHOLDER]. Customer-facing wording
+# registered as `approved_text` (config/placeholder_registry.yaml) is used only once an
+# Admin has approved it, exactly as written, in the dashboard (BE-22).
 #
 # Structure:
 #   company / letterhead   — branding, consumed by the PDF generator
@@ -39,8 +41,18 @@ base_sections:
     enquiry, and set up the proposal that follows.]
 
   standard_terms: |
-    [PLACEHOLDER: Standard commercial terms and conditions — to be reviewed by
-    counsel before any proposal is sent.]
+    Terms and conditions
+
+    1. Price. Prices are in Indian rupees and include GST at the rates shown. If the GST rate or any statutory levy changes before invoicing, the rate notified by the Government applies.
+    2. Validity. This offer is valid for the period stated in this proposal. After that, Grid Nova may revise it.
+    3. Payment. Payment is accepted only by cheque, NEFT, RTGS or IMPS into Grid Nova Energy's current account printed in this proposal. Grid Nova never accepts cash, and no associate or employee may accept payment in their own name or account.
+    4. Site. The customer provides safe access to the site; a shadow-free roof or land able to carry the system; space for the inverter and cable routes; and water and electricity during installation.
+    5. Approvals and subsidy. Net metering, grid connection and any government subsidy are decided by the DISCOM and the government authorities. Grid Nova supports the applications but cannot guarantee their approval, amount or timing. A subsidy, where granted, is paid by the authority as the scheme provides.
+    6. Timeline. Installation dates are fixed after the advance is received and the site is ready. Delays caused by approvals, site readiness, weather or events beyond Grid Nova's control extend the timeline.
+    7. Warranty. Equipment carries its manufacturer's warranty. Grid Nova's system warranty is as stated in this proposal. Warranties do not cover misuse, changes made by others, natural calamity or theft.
+    8. Ownership and risk. Ownership of the equipment passes to the customer on full payment; risk passes on delivery to the site.
+    9. Cancellation. Cancellation after acceptance is governed by the agreement signed between the customer and Grid Nova.
+    10. Jurisdiction. These terms are governed by the laws of India. Courts at Kolkata have jurisdiction.
 
   closing: |
     [PLACEHOLDER: Closing paragraph — validity period, next steps, and contact
@@ -61,29 +73,64 @@ sections_library:
     large-scale engineering review, HT/LT integration, phased commissioning.]
 
   utility_scale_scope: |
-    [PLACEHOLDER: Scope of work for a utility-scale ground-mounted plant —
-    land preparation, mounting structures, evacuation infrastructure, grid tie-in.]
+    Scope of work — ground-mounted solar plant
+
+    Grid Nova will deliver the plant on a turnkey basis, covering the items below as detailed in the bill of quantity of this proposal:
+    • Site assessment: topographical survey, soil investigation and shadow analysis of the land provided by the customer.
+    • Engineering: plant layout; design of the module mounting structures and foundations; DC and AC electrical design; earthing and lightning protection; single-line diagram.
+    • Supply of solar modules, inverters, mounting structures, cables, combiner and distribution boxes, protection equipment, earthing and the monitoring system, of the makes stated in this proposal.
+    • Civil and installation work: foundations, structure erection, module mounting, cable trenching and laying, inverter and switchgear installation.
+    • Grid connection up to the agreed interconnection point, with support for the utility's approvals and inspections.
+    • Testing and commissioning, with a commissioning report and as-built drawings.
+    • Training of the customer's staff, and handover with operation and maintenance manuals.
+
+    Not included unless this proposal states otherwise: land purchase or lease; land levelling beyond normal site preparation; boundary wall and approach road; the evacuation line beyond the interconnection point; fees and deposits payable to authorities; and approvals that must be obtained in the customer's own name.
 
   government_scope: |
-    [PLACEHOLDER: Scope of work for a government / institutional project —
-    tender-specification alignment, documentation, and delivery milestones.]
+    Scope of work — government and institutional projects
+
+    Grid Nova will carry out the work in line with the tender or work order and the technical specification issued by the department or institution. Where this proposal and the tender documents differ, the tender documents prevail.
+    • Site survey, and design, drawings and bill of quantity for the department's approval.
+    • Supply of solar modules, inverters, mounting structures, cables, protection equipment and monitoring of the approved makes, with test certificates and warranty documents.
+    • Installation, testing and commissioning, in the presence of the department's engineer where required.
+    • Joint inspection, measurement and billing documents, and the completion certificate.
+    • Liaison with the DISCOM for net metering or grid connection, where this is part of the work order.
+    • Handover with as-built drawings, operation manuals and warranty cards, and training of the institution's nominated staff.
+
+    Delivery milestones, payment terms, performance guarantees and the defect liability period are as stated in the tender or work order.
 
   pm_surya_ghar_subsidy_note: |
     [PLACEHOLDER: PM Surya Ghar subsidy note — eligibility and how it reduces the
     effective customer cost for residential rooftop systems.]
 
   pm_kusum_note: |
-    [PLACEHOLDER: PM-KUSUM note — subsidy and eligibility for agricultural
-    solar-pump projects.]
+    About PM-KUSUM
+
+    PM-KUSUM is the Government of India's scheme for solar pumps and solar power for farmers. Financial assistance under the scheme is decided by the Ministry of New and Renewable Energy and the state's implementing agency. It depends on the scheme component, the pump capacity, the applicant's eligibility and the funds available at the time.
+
+    Grid Nova will help you apply, and will confirm with the implementing agency whether you are eligible and what assistance applies before you make any payment. Unless this proposal says otherwise, the price shown does not deduct any scheme assistance. Grid Nova cannot guarantee that an application will be approved, or how long approval will take.
 
   government_compliance_note: |
-    [PLACEHOLDER: Government compliance note — tender terms, statutory approvals,
-    and documentation requirements.]
+    Compliance
+
+    • Grid Nova will submit the documents the tender asks for, such as registration, GST and PAN certificates, experience certificates and the required declarations.
+    • Equipment will be of the makes and standards the tender specifies. Test certificates are supplied with the material, and domestic-content documents where the tender requires domestic-content equipment and this proposal states it.
+    • Earnest money, security deposit and performance guarantee are furnished as the tender requires.
+    • Work follows the applicable safety regulations and the requirements of the Central Electricity Authority, the state electricity regulator and the DISCOM.
+    • Approvals that must be obtained in the department's own name remain the department's responsibility; Grid Nova will prepare the papers and support the application.
 
   fallback_generic_scope: |
-    [PLACEHOLDER: Generic scope of work — used only when no parameter rule matches.
-    This proposal did not match a known project profile and MUST be reviewed and
-    completed manually before it is sent.]
+    Scope of work
+
+    Grid Nova will design, supply, install, test and commission the solar power system described in this proposal, including:
+    • Site survey and system design.
+    • Supply of the equipment listed in this proposal, of the stated makes.
+    • Mounting structure, cabling, protection and earthing.
+    • Installation, testing and commissioning.
+    • Support with the DISCOM's net-metering or grid-connection process, where applicable.
+    • Handover with warranty documents and a briefing on operating the system.
+
+    Anything not listed here or in the bill of quantity is outside the scope of this proposal.
 
 parameter_rules:
   # Each rule matches on lead parameters; ALL matching rules contribute their
@@ -121,20 +168,23 @@ pricing:
   tiers:
     # Matched by project_type + capacity range; first matching tier wins.
     # Ranges must not overlap for the same project_type — validated at startup.
-    # capacity_max_kw: null = no upper bound. rate_per_kw is INR/kW.
+    # capacity_max_kw: null = no upper bound. rate_per_kw is INR/kW (> 0), or null.
+    # rate_per_kw: null — Priced by staff: list-priced packages (West Bengal residential)
+    # come from config/price_list.yaml; every other proposal is priced in Proposal Studio
+    # or with adjust-pricing. A rate may be added later.
     - project_type: rooftop
       capacity_min_kw: 0
       capacity_max_kw: 10
-      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+      rate_per_kw: null
     - project_type: rooftop
       capacity_min_kw: 10
       capacity_max_kw: 100
-      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+      rate_per_kw: null
     - project_type: ground_mounted
       capacity_min_kw: 0
       capacity_max_kw: null   # null = no upper bound
-      rate_per_kw: 0          # [PLACEHOLDER — real INR/kW]
+      rate_per_kw: null
   segment_modifiers:
     # Multiplicative modifier applied after the base tier rate, if the lead's
     # segment matches — e.g. 0.95 = 5% reduction. 1.0 = no change.
-    government: 1.0           # [PLACEHOLDER — confirm real modifier with Grid Nova]
+    government: 1.0

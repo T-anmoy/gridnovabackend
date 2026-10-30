@@ -121,7 +121,7 @@ def serialize(db: Session, warranty: Optional[ProjectWarranty]) -> Optional[dict
                    "ends": warranty.system_warranty_end.isoformat(), "active": now <= warranty.system_warranty_end},
         "om": {"free_months": warranty.om_free_months, "free_until": warranty.om_free_until.isoformat(),
                "free_period_active": now <= warranty.om_free_until,
-               "terms_after_free_period": None if _is_dummy(cfg["om_after_free_terms"]) else cfg["om_after_free_terms"]},
+               "terms_after_free_period": cfg["om_after_free_terms"] if _om_terms_approved(db, cfg) else None},
         "panel_performance_life_years": warranty.panel_performance_life_years,
         "units": [{"unit_id": unit.id, "category": item.category, "serial_number": unit.serial_number,
                    "make": unit.brand_as_printed, "model": unit.model_as_printed, "equipment_id": unit.equipment_id,
@@ -132,6 +132,9 @@ def serialize(db: Session, warranty: Optional[ProjectWarranty]) -> Optional[dict
     }
 
 
-def _is_dummy(text: str) -> bool:
-    from app.placeholders.registry import MARKERS
-    return bool(MARKERS.search(text))
+def _om_terms_approved(db: Session, cfg: dict) -> bool:
+    """The O&M terms are shown only when they are not a dummy and an Admin has approved
+    them exactly as they stand (registry HW-OM, BE-22)."""
+    from app.placeholders import registry
+    terms = str(cfg["om_after_free_terms"])
+    return not registry.MARKERS.search(terms) and registry.text_is_approved("HW-OM", db, text=terms)

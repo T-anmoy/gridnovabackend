@@ -375,6 +375,7 @@ class TestDraftedDocument:
         assert page["document"]["total"] == f["total"] and page["price"] == float(f["total"])
         assert page["document"]["reference"] == db_session.get(Proposal, pid).document_reference
 
+    @pytest.mark.launch_texts_unapproved      # BE-22: drafted government text, not yet approved
     def test_uncovered_segment_keeps_manual_review(self, client, _isolated_db):
         pid = _draft(client, _isolated_db, segment="government", capacity_kw=40)
         view = document(client, pid)

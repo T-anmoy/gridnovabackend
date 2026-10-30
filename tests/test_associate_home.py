@@ -53,8 +53,10 @@ class TestFeed:
         db_session.add(proposal)
         db_session.commit()
         advance_to(db_session, oid, ProjectStage.accepted)
+        from app.onboarding import agreement
         db_session.add(CustomerAgreement(onboarding_id=oid, proposal_id=proposal.id, agreement_storage_key="k",
-                                         generated_at=datetime.now(timezone.utc), generated_by="emp-sales-1"))
+                                         generated_at=datetime.now(timezone.utc), generated_by="emp-sales-1",
+                                         wording_sha256=agreement._wording_sha256()))   # approved wording (BE-22)
         db_session.commit()
         _, items = _feed(client, gna)
         assert (oid, "formal_proposal_ready") not in items and (oid, "upload_signed_agreement") in items
@@ -88,7 +90,6 @@ class TestFeed:
         with pytest.MonkeyPatch.context() as mp:
             mp.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "G", "bank_name": "B",
                                                 "account_number": "1", "ifsc": "I"})
-            mp.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a tax invoice."})
             client.post(f"{PAY}/{pid}/verify", headers=ACCOUNTS)
         _, items = _feed(client, gna)
         assert (oid, "payment_due") not in items
@@ -197,11 +198,12 @@ class TestAssociateEmails:
         assert mail["event_type"] == "associate_stage_rejected" and "Wrong reference." in " ".join(mail["lines"])
         assert mail["link_url"].endswith(f"/associates/portal/customers/{oid}")
 
+    @pytest.mark.launch_texts_unapproved
     def test_payment_verified_link_only_when_not_held(self, client, db_session, onboarding_ready, stub_pdf,
                                                       notifications):
         gna, oid = accepted_customer(client, db_session)
         pid = record(client, ACCOUNTS, oid, neft(), staff=True).json()["payment_id"]
-        client.post(f"{PAY}/{pid}/verify", headers=ACCOUNTS)   # shipped config: DUMMY → held
+        client.post(f"{PAY}/{pid}/verify", headers=ACCOUNTS)   # receipt wording not approved → held
         [mail] = notifications.of("associate_email")
         assert mail["event_type"] == "associate_payment_verified" and mail["link_url"] is None
         assert "20000.00" in mail["lines"][0]

@@ -492,6 +492,8 @@ def get_payout_batch(batch_id: int, db: Session = Depends(get_db),
 
 class ApproveBatchIn(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=2000)
+    # Required (true) when the batch lists a tds_review (BE-22).
+    tds_review_acknowledged: bool = False
 
 
 @router.post("/payout-batches/{batch_id}/approve", responses={202: {"description": "Waiting for a second approval (pending_approval)"}})
@@ -500,13 +502,22 @@ def approve_payout_batch(batch_id: int, body: Optional[ApproveBatchIn] = None, d
     """Accounts/Admin, never the preparer (an Admin may, with a reason). With second
     approval on: 202, approved when a second person who processes commissions agrees."""
     _processor(employee)
-    _batch(db, batch_id)
+    batch = _batch(db, batch_id)
+    acknowledged = bool(body and body.tds_review_acknowledged)
     if access.second_approval_required("payouts.batch_approve"):
+        review = payouts.tds_review(db, batch)
+        if review and not acknowledged:
+            raise HTTPException(status_code=409, detail={
+                "code": "tds_review_required", "field": "tds_review_acknowledged", "tds_review": review,
+                "message": "Some associates' commission this financial year is above the TDS threshold while no TDS "
+                           "is deducted. Confirm with your Chartered Accountant, then acknowledge."})
         return _deferred(db, employee, "payouts.batch_approve", f"Approve payout batch #{batch_id}",
                          {"batch_id": batch_id, "reason": body.reason if body else None,
-                          "segregation_override": employee.holds("payouts.segregation_override")})
+                          "segregation_override": employee.holds("payouts.segregation_override"),
+                          "tds_review_acknowledged": acknowledged})
     batch = _act(db, lambda: payouts.approve(db, batch_id, employee.employee_id, is_admin=employee.holds("payouts.segregation_override"),
-                                             reason=body.reason if body else None))
+                                             reason=body.reason if body else None,
+                                             tds_review_acknowledged=acknowledged))
     return payouts.batch_json(db, batch, with_lines=True)
 
 
@@ -517,6 +528,8 @@ class PaidLineIn(BaseModel):
 
 class MarkPaidIn(BaseModel):
     lines: list[PaidLineIn] = Field(max_length=5000)
+    # Required (true) when the batch lists a tds_review (BE-22).
+    tds_review_acknowledged: bool = False
 
 
 @router.post("/payout-batches/{batch_id}/mark-paid")
@@ -526,7 +539,8 @@ def mark_payout_batch_paid(batch_id: int, body: MarkPaidIn, db: Session = Depend
     _processor(employee)
     _batch(db, batch_id)
     refs = {ln.associate_id: ln.bank_reference for ln in body.lines}
-    batch = _act(db, lambda: payouts.mark_paid(db, batch_id, employee.employee_id, refs))
+    batch = _act(db, lambda: payouts.mark_paid(db, batch_id, employee.employee_id, refs,
+                                               tds_review_acknowledged=body.tds_review_acknowledged))
     return payouts.batch_json(db, batch, with_lines=True)
 
 

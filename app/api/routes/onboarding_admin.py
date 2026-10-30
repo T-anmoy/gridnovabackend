@@ -271,7 +271,7 @@ def generate_agreement(onboarding_id: int, db: Session = Depends(get_db),
         db.rollback()
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
     db.commit()
-    return {**agreement.serialize(record), "links": agreement.links(record)}
+    return {**agreement.serialize(record, db), "links": agreement.links(record, db)}
 
 
 @router.get("/onboardings/{onboarding_id}/agreement")
@@ -283,12 +283,12 @@ def get_agreement(onboarding_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=403, detail="Your role cannot view associate-sourced customers.")
     onboarding = _load(db, employee, onboarding_id)
     record = agreement.get(db, onboarding)
-    links = agreement.links(record)
+    links = agreement.links(record, db)
     if links:
         from app.onboarding.service import audit_document_link
         audit_document_link(db, onboarding, employee.employee_id, "agreement", ",".join(sorted(links)))
         db.commit()
-    return {**agreement.serialize(record), "links": links}
+    return {**agreement.serialize(record, db), "links": links}
 
 
 @router.post("/onboardings/{onboarding_id}/agreement/signed")

@@ -189,7 +189,8 @@ payments:
       account_number: "50200122914495"
       account_type: "Current"
       ifsc: "HDFC0005385"
-    # P6 — receipt wording.
+    # P6 — receipt wording, drafted for Grid Nova (BE-22). Receipts are held until an
+    # Admin approves this exact text in the dashboard.
     wording:
-      heading: "DUMMY — receipt heading to be supplied by Grid Nova"
-      footer: "DUMMY — receipt footer to be supplied by Grid Nova. This is a payment receipt, not a GST tax invoice."
+      heading: "PAYMENT RECEIPT"
+      footer: "This receipt confirms that Grid Nova Energy has received the payment shown above in its bank account. It is not a GST tax invoice; the tax invoice is issued separately. Grid Nova never accepts cash or payment to any individual. Questions: info@gridnova.in · +91 98747 74440"

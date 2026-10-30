@@ -187,10 +187,37 @@ location:
 
 # The customer agreement, printed on ₹10 non-judicial stamp paper (app/onboarding/agreement.py).
 # The generated PDF carries the parties and project details; the agreement's own
-# wording is Grid Nova's to supply.
+# wording is below — drafted for Grid Nova (BE-22), registry ONB-5. No agreement is
+# generated or served until an Admin approves this exact text after legal review.
 agreement:
-  body: >-
-    [PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]
+  body: |
+    This Agreement is made on the date stated above between Grid Nova Energy, a partnership firm with its office at Plot No. 83, Kasba Industrial Estate, Phase II, Kolkata – 700107 ("Grid Nova"), and the Customer named above ("the Customer"), for the solar power system described above ("the System").
+
+    1. Scope. Grid Nova will design, supply, install, test and commission the System as set out in the accepted proposal named above, which forms part of this Agreement. Anything not in the accepted proposal is outside this Agreement unless both parties agree to it in writing.
+
+    2. Price. The project value is the amount stated above and in the accepted proposal, including GST at the rates shown there.
+
+    3. Payment. The Customer will pay in the stages stated in the accepted proposal. Payment is made only by cheque, NEFT, RTGS or IMPS into Grid Nova Energy's current account printed in the proposal and on Grid Nova's receipts. Grid Nova never accepts cash. No associate or employee may accept payment in their own name or account. Grid Nova issues a receipt for every payment received in its account.
+
+    4. Customer's responsibilities. The Customer will give safe access to the site; a roof or land able to carry the System; space for the inverter and cable routes; water and electricity during installation; and the documents needed for approvals. The Customer confirms that they own the site or have the owner's permission to install the System.
+
+    5. Timeline. Grid Nova will agree the installation date with the Customer after the advance is received and the site is ready. Time taken by the DISCOM or government authorities, site delays, weather or events beyond Grid Nova's control extends the timeline.
+
+    6. Net metering and subsidy. Grid Nova will help the Customer apply for net metering and, where the Customer is eligible and chooses to apply, for government subsidy. Approval, amount and timing are decided by the DISCOM and the authorities, and Grid Nova does not guarantee them. The project value is payable whether or not a subsidy is granted. A subsidy, where granted, is paid by the authority as the scheme provides.
+
+    7. Warranty and maintenance. Equipment carries its manufacturer's warranty. Grid Nova gives a system warranty on its workmanship for the period stated in the accepted proposal, and free operation and maintenance support for the first twelve months after commissioning. After that, maintenance is available under Grid Nova's terms in force at the time. Warranties do not cover misuse, changes made by others, natural calamity or theft.
+
+    8. Ownership and risk. Ownership of the System passes to the Customer on full payment. Risk of loss passes to the Customer on delivery to the site.
+
+    9. Cancellation. If the Customer cancels before material is dispatched, Grid Nova will refund the amount received, less costs already incurred for survey, design and applications, within 30 days, to the account the payment came from. After material is dispatched, cancellation is only by written agreement of both parties.
+
+    10. Associates. Where a Grid Nova Associate introduced the Customer, the Associate acts only as an introducer. An Associate cannot change the price or the terms, promise a subsidy, or accept payment.
+
+    11. Information. The Customer has been shown Grid Nova's Customer Information Notice, which explains how the Customer's information is used.
+
+    12. Disputes. The parties will first try to settle any dispute by discussion. This Agreement is governed by the laws of India, and courts at Kolkata have jurisdiction.
+
+    13. Whole agreement. This Agreement, together with the accepted proposal, is the whole agreement between the parties for the System.
   # Blank space left at the top of page 1 for the stamp paper's own printed header.
   stamp_paper_top_margin_mm: 100   # [PLACEHOLDER] — confirm against the paper Grid Nova uses
 

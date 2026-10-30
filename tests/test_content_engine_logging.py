@@ -7,7 +7,9 @@ Phase 7 content-engine visibility fixes:
 """
 import logging
 
-from app.proposals.content_engine import compose_content, validate_content_config
+import pytest
+
+from app.proposals.content_engine import ProposalConfigError, compose_content, validate_content_config
 
 _BASE_CFG = {
     "company": {"name": "Grid Nova Energy"},
@@ -22,7 +24,7 @@ _BASE_CFG = {
          "contributes": ["residential_rooftop_scope"]},
     ],
     "pricing": {
-        "tiers": [{"project_type": "rooftop", "capacity_min_kw": 0, "capacity_max_kw": None, "rate_per_kw": 0}],
+        "tiers": [{"project_type": "rooftop", "capacity_min_kw": 0, "capacity_max_kw": None, "rate_per_kw": None}],
         "segment_modifiers": {},
     },
 }
@@ -63,10 +65,21 @@ class TestFallbackReasonLogging:
 
 
 class TestPlaceholderPricingWarning:
-    def test_zero_rate_tier_logs_prominent_warning(self, caplog):
+    """BE-22: a tier's rate is positive or null (no automatic price) — never ₹0."""
+
+    @pytest.mark.parametrize("rate", [0, 0.0, -5, "45000", True])
+    def test_zero_or_invalid_rate_is_refused(self, rate):
+        cfg = {**_BASE_CFG, "pricing": {
+            "tiers": [{"project_type": "rooftop", "capacity_min_kw": 0, "capacity_max_kw": None, "rate_per_kw": rate}],
+            "segment_modifiers": {},
+        }}
+        with pytest.raises(ProposalConfigError, match="positive INR/kW or null"):
+            validate_content_config(cfg)
+
+    def test_null_rate_is_valid_and_silent(self, caplog):
         with caplog.at_level(logging.WARNING, logger="app.proposals.content_engine"):
             validate_content_config(_BASE_CFG)
-        assert any("PLACEHOLDER" in r.message for r in caplog.records)
+        assert not caplog.records
 
     def test_real_rate_tier_does_not_warn(self, caplog):
         cfg = {**_BASE_CFG, "pricing": {

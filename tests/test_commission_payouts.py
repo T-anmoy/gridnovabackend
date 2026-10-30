@@ -112,13 +112,88 @@ class TestFinancialYear:
         assert body["financial_year"] == "2026-27"
         ln = line_of(body, owner)
         assert (ln["gross"], ln["taxable"], ln["tds"], ln["net"]) == ("30000.00", "30000.00", "0.00", "30000.00")
-        assert approve(client, body["batch_id"]).status_code == 200
-        assert pay(client, body["batch_id"], {owner: "NEFT-1"}).status_code == 200
+        # 30,000 is above the 20,000 threshold with no TDS deducted (BE-22): acknowledged.
+        assert [r["associate_id"] for r in body["tds_review"]] == [owner]
+        assert approve(client, body["batch_id"], tds_review_acknowledged=True).status_code == 200
+        assert client.post(f"{BATCHES}/{body['batch_id']}/mark-paid", headers=ACCOUNTS, json={
+            "lines": [{"associate_id": owner, "bank_reference": "NEFT-1"}],
+            "tds_review_acknowledged": True}).status_code == 200
         at(monkeypatch, datetime(2027, 4, 2, tzinfo=UTC), date(2027, 5, 5))
         april = batch(client, "2027-04").json()
         assert april["financial_year"] == "2027-28"
         ln = line_of(april, owner)
         assert (ln["gross"], ln["tds"], ln["fy_taxable_before"]) == ("10000.00", "0.00", "0.00")   # threshold resets
+
+
+class TestTdsReview:
+    """BE-22: with no TDS deducted (rate 0), a batch flags every associate whose taxable
+    commission this financial year is above the threshold; approving and marking it paid
+    need an acknowledgement, recorded in the audit log. Facts only — no rate, no section."""
+
+    def _batch(self, client, db_session, owner_oid, monkeypatch, amount):
+        owner, oid = owner_oid
+        publish(db_session, overrides={"personal_sale.associate.sales": "50"})
+        at(monkeypatch, datetime(2026, 9, 10, tzinfo=UTC), date(2026, 10, 5))
+        record_and_verify(client, oid, amount, "UTR-TDS")
+        approve_all(client, db_session)
+        r = batch(client, "2026-09")
+        assert r.status_code == 201, r.text
+        return owner, r.json()
+
+    def test_under_the_threshold_no_review(self, client, db_session, owner_oid, monkeypatch):
+        owner, body = self._batch(client, db_session, owner_oid, monkeypatch, "21780.00")   # 10,000
+        assert body["tds_review"] == []
+        assert approve(client, body["batch_id"]).status_code == 200
+        assert pay(client, body["batch_id"], {owner: "NEFT-1"}).status_code == 200
+
+    def test_over_the_threshold_needs_an_acknowledgement(self, client, db_session, owner_oid, monkeypatch):
+        owner, body = self._batch(client, db_session, owner_oid, monkeypatch, "65340.00")   # 30,000
+        [review] = body["tds_review"]
+        assert (review["associate_id"], review["fy_to_date"], review["threshold"]) == (owner, "30000.00", "20000.00")
+        assert review["message"] == ("This associate's commission this financial year is above ₹20,000. Grid Nova "
+                                     "currently deducts no TDS. Confirm with your Chartered Accountant before paying.")
+        assert line_of(body, owner)["tds"] == "0.00"
+        refused = approve(client, body["batch_id"])
+        assert refused.status_code == 409 and refused.json()["detail"]["code"] == "tds_review_required"
+        assert refused.json()["detail"]["tds_review"][0]["associate_id"] == owner
+        assert db_session.get(PayoutBatch, body["batch_id"]).status == PayoutBatchStatus.draft
+
+        assert approve(client, body["batch_id"], tds_review_acknowledged=True).status_code == 200
+        refused = pay(client, body["batch_id"], {owner: "NEFT-1"})
+        assert refused.status_code == 409 and refused.json()["detail"]["code"] == "tds_review_required"
+        paid = client.post(f"{BATCHES}/{body['batch_id']}/mark-paid", headers=ACCOUNTS, json={
+            "lines": [{"associate_id": owner, "bank_reference": "NEFT-1"}], "tds_review_acknowledged": True})
+        assert paid.status_code == 200 and paid.json()["status"] == "paid"
+        acks = db_session.execute(select(AuditLog).where(AuditLog.action == "tds_review_acknowledged")
+                                  .order_by(AuditLog.id)).scalars().all()
+        assert [(a.after_value["step"], a.performed_by) for a in acks] == [
+            ("approve", ACCOUNTS_2["X-Employee-Id"]), ("mark_paid", ACCOUNTS["X-Employee-Id"])]
+        assert acks[0].after_value["associates"] == [{"associate_id": owner, "fy_to_date": "30000.00",
+                                                      "threshold": "20000.00"}]
+
+    def test_second_approval_carries_the_acknowledgement(self, client, db_session, owner_oid, monkeypatch):
+        from app.auth import access
+        monkeypatch.setattr(access, "second_approval_required", lambda key: key == "payouts.batch_approve")
+        owner, body = self._batch(client, db_session, owner_oid, monkeypatch, "65340.00")
+        refused = approve(client, body["batch_id"])
+        assert refused.status_code == 409 and refused.json()["detail"]["code"] == "tds_review_required"
+        deferred = approve(client, body["batch_id"], tds_review_acknowledged=True)
+        assert deferred.status_code == 202, deferred.text
+
+    def test_with_a_tds_rate_the_existing_deduction_applies_and_no_review(self, client, db_session, owner_oid,
+                                                                          monkeypatch):
+        from app.commissions import config as commission_config
+        monkeypatch.setitem(commission_config.tds(), "rate_percent", "2")
+        monkeypatch.setitem(commission_config.tds(), "no_pan_rate_percent", "2")
+        owner, body = self._batch(client, db_session, owner_oid, monkeypatch, "65340.00")
+        assert body["tds_review"] == []
+        assert line_of(body, owner)["tds"] == "600.00"              # 2 % of 30,000 (the test's stand-in rate)
+        assert approve(client, body["batch_id"]).status_code == 200
+
+    def test_indian_grouping_of_the_threshold(self):
+        assert payouts._inr_whole(D("20000")) == "20,000"
+        assert payouts._inr_whole(D("1234567")) == "12,34,567"
+        assert payouts._inr_whole(D("999")) == "999"
 
 
 class TestWorkedExample1:

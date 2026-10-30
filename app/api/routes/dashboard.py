@@ -915,7 +915,7 @@ class AdjustPricingRequest(BaseModel):
     """Exactly one of: new_value (the total including GST — the original field),
     basic_price (before GST; GST 8.9% and the total are computed) or rate_per_kwp
     (× the document's capacity). basic_price / rate_per_kwp need a BE-13 document."""
-    new_value: Optional[float] = Field(default=None, ge=0)
+    new_value: Optional[float] = Field(default=None, gt=0)   # never ₹0 (BE-22)
     basic_price: Optional[Decimal] = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     rate_per_kwp: Optional[Decimal] = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     reason: str = Field(min_length=1)
@@ -1057,7 +1057,7 @@ def send_proposal(
     # Approval is internal and may happen on draft copy; what reaches the customer
     # may not. Blocked until every section is real and there is a real price.
     from app.proposals.send_guard import placeholder_problem, reverification_problem
-    problem = placeholder_problem(proposal) or reverification_problem(proposal)
+    problem = placeholder_problem(proposal, db) or reverification_problem(proposal)
     if problem:
         raise HTTPException(status_code=409, detail=problem)
 

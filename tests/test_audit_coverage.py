@@ -67,15 +67,18 @@ def test_every_new_mutation_is_audited(client, db_session, onboarding_ready, stu
     pid = record(client, headers(gna2), oid2, cheque()).json()["payment"]["payment_id"]
     proof(client, gna2, oid2, pid)
     client.post(f"{PAY}/{pid}/deposit", headers=ACCOUNTS)
+    # Wording nobody approved holds the receipt (BE-22), so release-held has one to release.
+    from app.execution import config
+    receipt_cfg = config.payments()["receipt"]
+    approved_wording = receipt_cfg["wording"]
+    monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a tax invoice."})
     assert client.post(f"{PAY}/{pid}/verify", headers=ACCOUNTS).status_code == 200
     client.post(f"{PAY}/{pid}/dishonour", json={"reason": "Returned."}, headers=ACCOUNTS)
     other = record(client, headers(gna2), oid2, neft(reference="UTR-AUD")).json()["payment"]["payment_id"]
     client.post(f"{pay_url(oid2)}/{other}/cancel", json={"reason": "Duplicate."}, headers=headers(gna2))
-    from app.execution import config
-    receipt_cfg = config.payments()["receipt"]
     monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "G", "bank_name": "B",
                                                  "account_number": "1", "ifsc": "I"})
-    monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a tax invoice."})
+    monkeypatch.setitem(receipt_cfg, "wording", approved_wording)
     client.post(f"{DASH}/payment-receipts/release-held", headers=ACCOUNTS)
 
     # Follow-ups: admin override, mode switch (on a third, associate-mode project), and an

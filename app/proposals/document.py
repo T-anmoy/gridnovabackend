@@ -520,15 +520,24 @@ def missing_required(doc: ProposalDocument, figs: Optional[dict] = None) -> list
         keys = document_config.load()["uncovered_segments"].get(doc.coverage, [])
         if any(_open_section(k) for k in keys):
             out.append({"field": "segment_text",
-                        "message": f"Grid Nova's text for {doc.coverage} proposals (still a placeholder in "
-                                   f"config/proposal_content.yaml: {', '.join(keys)})"})
+                        "message": f"Grid Nova's text for {doc.coverage} proposals (a placeholder, or not yet "
+                                   f"approved in the dashboard: {', '.join(keys)})"})
     return out
 
 
 def _open_section(key: str) -> bool:
+    """The segment's text is still missing: absent, a placeholder, or (BE-22) wording an
+    Admin has not approved exactly as it stands."""
     from app.proposals import content_engine
-    value = (content_engine.load_content_config().get("sections_library") or {}).get(key.split(".", 1)[1])
-    return value is None or bool(_MARKERS.search(str(value)))
+    section_id = key.split(".", 1)[1]
+    value = (content_engine.load_content_config().get("sections_library") or {}).get(section_id)
+    if value is None or bool(_MARKERS.search(str(value))):
+        return True
+    entry_id = content_engine.section_entry(section_id)
+    if entry_id is None:
+        return False
+    from app.placeholders import registry
+    return not registry.text_is_approved(entry_id, text=str(value))
 
 
 # ── Building it ──────────────────────────────────────────────────────────────────

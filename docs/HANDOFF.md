@@ -228,6 +228,18 @@ themselves (`POST /api/v1/associate/me/claim`). Clerk sign-up must stay open. No
 Contracts: `docs/api/access_control.md`, `docs/api/associate_journeys.md`;
 steps: `deploy/PRODUCTION_ENV_GUIDE.md` §5.
 
+**BE-22 (31 Oct 2026) — launch content.** The nine open customer-facing texts (proposal
+terms, five scope/notes, the customer agreement, receipt wording, O&M after year one) are
+now drafted wording in the config files, but nothing uses them until an Admin approves each
+exact text in the dashboard (registry probe `approved_text`; the approval stores the text's
+SHA-256, so editing the text lapses it; the terms and the agreement also need the legal-review
+tick). Until then proposals, agreements, receipts and handover packs that use them are held,
+and the customer agreement can no longer be printed with placeholder text. Per-kW tiers are
+`null` ("Price to be set by Grid Nova"), never ₹0, and adjust-pricing refuses 0. Payout batches
+flag associates above the TDS threshold while no TDS is deducted, and need an acknowledgement.
+Migration 0059. Contract: `docs/api/launch_content.md`; Grid Nova's remaining actions:
+`docs/nova-training/02_GRID_NOVA_DATA_REQUEST.md` §E.
+
 ---
 
 ## 8. Known issues and risks

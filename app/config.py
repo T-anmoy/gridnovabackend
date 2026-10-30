@@ -369,12 +369,18 @@ def production_config_problems(s: Settings) -> tuple[list[str], list[str]]:
                         "— associates record customers' acknowledgement of placeholder text")
     if onboarding_config.agreement_is_placeholder():
         warnings.append("config/associate_onboarding.yaml: agreement.body is a [PLACEHOLDER] "
-                        "— customer agreements are generated with placeholder text")
+                        "— no customer agreement can be generated until it is replaced and approved")
     try:
         from app.memory.db import SessionLocal
         from app.placeholders import registry
         with SessionLocal() as db:
             blockers = registry.unresolved_launch_blockers(db)
+            drafted = registry.drafted_not_approved(db)
+        if drafted:
+            # Safe to boot: every use of these texts is held until it is approved.
+            warnings.append(f"drafted wording not yet approved by an Admin: {', '.join(drafted)} — proposals, "
+                            "agreements, receipts and handover packs using it are held; approve it in the "
+                            "dashboard (GET /api/v1/dashboard/placeholders)")
         if blockers:
             warnings.append(f"{blockers} launch-blocking placeholder(s) unresolved — "
                             "see GET /api/v1/dashboard/placeholders or scripts/list_placeholders.py")

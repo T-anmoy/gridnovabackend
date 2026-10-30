@@ -71,10 +71,9 @@ estimate:
 queries:
   # Policy 4.8: raise a query "within [30] days of it appearing"; Grid Nova responds
   # "within [15] working days".
-  # window_days (30) confirmed by Grid Nova, 15 Oct 2026. response_working_days (15) is
-  # still the draft value: the response time was not asked.
-  # [UNCONFIRMED] response_working_days — draft value from the policy (C5-8)
+  # window_days (30) confirmed by Grid Nova, 15 Oct 2026.
   window_days: 30
+  # 15 — as published in the Commission & Payout Policy 4.8 (website, effective 23 Oct 2026)
   response_working_days: 15
   # Working days for the response deadline (0 = Monday … 6 = Sunday). Public holidays
   # are not modelled.

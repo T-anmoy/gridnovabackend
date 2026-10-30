@@ -163,6 +163,8 @@ STAFF = {
     ("POST", "/api/v1/dashboard/internal/check-service-requests"): (ADMIN_ONLY, {}),
     ("GET", "/api/v1/dashboard/placeholders"): ({"admin", "management"}, {}),
     ("POST", "/api/v1/dashboard/placeholders/{entry_id}/resolve"): (ADMIN_ONLY, {"json": {"note": "x"}}),
+    ("POST", "/api/v1/dashboard/placeholders/{entry_id}/approve"): (ADMIN_ONLY, {"json": {"content_sha256": "0" * 64}}),
+    ("POST", "/api/v1/dashboard/placeholders/{entry_id}/revoke"): (ADMIN_ONLY, {"json": {"note": "x"}}),
     ("GET", "/api/v1/dashboard/execution"): (EXECUTION_READERS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/execution"): (EXECUTION_READERS, {}),
     ("GET", "/api/v1/dashboard/onboardings/{onboarding_id}/execution/files/{file_ref}"): (EXECUTION_READERS, {}),

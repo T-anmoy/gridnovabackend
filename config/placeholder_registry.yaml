@@ -15,6 +15,10 @@
 #     setting_equals        an environment setting still equals dummy_value
 #     count_query           a named database check still finds dummy rows
 #     manual                open until an admin marks it resolved (with a note)
+#     approved_text         wording a customer or associate reads: resolved only when the
+#                           text has no marker AND an Admin approved exactly this text
+#                           (its SHA-256) in the dashboard; editing it lapses the approval.
+#                           legal_review_required: true → approval needs the legal-review tick.
 #   location  YAML: {file, key} — `{other.key}` in a key is read from the same file.
 #             Python: {file, symbols}. Settings: {env}.
 #
@@ -49,13 +53,14 @@ entries:
   - id: PRO-2
     area: proposals
     location: {file: config/proposal_content.yaml, key: base_sections.standard_terms}
-    description: Standard commercial terms and conditions in every proposal.
+    description: "Standard terms and conditions (composed proposals; BE-13 documented proposals do not print them)."
     dummy_value: "[PLACEHOLDER: Standard commercial terms and conditions …]"
-    needed_from_grid_nova: Please supply the standard terms and conditions (reviewed by counsel) for proposals.
+    needed_from_grid_nova: "Have Grid Nova's legal adviser review the drafted wording, then approve it in the dashboard with the legal-review tick."
     blocking: blocks_launch
-    probe: yaml_contains_marker
-    status: partially_resolved
-    status_note: "The samples carry Grid Nova's commercial notes, warranty and customer scope (config/proposal_document.yaml), and a proposal with a document is no longer held for this section. They do not carry counsel-reviewed terms and conditions: still needed if Grid Nova wants them in proposals."
+    probe: approved_text
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
+    legal_review_required: true
   - id: PRO-3
     area: proposals
     location: {file: config/proposal_content.yaml, key: base_sections.closing}
@@ -99,19 +104,25 @@ entries:
   - id: PRO-7
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.utility_scale_scope}
-    description: Scope of work for utility-scale ground-mounted proposals.
+    description: "Scope of work for utility-scale ground-mounted proposals."
     dummy_value: "[PLACEHOLDER: Scope of work for a utility-scale ground-mounted plant …]"
-    needed_from_grid_nova: Please supply the scope-of-work text for utility-scale ground-mounted plants.
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: PRO-8
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.government_scope}
-    description: Scope of work for government / institutional proposals.
+    description: "Scope of work for government / institutional proposals."
     dummy_value: "[PLACEHOLDER: Scope of work for a government / institutional project …]"
-    needed_from_grid_nova: Please supply the scope-of-work text for government and institutional projects.
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: PRO-9
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.pm_surya_ghar_subsidy_note}
@@ -125,37 +136,46 @@ entries:
   - id: PRO-10
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.pm_kusum_note}
-    description: PM-KUSUM note in agricultural proposals.
+    description: "PM-KUSUM note in agricultural proposals."
     dummy_value: "[PLACEHOLDER: PM-KUSUM note …]"
-    needed_from_grid_nova: Please supply the PM-KUSUM note (subsidy and eligibility) for agricultural projects.
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: PRO-11
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.government_compliance_note}
-    description: Compliance note in government proposals.
+    description: "Compliance note in government proposals."
     dummy_value: "[PLACEHOLDER: Government compliance note …]"
-    needed_from_grid_nova: Please supply the compliance note for government projects (tender terms, statutory approvals).
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: PRO-12
     area: proposals
     location: {file: config/proposal_content.yaml, key: sections_library.fallback_generic_scope}
-    description: Generic scope of work, used only when no rule matches a project.
+    description: "Generic scope of work, used only when no rule matches a project. A proposal that falls back to it still needs staff to classify it before it can be sent (manual_review_required)."
     dummy_value: "[PLACEHOLDER: Generic scope of work …]"
-    needed_from_grid_nova: Please supply a generic scope-of-work paragraph for projects that fit no other category.
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: PRO-13
     area: proposals
     location: {file: config/proposal_content.yaml, key: pricing.tiers}
-    description: Formal-proposal price per kW for each capacity tier (all three are 0).
+    description: "Formal-proposal price per kW for each capacity tier (rate_per_kw: null — no automatic price)."
     dummy_value: {rooftop_0_10kw: 0, rooftop_10_100kw: 0, ground_mounted: 0}
     needed_from_grid_nova: What is the price per kW (INR) for rooftop 0–10 kW, rooftop 10–100 kW, and ground-mounted projects?
     blocking: blocks_launch
     probe: yaml_contains_marker
-    status: superseded
-    status_note: "For list-priced proposals the price comes from Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); the per-kW tiers apply only to configurations outside the price list."
+    status: resolved
+    status_note: "Resolved: manual pricing by design (BE-22). List-priced packages come from config/price_list.yaml; every other proposal is priced by staff in Proposal Studio or with adjust-pricing, and is never sent without a price (missing_total_value). A rate may be added later."
   - id: PRO-14
     area: proposals
     location: {file: config/proposal_content.yaml, key: pricing.segment_modifiers}
@@ -164,8 +184,8 @@ entries:
     needed_from_grid_nova: Do government customers get a different price per kW, and if so by what percentage?
     blocking: tunable
     probe: yaml_contains_marker
-    status: superseded
-    status_note: "For list-priced proposals the price comes from Grid Nova's Pricing & Equipment Master Data v1 (config/price_list.yaml, source PDF sha256 ede4d3dc…); segment modifiers apply only outside the price list."
+    status: resolved
+    status_note: "Resolved (BE-22): 1.0 means no change, and the tiers carry no automatic rate."
 
   - id: PRO-15
     area: proposals
@@ -536,11 +556,14 @@ entries:
   - id: ONB-5
     area: onboarding
     location: {file: config/associate_onboarding.yaml, key: agreement.body}
-    description: Wording of the customer agreement printed on stamp paper.
+    description: "Wording of the customer agreement printed on stamp paper. No agreement is generated or served while it is not approved."
     dummy_value: "[PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]"
-    needed_from_grid_nova: Please supply the customer agreement text (reviewed by counsel).
+    needed_from_grid_nova: "Have Grid Nova's legal adviser review the drafted wording, then approve it in the dashboard with the legal-review tick."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: true
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: ONB-6
     area: onboarding
     location: {file: config/associate_onboarding.yaml, key: agreement.stamp_paper_top_margin_mm}
@@ -749,11 +772,14 @@ entries:
   - id: P6
     area: payments
     location: {file: config/execution_payments.yaml, key: payments.receipt.wording}
-    description: Receipt heading and footer.
+    description: "Receipt heading and footer. Receipts are held (wording_not_approved) while it is not approved."
     dummy_value: DUMMY heading and footer
-    needed_from_grid_nova: Please supply the wording for payment receipts, and say whether customers also need GST tax invoices.
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: P7
     area: payments
     location: {env: [ACCOUNTS_NOTIFY_EMAILS, OPERATIONS_NOTIFY_EMAILS]}
@@ -1196,6 +1222,8 @@ entries:
     needed_from_grid_nova: Within how many days may an associate query a commission entry, and within how many working days will Grid Nova respond?
     blocking: blocks_launch
     probe: yaml_contains_marker
+    status: resolved
+    status_note: "15 working days — as published in the Commission & Payout Policy 4.8 (website, effective 23 Oct 2026); the 30-day window was confirmed 15 Oct 2026. For the owner to confirm, since the published policy is what makes it binding."
   - id: C5-9
     area: policies
     location: {file: config/commissions.yaml, key: queries.working_weekdays}
@@ -1307,11 +1335,14 @@ entries:
   - id: HW-OM
     area: policies
     location: {file: config/handover_warranty.yaml, key: warranty.om_after_free_terms}
-    description: "O&M terms after the first free year, printed on the handover pack. The pack is held (not rendered or emailed) while this is a dummy."
+    description: "O&M terms after the first free year, printed on the handover pack and shown in the portals. The pack is held while it is not approved."
     dummy_value: "DUMMY - O&M terms after the first free year to be supplied by Grid Nova"
-    needed_from_grid_nova: What are the O&M terms after the first free year (what is covered, how often, at what price or plan)?
+    needed_from_grid_nova: "Approve the drafted wording in the dashboard."
     blocking: blocks_launch
-    probe: yaml_contains_marker
+    probe: approved_text
+    legal_review_required: false
+    status: open
+    status_note: "Drafted by Highline Work (BE-22, Appendix A). Used only once an Admin approves this exact text in the dashboard; editing it lapses the approval."
   - id: HW-SLA
     area: policies
     location: {file: config/handover_warranty.yaml, key: service.sla_hours}

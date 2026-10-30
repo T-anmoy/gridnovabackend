@@ -46,8 +46,13 @@ def _printed_text() -> list[str]:
             config.warranty()["om_after_free_terms"]]
 
 
+WORDING_ENTRY = "HW-OM"
+
+
 def hold_reason(db: Session) -> Optional[str]:
-    """Why the pack must not be rendered / sent yet, or None (same rule as receipts)."""
+    """Why the pack must not be rendered / sent yet, or None (same rule as receipts): a
+    marker in the printed text; an unresolved registry entry (staging/production); or,
+    in every environment, O&M wording (HW-OM) an Admin has not approved as it stands."""
     from app.config import settings
     from app.placeholders import registry
 
@@ -55,6 +60,8 @@ def hold_reason(db: Session) -> Optional[str]:
         return "placeholder_content"
     if settings.is_production_like and registry.unresolved_ids(list(HOLD_REGISTRY_ENTRIES), db):
         return "placeholder_content"
+    if not registry.text_is_approved(WORDING_ENTRY, db, text=config.warranty()["om_after_free_terms"]):
+        return "wording_not_approved"
     return None
 
 

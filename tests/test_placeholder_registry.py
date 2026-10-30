@@ -185,11 +185,12 @@ class TestProbes:
         """PM-A: the price list resolved ONB-3, PRC-8 and P1 (percent/labels), superseded
         the placeholder engine for list-priced paths, and partly resolved D1."""
         reg = registry.load()
-        for eid in ("ONB-3", "PRC-8", "P1"):
+        # BE-22: the per-kW tiers (PRO-13) and the government modifier (PRO-14) are
+        # resolved — manual pricing by design.
+        for eid in ("ONB-3", "PRC-8", "P1", "PRO-13", "PRO-14"):
             state = registry.evaluate(reg.by_id[eid])
             assert state["resolved"] is True and reg.by_id[eid].status == "resolved", eid
-        for eid in ("PRC-1", "PRC-2", "PRC-3", "PRC-4", "PRC-5", "PRC-6", "PRC-7", "PRC-12", "PRC-13", "PRO-13",
-                    "PRO-14"):
+        for eid in ("PRC-1", "PRC-2", "PRC-3", "PRC-4", "PRC-5", "PRC-6", "PRC-7", "PRC-12", "PRC-13"):
             state = registry.evaluate(reg.by_id[eid])
             assert state["resolved"] is True and state["resolution"]["status"] == "superseded", eid
         assert reg.by_id["D1"].status == "partially_resolved" and "DCR" in reg.by_id["D1"].status_note
@@ -251,6 +252,7 @@ class TestProbes:
 
 
 class TestEndpoints:
+    @pytest.mark.launch_texts_unapproved
     @pytest.mark.parametrize("role", ["admin", "management"])
     def test_readable_by_admin_and_management(self, client, role):
         body = client.get(URL, headers=staff(role)).json()
@@ -261,8 +263,11 @@ class TestEndpoints:
         assert item["resolved"] is True and item["blocking"] == "blocks_launch"      # company block supplied 15 Oct 2026
         assert item["location"] == "config/execution_payments.yaml → payments.receipt.company"
         p6 = next(i for a in body["areas"] for i in a["items"] if i["id"] == "P6")
-        assert p6["resolved"] is False                                                # receipt wording still pending
+        assert p6["resolved"] is False                                  # receipt wording drafted, not approved
+        assert (p6["probe"], p6["approval_state"], p6["approval"]) == ("approved_text", "not_approved", None)
+        assert p6["current_text"].startswith("heading: PAYMENT RECEIPT") and len(p6["current_sha256"]) == 64
         assert item["needed_from_grid_nova"].endswith("?")
+        assert item["approval_state"] is None and item["current_text"] is None    # not wording
 
     @pytest.mark.parametrize("role", ["sales", "engineer", "operations", "accounts"])
     def test_other_roles_refused(self, client, role):
@@ -275,7 +280,8 @@ class TestEndpoints:
         r = client.post(f"{URL}/A1/resolve", json={"note": "Confirmed by Tanmoy on a call."}, headers=staff("admin"))
         assert r.status_code == 200, r.text
         assert r.json()["resolved"] is True and r.json()["resolution"]["resolved_by"] == "emp-admin-1"
-        assert db_session.execute(select(PlaceholderResolution)).scalar_one().entry_id == "A1"
+        assert db_session.execute(select(PlaceholderResolution).where(
+            PlaceholderResolution.action == "resolved")).scalar_one().entry_id == "A1"
         audit = db_session.execute(select(AuditLog).where(AuditLog.entity_type == "placeholder")).scalar_one()
         assert (audit.entity_id, audit.action) == ("A1", "resolved")
         again = client.post(f"{URL}/A1/resolve", json={"note": "x"}, headers=staff("admin"))

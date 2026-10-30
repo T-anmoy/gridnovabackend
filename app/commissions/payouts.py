@@ -80,6 +80,59 @@ def tds_due(*, fy_taxable_before: Decimal, fy_tds_before: Decimal, taxable_now: 
     return tds.quantize(CENT), rate
 
 
+# ── TDS review (BE-22): no TDS deducted, threshold passed ────────────────────────
+
+TDS_REVIEW_MESSAGE = ("This associate's commission this financial year is above ₹{threshold}. Grid Nova currently "
+                      "deducts no TDS. Confirm with your Chartered Accountant before paying.")
+
+
+def _inr_whole(amount: Decimal) -> str:
+    """12,34,567 — Indian digit grouping, whole rupees."""
+    digits = str(int(Decimal(amount).to_integral_value(rounding=ROUND_HALF_UP)))
+    if len(digits) <= 3:
+        return digits
+    head, tail = digits[:-3], digits[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    return ",".join(([head] if head else []) + groups + [tail])
+
+
+def tds_review(db: Session, batch: PayoutBatch) -> list[dict]:
+    """The lines whose associate's taxable commission this financial year (the same
+    FY-to-date figure tds_due uses: earlier batches plus this one) is above the threshold
+    while no TDS was deducted at a 0% rate. Facts only — no rate or section is implied."""
+    threshold = Decimal(str(config.tds()["fy_threshold_inr"]))
+    out = []
+    for ln in db.execute(select(PayoutLine).where(PayoutLine.batch_id == batch.id)
+                         .order_by(PayoutLine.associate_id)).scalars():
+        fy_to_date = Decimal(ln.fy_taxable_before) + Decimal(ln.taxable)
+        if fy_to_date > threshold and Decimal(ln.tds_rate_percent) == 0:
+            associate = db.get(Associate, ln.associate_id)
+            out.append({"associate_id": associate.associate_id if associate else str(ln.associate_id),
+                        "name": ln.account_holder_name, "fy_to_date": _s(fy_to_date), "threshold": _s(threshold),
+                        "message": TDS_REVIEW_MESSAGE.format(threshold=_inr_whole(threshold))})
+    return out
+
+
+def _require_tds_acknowledgement(db: Session, batch: PayoutBatch, actor: str, acknowledged: bool,
+                                 step: str) -> None:
+    """Approving or marking paid a batch with a TDS review needs the Accounts/Admin user's
+    acknowledgement, recorded in the audit log with their id."""
+    review = tds_review(db, batch)
+    if not review:
+        return
+    if not acknowledged:
+        raise AssociateError("Some associates' commission this financial year is above the TDS threshold while no "
+                             "TDS is deducted. Confirm with your Chartered Accountant, then acknowledge.",
+                             code="tds_review_required", status_code=409, field="tds_review_acknowledged",
+                             extra={"tds_review": review})
+    _audit(db, batch.id, "tds_review_acknowledged", actor,
+           after={"step": step, "associates": [{k: r[k] for k in ("associate_id", "fy_to_date", "threshold")}
+                                               for r in review]})
+
+
 # ── Reading payout history ───────────────────────────────────────────────────────
 
 def application_of(db: Session, associate: Associate):
@@ -220,9 +273,11 @@ def create(db: Session, period: str, actor: str, today: date) -> PayoutBatch:
     return batch
 
 
-def approve(db: Session, batch_id: int, actor: str, *, is_admin: bool, reason: Optional[str]) -> PayoutBatch:
+def approve(db: Session, batch_id: int, actor: str, *, is_admin: bool, reason: Optional[str],
+            tds_review_acknowledged: bool = False) -> PayoutBatch:
     """Segregation of duties: the person who prepared a batch does not approve it;
-    only an Admin may, with a reason (audited as segregation_override)."""
+    only an Admin may, with a reason (audited as segregation_override). A batch with a
+    TDS review needs tds_review_acknowledged (409 tds_review_required otherwise)."""
     batch = _locked(db, batch_id)
     if batch.status != PayoutBatchStatus.draft:
         raise AssociateError(f"A {batch.status.value} batch cannot be approved.", code="invalid_transition",
@@ -236,6 +291,7 @@ def approve(db: Session, batch_id: int, actor: str, *, is_admin: bool, reason: O
         if not override:
             raise AssociateError("Say why you are approving a batch you prepared yourself.",
                                  code="reason_required", status_code=422, field="reason")
+    _require_tds_acknowledgement(db, batch, actor, tds_review_acknowledged, "approve")
     batch.status, batch.approved_by, batch.approved_at = PayoutBatchStatus.approved, actor, _now()
     batch.approval_override_reason = override
     db.flush()
@@ -247,9 +303,11 @@ def approve(db: Session, batch_id: int, actor: str, *, is_admin: bool, reason: O
     return batch
 
 
-def mark_paid(db: Session, batch_id: int, actor: str, references: dict[str, str]) -> PayoutBatch:
+def mark_paid(db: Session, batch_id: int, actor: str, references: dict[str, str], *,
+              tds_review_acknowledged: bool = False) -> PayoutBatch:
     """Record the bank transfer of every line (all at once): a bank reference for
-    each line with money to pay; lines that net to nothing need none."""
+    each line with money to pay; lines that net to nothing need none. A batch with a
+    TDS review needs tds_review_acknowledged again (409 tds_review_required)."""
     batch = _locked(db, batch_id)
     if batch.status != PayoutBatchStatus.approved:
         raise AssociateError(f"A {batch.status.value} batch cannot be marked paid.", code="invalid_transition",
@@ -270,6 +328,7 @@ def mark_paid(db: Session, batch_id: int, actor: str, references: dict[str, str]
     if any(len(v) > 100 for v in cleaned.values()):
         raise AssociateError("A bank reference is at most 100 characters.", code="invalid_bank_reference",
                              status_code=422, field="lines")
+    _require_tds_acknowledgement(db, batch, actor, tds_review_acknowledged, "mark_paid")
     now = _now()
     for ln in lines:
         ln.bank_reference = cleaned.get(gna[ln.associate_id]) or None
@@ -336,7 +395,8 @@ def batch_json(db: Session, batch: PayoutBatch, *, with_lines: bool) -> dict:
             "cancel_reason": batch.cancel_reason,
             "totals": {k: _s(sum((getattr(ln, k) for ln in lines), ZERO))
                        for k in ("gross", "recoveries", "carried_in", "taxable", "tds", "net", "carry_forward")},
-            "line_count": len(lines)}
+            "line_count": len(lines),
+            "tds_review": tds_review(db, batch) if batch.status in LIVE else []}
     if with_lines:
         associates = {a.id: a for a in db.execute(select(Associate).where(
             Associate.id.in_([ln.associate_id for ln in lines]))).scalars()} if lines else {}

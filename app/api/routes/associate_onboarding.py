@@ -690,11 +690,11 @@ def get_agreement(onboarding_id: int, db: Session = Depends(get_db),
     onboarding = _load(db, onboarding_id)
     require_onboarding_documents(associate, onboarding)
     record = agreement.get(db, onboarding)
-    links = agreement.links(record)
+    links = agreement.links(record, db)
     if links:
         service.audit_document_link(db, onboarding, service.actor(associate), "agreement", ",".join(sorted(links)))
         db.commit()
-    return {**agreement.serialize(record), "links": links}
+    return {**agreement.serialize(record, db), "links": links}
 
 
 @router.post("/{onboarding_id}/agreement/signed")
@@ -741,4 +741,4 @@ def _signed_upload(db: Session, onboarding: CustomerOnboarding, performed_by: st
         db.rollback()
         raise HTTPException(status_code=503, detail={"code": "storage_not_configured", "message": str(exc)})
     db.commit()
-    return {**agreement.serialize(record), "links": agreement.links(record)}
+    return {**agreement.serialize(record, db), "links": agreement.links(record, db)}

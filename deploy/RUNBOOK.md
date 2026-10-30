@@ -580,7 +580,12 @@ INTERNAL_KEY=$(gcloud secrets versions access latest --secret=gridnova-internal-
      record shows the Clerk invitation and both documents (they are generated after
      the response — BE-3).
    - **Scheduler**: `gcloud scheduler jobs run …` for each job; Cloud Logging shows a 200.
-10. Rate limit (`TRUSTED_PROXY_HOPS` is right) — 21 quick `POST /api/v1/chat/message`
+10. **Approved wording (BE-22)** — Dashboard → Placeholders: the drafted texts show
+   `not_approved`. Record and verify a test payment: its receipt is held
+   (`held_reason: wording_not_approved`), and no customer email is sent. Approve P6
+   (receipt wording) after reading it; Accounts → release held receipts: the receipt
+   renders and the email arrives. Revoke it again on staging if staging must stay closed.
+11. Rate limit (`TRUSTED_PROXY_HOPS` is right) — 21 quick `POST /api/v1/chat/message`
    from one machine end in 429; from a second network right after, 200. If the second
    network also gets 429, every visitor is sharing one bucket: check `TRUSTED_PROXY_HOPS`.
 

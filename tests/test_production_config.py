@@ -114,18 +114,29 @@ class TestWarnings:
 
     def test_placeholder_associate_texts_warn(self):
         """The KYC notice, welcome letter and (BE-19) customer notice are approved copy now;
-        the agreement is still a placeholder."""
+        the agreement is drafted wording (BE-22), no longer a placeholder."""
         _, warnings = production_config_problems(_settings())
         assert not any("KYC consent notice is a [PLACEHOLDER]" in w for w in warnings)
         assert not any("welcome_letter_body is a [PLACEHOLDER]" in w for w in warnings)
         assert not any("Customer Information Notice is a [PLACEHOLDER]" in w for w in warnings)
-        assert any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
+        assert not any("agreement.body is a [PLACEHOLDER]" in w for w in warnings)
+        assert not any("drafted wording not yet approved" in w for w in warnings)   # all approved (fixture)
+
+    @pytest.mark.launch_texts_unapproved
+    def test_drafted_but_unapproved_wording_warns_by_name(self):
+        _, warnings = production_config_problems(_settings())
+        [drafted] = [w for w in warnings if "drafted wording not yet approved" in w]
+        for entry_id in ("PRO-2", "PRO-7", "PRO-8", "PRO-10", "PRO-11", "PRO-12", "ONB-5", "P6", "HW-OM"):
+            assert entry_id in drafted
+        assert "held" in drafted
 
     def test_unresolved_launch_blocking_placeholders_warn_once(self, caplog):
         """One WARNING with the count — never a refusal to boot."""
+        from app.memory.db import SessionLocal
         from app.placeholders import registry
         _, warnings = production_config_problems(_settings())
-        count = registry.unresolved_launch_blockers()
+        with SessionLocal() as db:
+            count = registry.unresolved_launch_blockers(db)
         assert count > 0
         assert [w for w in warnings if "placeholder(s) unresolved" in w] == [
             f"{count} launch-blocking placeholder(s) unresolved — see GET /api/v1/dashboard/placeholders "

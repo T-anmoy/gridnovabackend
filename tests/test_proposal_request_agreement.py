@@ -473,7 +473,8 @@ class TestAgreement:
         gna, o, pid = self._accepted(client, db_session)
         onboarding = db_session.get(CustomerOnboarding, o["onboarding_id"])
         html = agreement.agreement_html(db_session, onboarding, db_session.get(Proposal, pid), date(2026, 9, 27))
-        assert "[PLACEHOLDER — the agreement text is to be supplied by Grid Nova.]" in html
+        assert "1. Scope. Grid Nova will design, supply, install, test and commission the System" in html
+        assert "[PLACEHOLDER" not in html
         assert "Customer 1" in html and "CN-000001" in html and "margin-top: 100.0mm" in html
 
     def test_real_pdf_render(self, client, db_session, sendable_proposal_content, onboarding_ready):
@@ -488,3 +489,104 @@ class TestAgreement:
         pdf = render_pdf(agreement.agreement_html(db_session, onboarding, db_session.get(Proposal, pid),
                                                   date(2026, 9, 27)))
         assert pdf.startswith(b"%PDF-")
+
+
+def _approve_agreement_wording(client, legal=True):
+    from app.placeholders import registry
+    entry = registry.load().by_id["ONB-5"]
+    return client.post("/api/v1/dashboard/placeholders/ONB-5/approve", headers=ADMIN,
+                       json={"content_sha256": registry.sha256(registry.current_text(entry)),
+                             "legal_review_confirmed": legal})
+
+
+@pytest.mark.launch_texts_unapproved
+class TestAgreementWording:
+    """BE-22: no agreement PDF is produced, served or signed from wording an Admin has
+    not approved exactly as it stands (registry ONB-5)."""
+
+    def _accepted(self, client, db_session):
+        gna, o, pid = _approved(client, db_session)
+        assert _in_person(client, headers(gna), o["onboarding_id"], pid).status_code == 200
+        return gna, o, pid
+
+    def test_no_pdf_while_the_wording_is_not_approved(self, client, db_session, sendable_proposal_content,
+                                                      onboarding_ready):
+        gna, o, _ = self._accepted(client, db_session)
+        oid = o["onboarding_id"]
+        with patch("app.associates.documents.render_pdf") as render:
+            r = client.post(f"{DASH}/onboardings/{oid}/agreement", headers=SALES)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "agreement_wording_not_approved"
+        render.assert_not_called()
+        assert db_session.execute(select(CustomerAgreement)).first() is None
+        seen = client.get(f"{BASE}/{oid}/agreement", headers=headers(gna)).json()
+        assert seen == {"generated": False, "signed": False, "wording_approved": False, "links": {}}
+
+    def test_without_the_legal_tick_it_stays_refused(self, client, db_session, sendable_proposal_content,
+                                                     onboarding_ready):
+        _, o, _ = self._accepted(client, db_session)
+        assert _approve_agreement_wording(client, legal=False).status_code == 422
+        with patch("app.associates.documents.render_pdf", return_value=b"%PDF-agreement"):
+            r = client.post(f"{DASH}/onboardings/{o['onboarding_id']}/agreement", headers=SALES)
+        assert r.status_code == 409
+
+    def test_approved_wording_generates_and_records_its_hash(self, client, db_session, sendable_proposal_content,
+                                                             onboarding_ready):
+        from app.placeholders import registry
+        gna, o, _ = self._accepted(client, db_session)
+        oid = o["onboarding_id"]
+        assert _approve_agreement_wording(client).status_code == 200
+        with patch("app.associates.documents.render_pdf", return_value=b"%PDF-agreement") as render:
+            r = client.post(f"{DASH}/onboardings/{oid}/agreement", headers=SALES)
+        assert r.status_code == 200 and r.json()["wording_approved"] is True and "agreement_pdf" in r.json()["links"]
+        html = render.call_args.args[0]
+        assert "13. Whole agreement." in html and "[PLACEHOLDER" not in html
+        record = db_session.execute(select(CustomerAgreement)).scalar_one()
+        entry = registry.load().by_id["ONB-5"]
+        assert record.wording_sha256 == registry.sha256(registry.current_text(entry))
+        seen = client.get(f"{BASE}/{oid}/agreement", headers=headers(gna)).json()
+        assert "agreement_pdf" in seen["links"] and seen["needs_regeneration"] is False
+
+    def test_revoked_wording_withholds_the_link_and_refuses_the_signed_copy(
+            self, client, db_session, sendable_proposal_content, onboarding_ready):
+        gna, o, _ = self._accepted(client, db_session)
+        oid = o["onboarding_id"]
+        _approve_agreement_wording(client)
+        with patch("app.associates.documents.render_pdf", return_value=b"%PDF-agreement"):
+            assert client.post(f"{DASH}/onboardings/{oid}/agreement", headers=SALES).status_code == 200
+        r = client.post("/api/v1/dashboard/placeholders/ONB-5/revoke", headers=ADMIN, json={"note": "Counsel edits."})
+        assert r.status_code == 200
+        for seen in (client.get(f"{BASE}/{oid}/agreement", headers=headers(gna)).json(),
+                     client.get(f"{DASH}/onboardings/{oid}/agreement", headers=ADMIN).json()):
+            assert seen["links"] == {} and seen["needs_regeneration"] is True and seen["wording_approved"] is False
+        up = client.post(f"{BASE}/{oid}/agreement/signed",
+                         data={"stamp_paper_number": "WB 1", "stamp_paper_date": "2026-09-01"},
+                         files={"file": ("signed.pdf", PDF, "application/pdf")}, headers=headers(gna))
+        assert up.status_code == 409 and up.json()["detail"]["code"] == "agreement_wording_not_approved"
+        assert db_session.execute(select(CustomerAgreement)).scalar_one().signed_scan_key is None
+
+    def test_an_agreement_printed_before_approval_must_be_regenerated(self, client, db_session,
+                                                                      sendable_proposal_content, onboarding_ready):
+        gna, o, _ = self._accepted(client, db_session)
+        oid = o["onboarding_id"]
+        _approve_agreement_wording(client)
+        with patch("app.associates.documents.render_pdf", return_value=b"%PDF-agreement"):
+            client.post(f"{DASH}/onboardings/{oid}/agreement", headers=SALES)
+        record = db_session.execute(select(CustomerAgreement)).scalar_one()
+        record.wording_sha256 = None              # generated before BE-22, from the placeholder
+        db_session.commit()
+        assert client.get(f"{BASE}/{oid}/agreement", headers=headers(gna)).json()["links"] == {}
+        with patch("app.associates.documents.render_pdf", return_value=b"%PDF-agreement"):
+            assert client.post(f"{DASH}/onboardings/{oid}/agreement", headers=SALES).status_code == 200
+        assert "agreement_pdf" in client.get(f"{BASE}/{oid}/agreement", headers=headers(gna)).json()["links"]
+
+    def test_changed_wording_lapses_the_approval(self, client, db_session, sendable_proposal_content,
+                                                 onboarding_ready, monkeypatch):
+        from app.onboarding import config as onboarding_config
+        _, o, _ = self._accepted(client, db_session)
+        _approve_agreement_wording(client)
+        cfg = onboarding_config.load()["agreement"]
+        monkeypatch.setitem(cfg, "body", cfg["body"] + "\n14. A clause nobody approved.")
+        with patch("app.associates.documents.render_pdf") as render:
+            r = client.post(f"{DASH}/onboardings/{o['onboarding_id']}/agreement", headers=SALES)
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "agreement_wording_not_approved"
+        render.assert_not_called()

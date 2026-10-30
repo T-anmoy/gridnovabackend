@@ -154,7 +154,7 @@
           "new_value": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "exclusiveMinimum": 0.0,
                 "type": "number"
               },
               {
@@ -296,6 +296,11 @@
               }
             ],
             "title": "Reason"
+          },
+          "tds_review_acknowledged": {
+            "default": false,
+            "title": "Tds Review Acknowledged",
+            "type": "boolean"
           }
         },
         "title": "ApproveBatchIn",
@@ -317,25 +322,6 @@
           "entry_ids"
         ],
         "title": "ApproveEntriesIn",
-        "type": "object"
-      },
-      "ApproveRequest": {
-        "properties": {
-          "verification_call_completed": {
-            "title": "Verification Call Completed",
-            "type": "boolean"
-          },
-          "verification_call_note": {
-            "maxLength": 2000,
-            "title": "Verification Call Note",
-            "type": "string"
-          }
-        },
-        "required": [
-          "verification_call_completed",
-          "verification_call_note"
-        ],
-        "title": "ApproveRequest",
         "type": "object"
       },
       "ArchiveStats": {
@@ -5675,6 +5661,11 @@
             "maxItems": 5000,
             "title": "Lines",
             "type": "array"
+          },
+          "tds_review_acknowledged": {
+            "default": false,
+            "title": "Tds Review Acknowledged",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9593,6 +9584,21 @@
         "title": "RevisitItem",
         "type": "object"
       },
+      "RevokeRequest": {
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "RevokeRequest",
+        "type": "object"
+      },
       "RoleUpdateRequest": {
         "properties": {
           "role": {
@@ -11539,6 +11545,25 @@
         "title": "ReasonIn",
         "type": "object"
       },
+      "app__api__routes__associates_admin__ApproveRequest": {
+        "properties": {
+          "verification_call_completed": {
+            "title": "Verification Call Completed",
+            "type": "boolean"
+          },
+          "verification_call_note": {
+            "maxLength": 2000,
+            "title": "Verification Call Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verification_call_completed",
+          "verification_call_note"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
       "app__api__routes__commissions_admin__ReasonIn": {
         "properties": {
           "reason": {
@@ -11607,6 +11632,39 @@
           "milestones"
         ],
         "title": "ScheduleIn",
+        "type": "object"
+      },
+      "app__api__routes__placeholders_admin__ApproveRequest": {
+        "properties": {
+          "content_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "legal_review_confirmed": {
+            "default": false,
+            "title": "Legal Review Confirmed",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "content_sha256"
+        ],
+        "title": "ApproveRequest",
         "type": "object"
       },
       "app__api__routes__proposal_inputs__ConsumptionMonth": {
@@ -16034,7 +16092,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApproveRequest"
+                "$ref": "#/components/schemas/app__api__routes__associates_admin__ApproveRequest"
               }
             }
           },
@@ -23718,6 +23776,59 @@
         "summary": "List Placeholders"
       }
     },
+    "/api/v1/dashboard/placeholders/{entry_id}/approve": {
+      "post": {
+        "description": "Approve the wording exactly as the Admin read it (content_sha256 from the listing).\n409 text_changed if the text is no longer that one; 409 still_placeholder while it\ncarries a marker; 422 legal_review_required without the legal adviser's tick where\nthe entry needs it.",
+        "operationId": "approve_wording_api_v1_dashboard_placeholders__entry_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__routes__placeholders_admin__ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Wording"
+      }
+    },
     "/api/v1/dashboard/placeholders/{entry_id}/resolve": {
       "post": {
         "operationId": "resolve_placeholder_api_v1_dashboard_placeholders__entry_id__resolve_post",
@@ -23768,6 +23879,59 @@
           }
         ],
         "summary": "Resolve Placeholder"
+      }
+    },
+    "/api/v1/dashboard/placeholders/{entry_id}/revoke": {
+      "post": {
+        "description": "Withdraw the approval: the wording is unapproved from now on (documents using it\nare held again). 409 not_approved when there is no standing approval.",
+        "operationId": "revoke_wording_api_v1_dashboard_placeholders__entry_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Wording"
       }
     },
     "/api/v1/dashboard/proposals": {

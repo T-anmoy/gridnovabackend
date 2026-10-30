@@ -242,10 +242,10 @@ def record_in_person_acceptance(db: Session, onboarding: CustomerOnboarding, rec
     if proposal.status not in (ProposalStatus.approved, ProposalStatus.sent):
         raise AssociateError(f"Only a proposal approved by Grid Nova can be handed over (this one is "
                              f"{proposal.status.value}).", code="not_approved", status_code=409)
-    problem = placeholder_problem(proposal)
+    problem = placeholder_problem(proposal, db)
     if problem:
-        raise AssociateError(problem["message"], code=problem["code"], status_code=409,
-                             extra={"missing": problem["missing"]} if "missing" in problem else None)
+        extra = {k: problem[k] for k in ("missing", "unapproved_sections") if problem.get(k)}
+        raise AssociateError(problem["message"], code=problem["code"], status_code=409, extra=extra or None)
     problem = reverification_problem(proposal)
     if problem:
         raise AssociateError(problem["message"], code=problem["code"], status_code=409,

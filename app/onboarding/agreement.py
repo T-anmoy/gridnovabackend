@@ -2,9 +2,13 @@
 non-judicial stamp paper, then the signed scan with the stamp paper's number and date.
 
 The PDF carries the parties and the project's details from the system; the agreement's
-own wording comes from config/associate_onboarding.yaml (agreement.body), which is a
-clearly labelled placeholder until Grid Nova supplies the text. Rendered with WeasyPrint
-like the proposal PDF and the associate ID card; stored in the private bucket.
+own wording comes from config/associate_onboarding.yaml (agreement.body, registry ONB-5).
+No PDF is produced from wording an Admin has not approved exactly as it stands (BE-22):
+generate() answers 409 agreement_wording_not_approved, in every environment. The PDF
+records the wording's SHA-256, and an unsigned agreement's link is served only while
+that is the approved wording — a PDF generated from older or unapproved wording must be
+regenerated. Rendered with WeasyPrint like the proposal PDF and the associate ID card;
+stored in the private bucket.
 """
 from __future__ import annotations
 
@@ -46,6 +50,31 @@ def get(db: Session, onboarding: CustomerOnboarding) -> Optional[CustomerAgreeme
     if pre is not None and onboarding.id in pre.agreements:
         return pre.agreements[onboarding.id]
     return db.execute(select(CustomerAgreement).where(CustomerAgreement.onboarding_id == onboarding.id)).scalar_one_or_none()
+
+
+WORDING_ENTRY = "ONB-5"
+
+
+def wording_problem(db: Session) -> Optional[AssociateError]:
+    """The refusal while the agreement wording is a placeholder or not approved, else None."""
+    from app.placeholders import registry
+    if registry.text_is_approved(WORDING_ENTRY, db, text=config.load()["agreement"]["body"]):
+        return None
+    return AssociateError("The customer agreement wording has not been approved by a Grid Nova Admin yet, so no "
+                          "agreement can be prepared.", code="agreement_wording_not_approved", status_code=409)
+
+
+def _wording_sha256() -> str:
+    from app.placeholders import registry
+    return registry.sha256(config.load()["agreement"]["body"])
+
+
+def servable(db: Session, agreement: Optional[CustomerAgreement]) -> bool:
+    """A signed agreement is a record and always servable; an unsigned one only while the
+    wording printed on it is the approved wording."""
+    if agreement is None or agreement.signed_scan_key:
+        return True
+    return agreement.wording_sha256 == _wording_sha256() and wording_problem(db) is None
 
 
 def agreement_html(db: Session, onboarding: CustomerOnboarding, proposal: Proposal, today: date) -> str:
@@ -94,11 +123,14 @@ def agreement_html(db: Session, onboarding: CustomerOnboarding, proposal: Propos
 
 
 def generate(db: Session, onboarding: CustomerOnboarding, performed_by: str, today: date) -> CustomerAgreement:
-    """(Re)generate the agreement PDF. Needs the `accepted` stage; refused once the
-    signed copy is in. Caller commits."""
+    """(Re)generate the agreement PDF. Needs the `accepted` stage and approved wording;
+    refused once the signed copy is in. Caller commits."""
     from app.associates.documents import render_pdf
     from app.storage import r2
 
+    refused = wording_problem(db)
+    if refused is not None:
+        raise refused
     if ProjectStage.accepted not in progress.recorded(db, onboarding.project_id):
         raise AssociateError("The customer has not accepted a proposal yet.", code="not_accepted", status_code=409)
     existing = get(db, onboarding)
@@ -108,23 +140,28 @@ def generate(db: Session, onboarding: CustomerOnboarding, performed_by: str, tod
     proposal = source_proposal(db, onboarding)
     if proposal is None:
         raise AssociateError("No proposal was sent to this customer.", code="no_proposal", status_code=409)
+    wording = _wording_sha256()
     pdf = render_pdf(agreement_html(db, onboarding, proposal, today))
     key = f"agreements/{onboarding.id}/{uuid.uuid4().hex}.pdf"
     r2.upload_bytes(key, pdf, "application/pdf")
     now = datetime.now(timezone.utc)
     if existing is None:
         existing = CustomerAgreement(onboarding_id=onboarding.id, proposal_id=proposal.id,
-                                     agreement_storage_key=key, generated_at=now, generated_by=performed_by)
+                                     agreement_storage_key=key, generated_at=now, generated_by=performed_by,
+                                     wording_sha256=wording)
         db.add(existing)
         before = None
     else:
-        before = {"agreement_storage_key": existing.agreement_storage_key, "proposal_id": existing.proposal_id}
+        before = {"agreement_storage_key": existing.agreement_storage_key, "proposal_id": existing.proposal_id,
+                  "wording_sha256": existing.wording_sha256}
         existing.agreement_storage_key, existing.proposal_id = key, proposal.id
         existing.generated_at, existing.generated_by = now, performed_by
+        existing.wording_sha256 = wording
     db.flush()
     db.add(AuditLog(entity_type="customer_agreement", entity_id=str(existing.id),
                     action="generated" if before is None else "regenerated", performed_by=performed_by,
-                    before_value=before, after_value={"proposal_id": proposal.id, "agreement_storage_key": key}))
+                    before_value=before, after_value={"proposal_id": proposal.id, "agreement_storage_key": key,
+                                                      "wording_sha256": wording}))
     return existing
 
 
@@ -141,6 +178,12 @@ def record_signed(db: Session, onboarding: CustomerOnboarding, performed_by: str
                              status_code=409)
     if agreement.signed_scan_key:
         raise AssociateError("The signed agreement is already on file.", code="already_signed", status_code=409)
+    if not servable(db, agreement):
+        # Printed from wording that is not (or no longer) the approved one: a signed copy
+        # of it must not become the customer's agreement. Regenerate, print, sign again.
+        raise AssociateError("This agreement was printed from wording that is not the approved wording. Generate "
+                             "it again and have the new copy signed.", code="agreement_wording_not_approved",
+                             status_code=409)
     number = (stamp_paper_number or "").strip()
     if not _STAMP_NUMBER_RE.fullmatch(number):
         raise AssociateError("Stamp paper number must be 1–50 letters, digits, spaces, '/' or '-'.",
@@ -163,10 +206,13 @@ def record_signed(db: Session, onboarding: CustomerOnboarding, performed_by: str
     return agreement
 
 
-def serialize(agreement: Optional[CustomerAgreement]) -> dict:
+def serialize(agreement: Optional[CustomerAgreement], db: Optional[Session] = None) -> dict:
     if agreement is None:
-        return {"generated": False, "signed": False}
-    return {
+        out = {"generated": False, "signed": False}
+        if db is not None:
+            out["wording_approved"] = wording_problem(db) is None
+        return out
+    out = {
         "generated": True,
         "agreement_id": agreement.id,
         "proposal_id": agreement.proposal_id,
@@ -179,14 +225,23 @@ def serialize(agreement: Optional[CustomerAgreement]) -> dict:
         "signed_uploaded_by": agreement.signed_uploaded_by,
         "signed_scan_filename": agreement.signed_scan_filename,
     }
+    if db is not None:
+        out["wording_approved"] = wording_problem(db) is None
+        # An unsigned PDF printed from wording that is not the approved one: no link to
+        # it; staff regenerate it once the wording is approved.
+        out["needs_regeneration"] = not servable(db, agreement)
+    return out
 
 
-def links(agreement: Optional[CustomerAgreement]) -> dict:
-    """Short-lived signed links to the generated PDF and the signed scan."""
+def links(agreement: Optional[CustomerAgreement], db: Optional[Session] = None) -> dict:
+    """Short-lived signed links to the generated PDF and the signed scan. With a session,
+    the unsigned PDF's link is withheld unless its wording is the approved one."""
     from app.storage import r2
 
     out = {}
     if agreement is None:
+        return out
+    if db is not None and not servable(db, agreement):
         return out
     try:
         url, expires = r2.signed_get_url(agreement.agreement_storage_key, filename=f"agreement-{agreement.onboarding_id}.pdf")

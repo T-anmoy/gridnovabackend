@@ -38,10 +38,11 @@ warranty:
   # W3 — expected panel performance life: 25 years (decided by Tanmoy Halder, 14 Oct 2026).
   # A life span, not a warranty.
   panel_performance_life_years: 25
-  # W4 — operations & maintenance. The first year is free (CONFIRMED); later terms are not
-  # supplied. The handover pack is held while this text is a dummy.
+  # W4 — operations & maintenance. The first year is free (CONFIRMED). The terms after it
+  # are drafted for Grid Nova (BE-22, registry HW-OM); the handover pack is held until an
+  # Admin approves this exact text in the dashboard.
   om_free_months: 12
-  om_after_free_terms: "DUMMY — O&M terms after the first free year to be supplied by Grid Nova"   # [PLACEHOLDER]
+  om_after_free_terms: "After the free first year, Grid Nova offers an Annual Maintenance Contract (AMC) for your solar system. Under an AMC, Grid Nova inspects the modules, mounting structure, cabling, earthing and inverter; cleans the modules at the agreed frequency; checks generation against the expected values; and attends breakdown calls. The AMC price and visit frequency are quoted at renewal, based on your system's size. Without an AMC, service visits are charged per visit. Manufacturer warranties continue for their full term whether or not you take an AMC. Contact info@gridnova.in or +91 98747 74440."
 
 service:
   # S1 — hours within which a service request should be resolved. null: no SLA is shown and

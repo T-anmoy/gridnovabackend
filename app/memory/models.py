@@ -1596,6 +1596,9 @@ class CustomerAgreement(Base):
     signed_scan_content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     signed_uploaded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     signed_uploaded_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # SHA-256 of the agreement wording (registry ONB-5) printed on this PDF. Its link is
+    # served only while that wording is the approved one (null: generated before BE-22).
+    wording_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class IndicativeEstimate(Base):
@@ -1614,17 +1617,28 @@ class IndicativeEstimate(Base):
 
 
 class PlaceholderResolution(Base):
-    """An admin marking a `manual` placeholder-registry entry (config/placeholder_registry.yaml)
-    as resolved, with a note. Append-only: one row per entry, never edited or deleted.
-    Probed entries are never recorded here — their value itself says whether they are
-    resolved."""
+    """An Admin's decision on a placeholder-registry entry (config/placeholder_registry.yaml),
+    with a note. Append-only: never edited or deleted.
+
+      action=resolved   a `manual` entry marked resolved (once per entry).
+      action=approved   an `approved_text` entry's wording approved exactly as it stood
+                        (content_sha256 of the normalised text; legal_review_confirmed
+                        when the entry needs Grid Nova's legal adviser).
+      action=revoked    that approval withdrawn. The latest approved/revoked row decides.
+
+    resolved_by / resolved_at are who and when, for every action. Other probed entries
+    are never recorded here — their value itself says whether they are resolved."""
     __tablename__ = "placeholder_resolutions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    entry_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(16), nullable=False, default="resolved", server_default="resolved")
     resolved_by: Mapped[str] = mapped_column(String, nullable=False)
     resolved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now, nullable=False)
     note: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    legal_review_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                         server_default=false())
 
 
 # ── Execution (Phase 4A) ─────────────────────────────────────────────────────────

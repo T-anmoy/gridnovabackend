@@ -108,6 +108,8 @@ Every variable is in `.env.example` with a comment (a test enforces it, and anot
 checks this table lists every `Settings` field). "yes" = the app refuses to start in
 staging/production without it; "warns" = it starts and logs a warning.
 
+`.env.example` is documentation only; real values go in `.env` (git-ignored), production values in Secret Manager and `deploy/env.production.yaml` (`tests/test_env_example.py` fails if it ever holds a value).
+
 | Variable | Staging / production | Purpose |
 |---|---|---|
 | `ENVIRONMENT` | yes | `development` \| `test` \| `staging` \| `production` exactly; staging and production run the startup guard and refuse dev auth headers |

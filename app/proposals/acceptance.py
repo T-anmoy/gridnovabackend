@@ -9,7 +9,10 @@ A proposal can be accepted only while it is the one on offer:
   * it is still within the validity period (config/sales_policy.yaml
     proposal_validity_days — a registered, unconfirmed default);
   * it is not waiting for re-verification after a survey change (app/survey/changes.py
-    — otherwise: needs_reverification; the customer is not told which fields).
+    — otherwise: needs_reverification; the customer is not told which fields);
+  * Grid Nova's wording in it is still approved exactly as sent (BE-22: an Admin may
+    revoke an approval after sending — otherwise: proposal_not_available, the same
+    neutral answer, so the customer is never shown the unapproved text).
 
 Acceptance locks the lead row and then the proposal row (SELECT … FOR UPDATE on
 PostgreSQL; SQLite has no row locks and serialises writers instead) and re-reads
@@ -78,4 +81,7 @@ def refusal(db: Session, proposal: Proposal) -> Optional[tuple[str, str]]:
     if proposal.needs_reverification:
         return REVERIFICATION, ("Grid Nova is checking this proposal again after a change to the site survey. "
                                 "Please wait for Grid Nova to contact you.")
+    from app.proposals import content_engine
+    if content_engine.unapproved_sections(proposal.content, db):
+        return NOT_AVAILABLE, "This proposal is not open for acceptance right now. Please contact Grid Nova."
     return None

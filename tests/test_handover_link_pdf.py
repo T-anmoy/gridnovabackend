@@ -35,12 +35,16 @@ def pack_of(db):
     return db.execute(select(HandoverPack)).scalar_one()
 
 
-class TestHeldWhileDummy:
+@pytest.mark.launch_texts_unapproved
+class TestHeldWhileUnapproved:
+    """BE-22: the shipped O&M terms (HW-OM) are drafted wording; until an Admin approves
+    them the pack is held and the terms are never shown."""
+
     def test_shipped_config_holds_the_pack(self, client, db_session, onboarding_ready, catalogue, notifications, storage,
                                            stub_pdf):
         oid = handed_over(client, db_session, catalogue, notifications)
         pack = pack_of(db_session)
-        assert pack.pdf_key is None and pack.email_status == "held" and pack.held_reason == "placeholder_content"
+        assert pack.pdf_key is None and pack.email_status == "held" and pack.held_reason == "wording_not_approved"
         assert notifications.of("handover_customer_email") == []
         assert [p["reason"] for p in notifications.of("handover_blocked")] == ["held"]
         body = client.get(hand_url(oid), headers=OPS).json()
@@ -48,8 +52,8 @@ class TestHeldWhileDummy:
         assert client.post(hand_url(oid, "/link"), json={}, headers=OPS).json()["detail"]["code"] == "handover_pdf_held"
         assert client.get(hand_url(oid, "/pdf"), headers=OPS).status_code == 404
 
-    def test_om_terms_are_not_exposed_while_dummy(self, client, db_session, onboarding_ready, catalogue, notifications,
-                                                  storage, stub_pdf):
+    def test_om_terms_are_not_exposed_while_unapproved(self, client, db_session, onboarding_ready, catalogue,
+                                                       notifications, storage, stub_pdf):
         handed_over(client, db_session, catalogue, notifications)
         token = _token(client, db_session)
         # no link could be issued via the API while held; issue directly
@@ -57,6 +61,23 @@ class TestHeldWhileDummy:
         assert page.status_code == 200
         assert page.json()["warranty"]["om"]["terms_after_free_period"] is None
         assert client.get(f"/api/v1/public/handover/{token}/pdf", follow_redirects=False).status_code == 404
+
+    def test_approving_the_terms_releases_the_pack(self, client, db_session, onboarding_ready, catalogue,
+                                                   notifications, storage, stub_pdf):
+        from app.placeholders import registry
+        oid = handed_over(client, db_session, catalogue, notifications)
+        assert pack_of(db_session).held_reason == "wording_not_approved"
+        entry = registry.load().by_id["HW-OM"]
+        r = client.post("/api/v1/dashboard/placeholders/HW-OM/approve", headers=ADMIN,
+                        json={"content_sha256": registry.sha256(registry.current_text(entry))})
+        assert r.status_code == 200, r.text
+        # The existing path: staff send the link, which renders and emails the pack.
+        assert client.post(hand_url(oid, "/link"), json={}, headers=OPS).status_code == 200
+        pack = pack_of(db_session)
+        assert pack.pdf_key and pack.held_reason is None
+        assert len(notifications.of("handover_customer_email")) == 1
+        assert client.get(hand_url(oid), headers=OPS).json()["warranty"]["om"]["terms_after_free_period"] \
+            .startswith("After the free first year, Grid Nova offers an Annual Maintenance Contract")
 
 
 def _token(client, db):
@@ -79,7 +100,7 @@ class TestRendered:
         html = storage and __import__("app.handover.pdf", fromlist=["x"]).build_html(
             db_session, db_session.get(__import__("app.memory.models", fromlist=["x"]).CustomerOnboarding, oid), pack)
         assert "Handover pack and warranty certificate" in html and "O&amp;M terms after the first free year to be supplied" not in html
-        assert "Annual maintenance plan" in html
+        assert "Grid Nova offers an Annual Maintenance Contract (AMC)" in html
 
     def test_letterhead_prints_the_patna_branch_under_the_head_office(
             self, client, db_session, onboarding_ready, catalogue, notifications, storage, stub_pdf, real_handover_text):

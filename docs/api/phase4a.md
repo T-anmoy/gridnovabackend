@@ -298,6 +298,11 @@ dummy_value, needed_from_grid_nova, blocking, probe, resolved, status, status_no
 probe_error, resolution}]}]}` (`status`/`status_note` added by PM-A). Resolve errors:
 `not_manual` (409), `already_resolved` (409), `note_required` (422), 404.
 
+BE-22 adds `approved_text` entries (wording an Admin approves exactly as written), their
+`approve` / `revoke` routes, the item fields `legal_review_required`, `current_text`,
+`current_sha256`, `approval`, `approval_state`, and the receipt / handover hold
+`held_reason: "wording_not_approved"` — see [launch_content.md](launch_content.md).
+
 ## 5. Associate home feed
 
 `GET /api/v1/associate/home` (any associate; their OWN customers only):

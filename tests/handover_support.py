@@ -33,10 +33,10 @@ def catalogue(db_session):
 
 @pytest.fixture
 def real_handover_text(monkeypatch):
-    """Stand in Grid Nova's real O&M terms (the shipped config holds a dummy, which
-    correctly holds the pack)."""
+    """The shipped O&M terms (BE-22) are real wording, approved by conftest's
+    _launch_texts_approved; kept as a fixture so tests still say they need it."""
     from app.handover import config
-    monkeypatch.setitem(config.warranty(), "om_after_free_terms", "Annual maintenance plan at the then-current rate.")
+    assert "DUMMY" not in config.warranty()["om_after_free_terms"]
 
 
 def hand_url(oid: int, tail: str = "") -> str:

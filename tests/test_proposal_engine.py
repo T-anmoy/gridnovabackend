@@ -84,9 +84,11 @@ class TestMultiRuleComposition:
 # ── Pricing math ─────────────────────────────────────────────────────────────────
 
 class TestPricing:
-    def test_placeholder_rates_return_zero(self, cfg):
-        # Shipped rates are 0 placeholders — rooftop 0-10 kW tier.
-        assert ce.select_pricing("rooftop", 8, "residential", cfg) == 0.0
+    def test_shipped_tiers_have_no_automatic_price(self, cfg):
+        # BE-22: the shipped tiers are rate_per_kw: null — priced by staff, never ₹0.
+        assert [t["rate_per_kw"] for t in cfg["pricing"]["tiers"]] == [None, None, None]
+        assert ce.select_pricing("rooftop", 8, "residential", cfg) is None
+        assert ce.select_pricing("ground_mounted", 800, "government", cfg) is None
 
     def test_tier_and_modifier_math(self):
         # Build a config with real rates + a modifier to verify the arithmetic.

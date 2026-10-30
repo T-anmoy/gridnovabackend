@@ -286,7 +286,8 @@ def _exec_batch_approve(db: Session, actor, req: ApprovalRequest) -> dict:
 
     p = req.payload
     batch = _translate(lambda: payouts.approve(db, p["batch_id"], req.requested_by,
-                                               is_admin=bool(p.get("segregation_override")), reason=p.get("reason")))
+                                               is_admin=bool(p.get("segregation_override")), reason=p.get("reason"),
+                                               tds_review_acknowledged=bool(p.get("tds_review_acknowledged"))))
     return {"batch_id": batch.id, "status": batch.status.value}
 
 

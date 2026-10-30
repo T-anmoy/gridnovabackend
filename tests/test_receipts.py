@@ -44,6 +44,15 @@ class TestWords:
         assert receipts.format_number("R/{YYYY}/{SEQ}", 2026, 12) == "R/2026/12"
 
 
+def approve_receipt_wording(client) -> None:
+    """An Admin approves the shipped receipt wording (P6) as it stands (BE-22)."""
+    from app.placeholders import registry
+    entry = registry.load().by_id["P6"]
+    r = client.post("/api/v1/dashboard/placeholders/P6/approve", headers=ADMIN,
+                    json={"content_sha256": registry.sha256(registry.current_text(entry))})
+    assert r.status_code == 200, r.text
+
+
 def _verified(client, db_session, reference="UTR-0001", **customer):
     gna, oid = accepted_customer(client, db_session, **customer)
     pid = record(client, ACCOUNTS, oid, neft(reference=reference), staff=True).json()["payment_id"]
@@ -53,8 +62,9 @@ def _verified(client, db_session, reference="UTR-0001", **customer):
 
 
 class TestIssue:
-    def test_numbered_and_held_unrendered_while_dummy(self, client, db_session, onboarding_ready, stub_pdf,
-                                                      notifications):
+    @pytest.mark.launch_texts_unapproved
+    def test_numbered_and_held_unrendered_while_wording_unapproved(self, client, db_session, onboarding_ready,
+                                                                   stub_pdf, notifications):
         _, _, first = _verified(client, db_session, customer_email="asha@example.test")
         _verified(client, db_session, reference="UTR-0002", customer_email="ravi@example.test")
         rows = db_session.execute(select(PaymentReceipt).order_by(PaymentReceipt.id)).scalars().all()
@@ -62,8 +72,8 @@ class TestIssue:
         assert [r.receipt_number for r in rows] == [f"GNR-{year}-000001", f"GNR-{year}-000002"]
         # BE-1 C3: decided before rendering — no placeholder-content PDF is ever stored.
         assert all(r.pdf_key is None and r.email_status == ReceiptEmailStatus.held for r in rows)
-        assert rows[0].held_reason == "placeholder_content"
-        assert not notifications.of("receipt_customer_email")          # never a DUMMY receipt to a customer
+        assert rows[0].held_reason == "wording_not_approved"          # BE-22: P6 drafted, not approved
+        assert not notifications.of("receipt_customer_email")          # never unapproved wording to a customer
         assert [b["reason"] for b in notifications.of("receipt_blocked")] == ["held", "held"]
         item = client.get(f"{PAY}/{first}", headers=ACCOUNTS).json()
         assert item["receipt"]["held"] is True and "receipt_held" in item["attention_reasons"]
@@ -93,25 +103,33 @@ class TestIssue:
         assert [b["reason"] for b in notifications.of("receipt_blocked")] == ["no_customer_email"]
         assert client.get(PAY, params={"needs_attention": True}, headers=ACCOUNTS).json()["total"] == 1
 
+    @pytest.mark.launch_texts_unapproved
     def test_production_holds_while_the_registry_is_unresolved(self, db_session, real_receipt_text, monkeypatch):
-        """Even with real-looking text in place, production holds while P5/P6 are
-        still open in the registry (they probe config/execution_payments.yaml)."""
+        """Real wording without an approval is held everywhere (wording_not_approved),
+        and production also finds P6 unresolved in the registry (placeholder_content)."""
         from app.config import settings
-        assert receipts.hold_reason(db_session) is None
+        assert receipts.hold_reason(db_session) == "wording_not_approved"
         monkeypatch.setattr(settings, "environment", "production")
         assert receipts.hold_reason(db_session) == "placeholder_content"
 
+    def test_wording_changed_after_approval_holds_again(self, db_session, real_receipt_text, monkeypatch):
+        from app.execution import config
+        assert receipts.hold_reason(db_session) is None
+        receipt_cfg = config.payments()["receipt"]
+        monkeypatch.setitem(receipt_cfg, "wording", {**receipt_cfg["wording"], "heading": "RECEIPT"})
+        assert receipts.hold_reason(db_session) == "wording_not_approved"
+
+    @pytest.mark.launch_texts_unapproved
     def test_release_held_once_resolved(self, client, db_session, onboarding_ready, stub_pdf, notifications,
                                         monkeypatch):
+        """BE-22: held while P6 is not approved; approved in the dashboard, the held
+        receipt is released by the existing release-held action."""
         _verified(client, db_session, customer_email="asha@example.test")
         url = "/api/v1/dashboard/payment-receipts/release-held"
         assert client.post(url, headers=ACCOUNTS).json() == {"released": 0, "failed": 0, "still_held": 1,
-                                                              "reason": "placeholder_content"}
-        from app.execution import config
-        receipt_cfg = config.payments()["receipt"]
-        monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "19ABCDE1234F1Z5",
-                                                     "bank_name": "SBI", "account_number": "1", "ifsc": "SBIN0000001"})
-        monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a GST tax invoice."})
+                                                              "reason": "wording_not_approved"}
+        assert not notifications.of("receipt_customer_email")
+        approve_receipt_wording(client)
         assert client.post(url, headers=ADMIN).json() == {"released": 1, "failed": 0, "still_held": 0,
                                                           "reason": None}
         assert len(notifications.of("receipt_customer_email")) == 1
@@ -226,15 +244,12 @@ class TestHeldVoidAndRelease:
         assert body["voided"] is True and body["url"] is None and body["voided_at"]
         assert "VOID" in receipts.receipt_html(db_session, receipt)
 
+    @pytest.mark.launch_texts_unapproved
     def test_one_failed_delivery_does_not_strand_the_rest(self, client, db_session, onboarding_ready, stub_pdf,
                                                           notifications, monkeypatch):
         _verified(client, db_session, customer_email="a@example.test")
         _verified(client, db_session, reference="UTR-0002", customer_email="b@example.test")
-        from app.execution import config
-        receipt_cfg = config.payments()["receipt"]
-        monkeypatch.setitem(receipt_cfg, "company", {**receipt_cfg["company"], "gstin": "19ABCDE1234F1Z5",
-                                                     "bank_name": "SBI", "account_number": "1", "ifsc": "SBIN0000001"})
-        monkeypatch.setitem(receipt_cfg, "wording", {"heading": "Receipt", "footer": "Not a GST tax invoice."})
+        approve_receipt_wording(client)
         real_deliver, calls = receipts.deliver, []
 
         def flaky(db, receipt):

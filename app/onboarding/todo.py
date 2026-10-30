@@ -103,7 +103,7 @@ def items_for(db: Session, onboarding: CustomerOnboarding, *, include_info: bool
         items.append(_item(onboarding, name, "formal_proposal_ready", 2))
     if ProjectStage.accepted in done and ProjectStage.agreement_signed not in done:
         record = agreement.get(db, onboarding)
-        if record is not None and not record.signed_scan_key:
+        if record is not None and not record.signed_scan_key and agreement.servable(db, record):
             items.append(_item(onboarding, name, "upload_signed_agreement", 2))
     record = execution.get(db, onboarding)
     if record is not None and record.execution_mode == ExecutionMode.associate:

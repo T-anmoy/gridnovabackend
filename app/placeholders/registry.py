@@ -3,7 +3,10 @@ not supplied or confirmed yet, where it lives, and whether it is still the dummy
 
 Whether an entry is resolved is never stored for probed entries — it is read from the
 value itself each time (see PROBES), so editing the value is what resolves it. Only
-`manual` entries are resolved by hand (placeholder_resolutions, append-only).
+`manual` entries are resolved by hand, and `approved_text` entries (wording a customer or
+associate reads) need both: no marker in the text, and an Admin's approval of that exact
+text (its SHA-256) — placeholder_resolutions, append-only, approvals and revocations
+included. Editing an approved text lapses its approval.
 
 The same module maps every marker in the source to an "anchor" — a YAML key path, or
 the Python constant/function it sits in — so tests/test_placeholder_registry.py can fail
@@ -26,7 +29,12 @@ _PATH = REPO_ROOT / "config" / "placeholder_registry.yaml"
 
 AREAS = ("proposals", "pricing", "onboarding", "associates", "execution", "payments", "company", "policies")
 BLOCKING = ("blocks_launch", "blocks_feature", "tunable")
-PROBES = ("yaml_contains_marker", "yaml_equals", "constant_equals", "setting_equals", "count_query", "manual")
+PROBES = ("yaml_contains_marker", "yaml_equals", "constant_equals", "setting_equals", "count_query", "manual",
+          "approved_text")
+# placeholder_resolutions.action: a manual entry marked resolved, or an approved_text
+# entry's wording approved / its approval revoked (the latest of those two decides).
+RESOLVED, APPROVED, REVOKED = "resolved", "approved", "revoked"
+APPROVAL_STATES = ("approved", "not_approved", "lapsed")
 # An entry's recorded standing, on top of its probe. `resolved` / `superseded` (by a
 # later source — e.g. Grid Nova's price list replacing a placeholder engine for every
 # list-priced path) count as resolved even where the old value is still in the code;
@@ -59,6 +67,7 @@ class Entry:
     query: Optional[str] = None
     status: str = "open"
     status_note: Optional[str] = None
+    legal_review_required: bool = False
 
     @property
     def file(self) -> Optional[str]:
@@ -104,8 +113,12 @@ def _validate(data: dict) -> Registry:
         loc = raw["location"]
         need(isinstance(loc, dict) and (("file" in loc and ("key" in loc or "symbols" in loc)) or "env" in loc),
              f"{eid}: location needs file+key, file+symbols, or env")
-        if raw["probe"] in ("yaml_contains_marker", "yaml_equals"):
+        if raw["probe"] in ("yaml_contains_marker", "yaml_equals", "approved_text"):
             need("key" in loc, f"{eid}: a YAML probe needs location.key")
+        need(isinstance(raw.get("legal_review_required", False), bool),
+             f"{eid}: legal_review_required must be true or false")
+        need(not raw.get("legal_review_required") or raw["probe"] == "approved_text",
+             f"{eid}: legal_review_required applies to approved_text entries only")
         if raw["probe"] == "constant_equals":
             need("symbols" in loc and isinstance(raw["dummy_value"], dict)
                  and set(raw["dummy_value"]) == set(loc["symbols"]),
@@ -122,7 +135,8 @@ def _validate(data: dict) -> Registry:
         entries.append(Entry(id=eid, area=raw["area"], location=loc, description=raw["description"],
                              dummy_value=raw["dummy_value"], needed_from_grid_nova=raw["needed_from_grid_nova"],
                              blocking=raw["blocking"], probe=raw["probe"], query=raw.get("query"),
-                             status=status, status_note=raw.get("status_note")))
+                             status=status, status_note=raw.get("status_note"),
+                             legal_review_required=bool(raw.get("legal_review_required", False))))
     ids = [e.id for e in entries]
     need(len(set(ids)) == len(ids), "entry ids must be unique")
     exemptions = []
@@ -402,15 +416,96 @@ QUERIES: dict[str, Callable] = {"equipment_catalogue_not_real": _equipment_catal
 
 
 def _resolutions(db) -> dict:
+    """entry id → its placeholder_resolutions rows, oldest first."""
     from sqlalchemy import select
     from app.memory.models import PlaceholderResolution
-    return {r.entry_id: r for r in db.execute(select(PlaceholderResolution)).scalars()}
+    out: dict = {}
+    for r in db.execute(select(PlaceholderResolution).order_by(PlaceholderResolution.id)).scalars():
+        out.setdefault(r.entry_id, []).append(r)
+    return out
+
+
+# ── Approved wording (approved_text) ────────────────────────────────────────────
+
+def normalise(text: str) -> str:
+    """The form a text is hashed in: line endings \n, trimmed."""
+    return str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def sha256(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(normalise(text).encode("utf-8")).hexdigest()
+
+
+def current_text(entry: Entry) -> str:
+    """The text at an approved_text entry's location, as it is printed. A mapping (the
+    receipt's heading and footer) reads as `key: value` lines in file order."""
+    data = yaml.safe_load((REPO_ROOT / entry.file).read_text(encoding="utf-8")) or {}
+    return canonical(_yaml_value(data, _resolve_key(data, entry.location["key"])))
+
+
+def canonical(value: Any) -> str:
+    """A configured text value as approvals hash it: a mapping as `key: value` lines in
+    order, anything else as its normalised string. Gates pass the value they print."""
+    if isinstance(value, dict):
+        return "\n".join(f"{k}: {normalise(v)}" for k, v in value.items())
+    return normalise("" if value is None else value)
+
+
+def has_marker(entry: Entry) -> bool:
+    return _probe_yaml_marker(entry) or bool(MARKERS.search(current_text(entry)))
+
+
+def _decision(rows: list):
+    """The latest approval or revocation row, or None."""
+    return next((r for r in reversed(rows or []) if r.action in (APPROVED, REVOKED)), None)
+
+
+def approval_state(entry: Entry, db, rows: Optional[list] = None, text: Optional[str] = None) -> dict:
+    """{state, approval, sha256}: `approved` only when the latest decision is an approval
+    of exactly this text (the current text unless `text` is given); `lapsed` when an
+    approval stands but the text has changed since; else `not_approved`."""
+    digest = sha256(current_text(entry) if text is None else text)
+    rows = rows if rows is not None else _resolutions(db).get(entry.id, [])
+    last = _decision(rows)
+    if last is None or last.action == REVOKED:
+        return {"state": "not_approved", "approval": None, "sha256": digest}
+    approval = {"by": last.resolved_by, "at": last.resolved_at.isoformat(), "note": last.note,
+                "legal_review_confirmed": bool(last.legal_review_confirmed), "content_sha256": last.content_sha256}
+    return {"state": "approved" if last.content_sha256 == digest else "lapsed", "approval": approval,
+            "sha256": digest}
+
+
+def text_is_approved(entry_id: str, db=None, text: Optional[str] = None) -> bool:
+    """The one check every gate uses: is this entry's wording free of markers and
+    approved by an Admin exactly as it stands? With `text`, that text (e.g. a section
+    body stored in a proposal) is checked against the approval instead of the file.
+    Without a session, one is opened. Any failure answers False (held, never sent)."""
+    entry = load().by_id.get(entry_id)
+    if entry is None or entry.probe != "approved_text":
+        return False
+    try:
+        if text is not None and MARKERS.search(str(text)):
+            return False
+        if text is None and has_marker(entry):
+            return False
+        if db is None:
+            from app.memory.db import SessionLocal
+            with SessionLocal() as own:
+                return approval_state(entry, own, text=text)["state"] == "approved"
+        return approval_state(entry, db, text=text)["state"] == "approved"
+    except Exception:
+        return False
+
+
+def approved_text_entries() -> list[Entry]:
+    return [e for e in load().entries if e.probe == "approved_text"]
 
 
 def evaluate(entry: Entry, db=None, resolutions: Optional[dict] = None) -> dict:
     """{"resolved": True/False/None, "error": str|None, "resolution": {...}|None}.
-    None = cannot tell without a database (count_query/manual with no session).
-    A `resolved` or `superseded` status is resolved whatever the probe says."""
+    None = cannot tell without a database (count_query/manual/approved_text with no
+    session). A `resolved` or `superseded` status is resolved whatever the probe says."""
     if entry.status in ("resolved", "superseded"):
         return {"resolved": True, "error": None,
                 "resolution": {"status": entry.status, "note": entry.status_note}}
@@ -423,11 +518,17 @@ def evaluate(entry: Entry, db=None, resolutions: Optional[dict] = None) -> dict:
             return {"resolved": not _probe_constant(entry), "error": None, "resolution": None}
         if entry.probe == "setting_equals":
             return {"resolved": not _probe_setting(entry), "error": None, "resolution": None}
+        if entry.probe == "approved_text" and has_marker(entry):
+            return {"resolved": False, "error": None, "resolution": None}
         if db is None:
             return {"resolved": None, "error": None, "resolution": None}
         if entry.probe == "count_query":
             return {"resolved": QUERIES[entry.query](db) == 0, "error": None, "resolution": None}
-        res = (resolutions if resolutions is not None else _resolutions(db)).get(entry.id)
+        rows = (resolutions if resolutions is not None else _resolutions(db)).get(entry.id, [])
+        if entry.probe == "approved_text":
+            state = approval_state(entry, db, rows)
+            return {"resolved": state["state"] == "approved", "error": None, "resolution": state["approval"]}
+        res = next((r for r in rows if r.action == RESOLVED), None)
         return {"resolved": res is not None, "error": None,
                 "resolution": None if res is None else {"resolved_by": res.resolved_by,
                                                         "resolved_at": res.resolved_at.isoformat(),
@@ -450,3 +551,10 @@ def unresolved_ids(ids: list[str], db=None) -> list[str]:
 
 def unresolved_launch_blockers(db=None) -> int:
     return sum(1 for e, s in evaluate_all(db) if e.blocking == "blocks_launch" and s["resolved"] is not True)
+
+
+def drafted_not_approved(db) -> list[str]:
+    """approved_text entries whose wording has no marker but is not approved as it stands."""
+    rows = _resolutions(db)
+    return [e.id for e in approved_text_entries()
+            if not has_marker(e) and approval_state(e, db, rows.get(e.id, []))["state"] != "approved"]

@@ -11,7 +11,9 @@ verification leaves no gap.
 
 Never sent with placeholder content: a receipt whose company block or wording still
 contains DUMMY text is HELD (held_reason = placeholder_content) in every environment,
-and in staging/production also while registry entries P5/P6 are unresolved. A held
+and in staging/production also while registry entries P5/P6 are unresolved. In every
+environment it is also HELD (held_reason = wording_not_approved) while the receipt wording
+(P6) is not approved by an Admin exactly as it stands (BE-22). A held
 receipt is not rendered at all (so no dummy-content PDF exists to be reused or served);
 it is rendered when released. Verification still succeeds; held receipts are visible,
 filterable, and released in bulk once resolved. No customer email →
@@ -114,6 +116,9 @@ def _content_has_dummy() -> bool:
     return DUMMY_TEXT_PREFIX in blob or "DUMMY" in blob
 
 
+WORDING_ENTRY = "P6"
+
+
 def hold_reason(db: Session) -> Optional[str]:
     """Why a receipt must not go to the customer yet, or None."""
     from app.config import settings
@@ -123,6 +128,9 @@ def hold_reason(db: Session) -> Optional[str]:
         return "placeholder_content"
     if settings.is_production_like and registry.unresolved_ids(list(HOLD_REGISTRY_ENTRIES), db):
         return "placeholder_content"
+    wording = config.payments()["receipt"]["wording"]
+    if not registry.text_is_approved(WORDING_ENTRY, db, text=registry.canonical(wording)):
+        return "wording_not_approved"
     return None
 
 
@@ -331,8 +339,9 @@ def release_held(db: Session, actor: str) -> dict:
     marks that receipt failed (with the reason) and the rest carry on."""
     from app.memory.models import AuditLog
 
-    if hold_reason(db):
-        return {"released": 0, "failed": 0, "still_held": _count_held(db), "reason": "placeholder_content"}
+    reason = hold_reason(db)
+    if reason:
+        return {"released": 0, "failed": 0, "still_held": _count_held(db), "reason": reason}
     held = list(db.execute(select(PaymentReceipt).where(
         PaymentReceipt.email_status == ReceiptEmailStatus.held)).scalars())
     for receipt in held:

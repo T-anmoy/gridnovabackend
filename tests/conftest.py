@@ -129,6 +129,35 @@ def _isolated_db(monkeypatch):
         engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _launch_texts_approved(request, _isolated_db):
+    """The gates apply in every environment (BE-22), and tests run as `development`: so
+    each test starts with the approved_text wording (proposal terms and scopes, the
+    customer agreement, receipt wording, O&M terms) approved exactly as it stands in the
+    config — the fixture is the Admin. Tests of the gates themselves start with nothing
+    approved: mark them `@pytest.mark.launch_texts_unapproved`."""
+    if request.node.get_closest_marker("launch_texts_unapproved"):
+        yield
+        return
+    from datetime import datetime, timezone
+    from app.memory.models import PlaceholderResolution
+    from app.placeholders import registry
+    session = _isolated_db()
+    try:
+        for entry in registry.approved_text_entries():
+            if registry.has_marker(entry):
+                continue
+            session.add(PlaceholderResolution(
+                entry_id=entry.id, action=registry.APPROVED, resolved_by="test-fixture-admin",
+                resolved_at=datetime.now(timezone.utc), note="approved by the test fixture",
+                content_sha256=registry.sha256(registry.current_text(entry)),
+                legal_review_confirmed=entry.legal_review_required))
+        session.commit()
+    finally:
+        session.close()
+    yield
+
+
 class _HttpxPostSeam:
     """Stands in for the notifier's shared httpx.Client: forwards to httpx.post, looked
     up at call time, so the tests that intercept email by patching httpx.post keep
@@ -182,6 +211,8 @@ def reset_chat_inmemory_state():
     nova_records_store._minute_log.clear()
     import app.api.routes.proposal_document as proposal_document
     proposal_document._preview_log.clear()
+    import app.api.routes.placeholders_admin as placeholders_admin
+    placeholders_admin._decision_log.clear()
     yield
     for log in (public_associates._apply_request_log, public_associates._verify_request_log,
                 public_associates._lookup_request_log):
@@ -284,11 +315,12 @@ STORAGE_URL_PREFIX = "https://acct.r2.cloudflarestorage.com/gridnova-test/"
 
 
 # ── Proposal content that can actually be sent ───────────────────────────────
-# config/proposal_content.yaml is still all placeholder copy with 0 rates, so any
-# engine-drafted proposal is (correctly) blocked from being sent to a customer. Tests
-# that exercise a real send use this fixture: the real config's structure with every
-# placeholder string replaced and every rate made positive. The YAML itself is
-# never modified.
+# config/proposal_content.yaml still has placeholder copy in sections the BE-13 document
+# replaces, and no automatic per-kW rates (null), so an engine-drafted proposal is
+# (correctly) blocked from being sent to a customer. Tests that exercise a real send use
+# this fixture: the real config's structure with every placeholder string replaced and
+# every rate made positive. Approved wording (BE-22) is left exactly as it is, so the
+# _launch_texts_approved approvals still match it. The YAML itself is never modified.
 
 TEST_RATE_PER_KW = 50_000
 

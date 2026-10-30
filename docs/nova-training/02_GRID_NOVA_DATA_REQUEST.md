@@ -49,3 +49,14 @@ Send this list to Grid Nova. Every answer becomes a verified knowledge entry, so
 | # | Data needed |
 |---|---|
 | R26 | After launch: permission to review anonymised Nova chats monthly to add missing questions and fix weak answers. Chats contain personal data; review follows the privacy policy and never leaves Grid Nova's systems |
+
+## E. Launch content — what Grid Nova still has to do (BE-22)
+
+The proposal terms, the scope and note texts, the customer agreement, the receipt wording and the O&M terms after the first year are drafted. Nothing goes to a customer until a Grid Nova Admin approves it.
+
+1. **Read and approve each drafted text** in the dashboard (Dashboard → Placeholders, Admin only). If a text is edited later, approve it again.
+2. **Legal review of the proposal terms and the customer agreement.** Approving either needs the "Reviewed by Grid Nova's legal adviser" tick. The agreement also needs the right **stamp paper value for West Bengal and for Bihar**. The system says ₹10 today; please confirm it.
+3. **Cancellation and refund clause** in the agreement (clause 9: refund before material is dispatched, less survey, design and application costs, within 30 days). Confirm it or change it. This is policy DP-1, and the refund workflow itself is not built yet.
+4. **Publish the commission rate schedule** (rates per associate type) in Dashboard → Commissions → Rate schedules. Until then no commission is paid.
+5. **TDS decision with your Chartered Accountant.** No TDS is deducted today. Payout batches warn when an associate passes the yearly threshold.
+6. **Confirm the 15-working-day reply to commission queries.** It is already published on the website (Commission & Payout Policy 4.8, effective 23 Oct 2026).

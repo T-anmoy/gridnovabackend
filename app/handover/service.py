@@ -139,7 +139,8 @@ def send_link(db: Session, onboarding: CustomerOnboarding, actor: str, *, send_e
                              status_code=409)
     reason = pdf.hold_reason(db)
     if reason:
-        raise AssociateError("The handover pack cannot be sent while its text still contains placeholders.",
+        raise AssociateError("The handover pack cannot be sent while its text is a placeholder or not yet "
+                             "approved by an Admin.",
                              code="handover_pdf_held", status_code=409, extra={"held_reason": reason})
     warranty_register.ensure(db, onboarding, actor)
     pack = pack_module.ensure(db, onboarding)
@@ -161,7 +162,8 @@ def regenerate_pdf(db: Session, onboarding: CustomerOnboarding, actor: str) -> H
         raise AssociateError("The pack is rendered once the project is handed over.", code="handover_not_recorded",
                              status_code=409)
     if pdf.hold_reason(db):
-        raise AssociateError("The handover pack cannot be rendered while its text still contains placeholders.",
+        raise AssociateError("The handover pack cannot be rendered while its text is a placeholder or not yet "
+                             "approved by an Admin.",
                              code="handover_pdf_held", status_code=409, extra={"held_reason": pdf.hold_reason(db)})
     warranty_register.ensure(db, onboarding, actor)
     pack = pack_module.ensure(db, onboarding)

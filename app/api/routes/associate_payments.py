@@ -72,7 +72,8 @@ def payment_instructions(db: Session = Depends(get_db),
     from app.payments.receipts import hold_reason
 
     company = config.payments()["receipt"]["company"]
-    if hold_reason(db):
+    # Only the account details matter here, not the receipt wording (wording_not_approved).
+    if hold_reason(db) == "placeholder_content":
         return {"available": False, "reason": "placeholder_content", "account": None,
                 "message_key": "payments.instructions.not_ready"}
     return {"available": True, "reason": None, "message_key": "payments.instructions.pay_only_here",

@@ -61,9 +61,6 @@ def _env(monkeypatch, fake_storage):
         for name in [n for n in vars(module) if n.endswith("_log") and isinstance(getattr(module, n), RateLimitLog)]:
             monkeypatch.setattr(module, name, RateLimitLog(60))
     monkeypatch.setattr(studio, "_preview_log", RateLimitLog(60))
-    receipt = config.payments()["receipt"]
-    monkeypatch.setitem(receipt, "wording", {"heading": "Payment Receipt",
-                                             "footer": "This is a payment receipt, not a GST tax invoice."})
     monkeypatch.setattr(documents, "render_pdf", lambda html: b"%PDF-1.4 receipt " + html.encode()[:64])
     rec = Recorder()
     monkeypatch.setattr(notifier_module, "notifier", rec)

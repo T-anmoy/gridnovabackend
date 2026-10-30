@@ -69,12 +69,11 @@ def stub_pdf(monkeypatch):
 
 @pytest.fixture
 def real_receipt_text(monkeypatch):
-    """Stand in Grid Nova's real company block and wording (the shipped config holds
-    DUMMY text, which correctly holds every receipt)."""
+    """Stand in a real company block. The shipped receipt wording (BE-22) is used as it
+    is — approved by conftest's _launch_texts_approved; different wording would not be
+    approved and would hold every receipt (wording_not_approved)."""
     from app.execution import config
     receipt = config.payments()["receipt"]
     monkeypatch.setitem(receipt, "company", {**receipt["company"], "gstin": "19ABCDE1234F1Z5",
                                              "bank_name": "State Bank of India", "account_number": "000011112222",
                                              "ifsc": "SBIN0001234"})
-    monkeypatch.setitem(receipt, "wording", {"heading": "Payment Receipt",
-                                             "footer": "This is a payment receipt, not a GST tax invoice."})

@@ -114,6 +114,7 @@ class TestFigures:
         f = d.figures(ground_mounted_1mw())
         assert (f["layout"], f["basic"], f["total"]) == ("detailed", "38000000.00", "41382000.00")
 
+    @pytest.mark.launch_texts_unapproved      # BE-22: drafted texts, not yet approved
     @pytest.mark.parametrize("ptype,registry", [("ground_mounted", {"PRO-7"}),
                                                 ("government_institutional", {"PRO-8", "PRO-11"}),
                                                 ("pm_kusum", {"PRO-10"}), ("generic", {"PRO-12"})])
@@ -361,6 +362,7 @@ class TestErrors:
         doc = d.new_studio_document("commercial_rooftop")
         assert "missing_required" in _ids(_doc_checks(doc))
 
+    @pytest.mark.launch_texts_unapproved      # BE-22: drafted texts, not yet approved
     def test_content_not_ready(self):
         assert "content_not_ready" in _ids(_doc_checks(ground_mounted_1mw()))
 

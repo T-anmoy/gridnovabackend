@@ -116,23 +116,16 @@ def validate_content_config(cfg: dict) -> None:
                     f"[{a_lo:g}, {a_hi:g}) and [{b_lo:g}, {b_hi:g}) overlap."
                 )
 
-    # Placeholder pricing (rate_per_kw == 0) is structurally valid — the app still
-    # boots — but every proposal it produces will price at ₹0 until Grid Nova staff
-    # fill in real rates. That's easy to miss since nothing else fails loudly about
-    # it after boot, so flag it clearly, once, right when it matters most.
-    placeholder_tiers = [t for t in tiers if not t.get("rate_per_kw")]
-    if placeholder_tiers:
-        described = ", ".join(
-            f"{t.get('project_type')} [{_tier_bounds(t)[0]:g}, "
-            f"{'∞' if _tier_bounds(t)[1] == float('inf') else f'{_tier_bounds(t)[1]:g}'})"
-            for t in placeholder_tiers
-        )
-        logger.warning(
-            "%d of %d pricing tier(s) in %s still have rate_per_kw = 0 (PLACEHOLDER) — "
-            "every proposal matching one of these tiers will price at ₹0 until real "
-            "rates are entered. Affected tiers: %s",
-            len(placeholder_tiers), len(tiers), _CONFIG_PATH, described,
-        )
+    # A tier's rate is a positive INR/kW, or null: no automatic price — staff price the
+    # proposal (Proposal Studio / adjust-pricing) and it is never sent without one. A
+    # rate of 0 (or below) would price a proposal at ₹0: refused, never a default.
+    for tier in tiers:
+        rate = tier.get("rate_per_kw")
+        if rate is not None and (isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate <= 0):
+            raise ProposalConfigError(
+                f"pricing tier {tier.get('project_type')} [{_tier_bounds(tier)[0]:g}, ...): rate_per_kw must be "
+                f"a positive INR/kW or null (no automatic price), not {rate!r}."
+            )
 
 
 # ── Selection ────────────────────────────────────────────────────────────────────
@@ -192,7 +185,8 @@ def select_pricing(
     """First pricing tier whose project_type matches and whose [min, max) range
     contains capacity_kw, with the matching segment modifier applied (default 1.0).
 
-    Returns the computed rate_per_kw, or None if nothing matches (never guesses).
+    Returns the computed rate_per_kw, or None if nothing matches or the tier has no
+    rate (rate_per_kw: null — priced by staff). Never guesses, never 0.
     """
     capacity = _coerce_capacity(capacity_kw)
     if project_type is None or capacity is None:
@@ -205,7 +199,7 @@ def select_pricing(
         lo, hi = _tier_bounds(tier)
         if lo <= capacity < hi:
             rate = tier.get("rate_per_kw")
-            if rate is None:
+            if not rate or rate <= 0:
                 return None
             modifier = 1.0
             if segment is not None:
@@ -285,11 +279,11 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
                      "body": base.get("cover_letter_intro", "[PLACEHOLDER]")})
 
     for section_id in section_ids:
-        sections.append({
+        sections.append(_with_source({
             "id": section_id,
             "category": _categorize(section_id),
             "body": library.get(section_id, "[PLACEHOLDER]"),
-        })
+        }))
 
     from app.proposals import price_list_content
     if quote is not None:
@@ -313,8 +307,8 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
         package=(list_ctx or {}).get("package"), kw=(list_ctx or {}).get("kw") if list_ctx else None,
         list_priced=quote is not None))
 
-    sections.append({"id": "standard_terms", "category": "terms",
-                     "body": base.get("standard_terms", "[PLACEHOLDER]")})
+    sections.append(_with_source({"id": "standard_terms", "category": "terms",
+                                  "body": base.get("standard_terms", "[PLACEHOLDER]")}))
     sections.append({"id": "closing", "category": "closing",
                      "body": base.get("closing", "[PLACEHOLDER]")})
 
@@ -357,6 +351,43 @@ def compose_content(lead_ctx: dict, cfg: dict) -> dict:
 
 
 PLACEHOLDER_MARKER = "[PLACEHOLDER"
+
+
+def section_entry(section_id: str) -> Optional[str]:
+    """The approved_text registry entry (config/placeholder_registry.yaml) whose wording a
+    composed section carries, or None — e.g. government_scope → PRO-8."""
+    from app.placeholders import registry
+    for entry in registry.approved_text_entries():
+        key = entry.location.get("key") or ""
+        if entry.file == _CONFIG_PATH and key.split(".")[-1] == section_id and key.split(".")[0] in (
+                "base_sections", "sections_library"):
+            return entry.id
+    return None
+
+
+def _with_source(section: dict) -> dict:
+    """Record which registry entry's wording a section carries (BE-22), so the send,
+    in-person and online-accept checks can ask whether that exact wording is approved."""
+    entry_id = section_entry(section["id"])
+    if entry_id:
+        section["source_entry"] = entry_id
+    return section
+
+
+def unapproved_sections(content: Optional[dict], db=None) -> list[str]:
+    """Ids of the stored sections whose wording comes from an approved_text entry and is
+    not approved exactly as stored (a section drafted before the source_entry key is
+    matched by its id). Placeholder copy is reported by placeholder_sections instead."""
+    from app.placeholders import registry
+    out = []
+    for section in ((content or {}).get("sections") or []):
+        if not isinstance(section, dict):
+            continue
+        entry_id = section.get("source_entry") or section_entry(str(section.get("id")))
+        body = str(section.get("body") or "")
+        if entry_id and PLACEHOLDER_MARKER not in body and not registry.text_is_approved(entry_id, db, text=body):
+            out.append(str(section.get("id")))
+    return out
 
 
 def placeholder_sections(content: Optional[dict]) -> list[str]:
@@ -430,4 +461,5 @@ def _format_pricing_body(rate_per_kw: Optional[float], capacity, total_value: Op
         )
     if rate_per_kw is not None:
         return "Pricing pending — a rate is configured but the project value is not yet finalized."
-    return "[PLACEHOLDER: Pricing to be confirmed after site assessment.]"
+    # No automatic price (rate_per_kw: null): staff set it; never sent without one.
+    return "[PLACEHOLDER: Price to be set by Grid Nova.]"
