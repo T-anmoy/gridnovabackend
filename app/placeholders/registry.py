@@ -351,18 +351,34 @@ def _resolve_key(data: dict, key: str) -> str:
     return re.sub(r"\{([^}]+)\}", lambda m: str(_yaml_value(data, m.group(1))), key)
 
 
+# Parsed config files, keyed by path and refreshed whenever the file's size or mtime
+# changes: the approval gates read the same few files on every request, and parsing
+# them each time is slow. Never mutate what _parsed returns.
+_PARSED: dict = {}
+
+
+def _parsed(path: Path) -> tuple[str, Any, list[str]]:
+    """(text, YAML data, line anchors) of a file, cached until the file changes."""
+    stat = path.stat()
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    hit = _PARSED.get(path)
+    if hit is None or hit[0] != stamp:
+        text = path.read_text(encoding="utf-8")
+        hit = (stamp, (text, yaml.safe_load(text) or {}, yaml_line_anchors(text)))
+        _PARSED[path] = hit
+    return hit[1]
+
+
 def _probe_yaml_marker(entry: Entry) -> bool:
-    path = REPO_ROOT / entry.file
-    text = path.read_text(encoding="utf-8")
-    key = _resolve_key(yaml.safe_load(text) or {}, entry.location["key"])
-    _yaml_value(yaml.safe_load(text) or {}, key)  # KeyError if the key has gone
+    text, data, anchors = _parsed(REPO_ROOT / entry.file)
+    key = _resolve_key(data, entry.location["key"])
+    _yaml_value(data, key)  # KeyError if the key has gone
     lines = text.splitlines()
-    return any(MARKERS.search(lines[i]) for i, a in enumerate(yaml_line_anchors(text))
-               if a == key or a.startswith(key + "."))
+    return any(MARKERS.search(lines[i]) for i, a in enumerate(anchors) if a == key or a.startswith(key + "."))
 
 
 def _probe_yaml_equals(entry: Entry) -> bool:
-    data = yaml.safe_load((REPO_ROOT / entry.file).read_text(encoding="utf-8")) or {}
+    data = _parsed(REPO_ROOT / entry.file)[1]
     return _yaml_value(data, _resolve_key(data, entry.location["key"])) == entry.dummy_value
 
 
@@ -440,7 +456,7 @@ def sha256(text: str) -> str:
 def current_text(entry: Entry) -> str:
     """The text at an approved_text entry's location, as it is printed. A mapping (the
     receipt's heading and footer) reads as `key: value` lines in file order."""
-    data = yaml.safe_load((REPO_ROOT / entry.file).read_text(encoding="utf-8")) or {}
+    data = _parsed(REPO_ROOT / entry.file)[1]
     return canonical(_yaml_value(data, _resolve_key(data, entry.location["key"])))
 
 

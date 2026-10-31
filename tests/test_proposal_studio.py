@@ -161,6 +161,7 @@ class TestWorkflow:
             r = client.post(f"{D}/studio/proposals/{pid}/{action}", headers=DESK)
             assert r.status_code == 409 and r.json()["detail"]["code"] == "proof_check_failed"
 
+    @pytest.mark.launch_texts_unapproved      # BE-22: drafted texts, not yet approved
     def test_content_not_ready_names_the_registry(self, client):
         pid = new_proposal(client, "ground_mounted")["proposal"]["id"]
         fill(client, pid, [("site", {"address_lines": ["Example Mouza"], "town": "Bankura", "state": "West Bengal"}),
